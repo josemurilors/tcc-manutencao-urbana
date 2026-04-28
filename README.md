@@ -25,6 +25,60 @@ O sistema é dividido em 4 módulos independentes e integrados:
 ### 4) Banco de Dados
 - **PostgreSQL com PostGIS**: Banco de dados geoespacial para armazenamento de dados de localização
 
+## Como Iniciar Localmente
+
+### Pré-requisitos
+- Node.js (versão 16 ou superior)
+- PostgreSQL com PostGIS
+- Python 3.8 ou superior (para o serviço de IA)
+
+### Passo a passo para executar localmente
+
+1. **Clone o repositório**
+   ```bash
+   git clone https://github.com/josemurilors/tcc-manutencao-urbana.git
+   cd tcc-manutencao-urbana
+   ```
+
+2. **Configuração do Banco de Dados**
+   - Instale PostgreSQL com PostGIS
+   - Crie um banco de dados e configure as credenciais no arquivo `.env` do backend
+
+3. **Instalação das dependências do Frontend**
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+4. **Instalação das dependências do Backend**
+   ```bash
+   cd backend
+   npm install
+   ```
+
+5. **Configuração do serviço de IA**
+   ```bash
+   cd ia
+   pip install -r requirements.txt
+   ```
+
+6. **Execução local**
+   - Inicie o servidor de desenvolvimento do frontend:
+     ```bash
+     cd frontend
+     npm run dev
+     ```
+   - Inicie o servidor backend:
+     ```bash
+     cd backend
+     npm start
+     ```
+   - Inicie o serviço de IA:
+     ```bash
+     cd ia
+     python main.py
+     ```
+
 ## Como Iniciar com Docker
 
 ### Pré-requisitos
@@ -147,6 +201,48 @@ manutencao-urbana-pwa/
     "vite": "^8.0.10"
   }
 }
+```
+
+### Banco de Dados (schema.sql)
+```sql
+-- Schema do banco de dados para manutenção urbana
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- Tabela de usuários
+CREATE TABLE usuarios (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    senha VARCHAR(255) NOT NULL,
+    admin BOOLEAN DEFAULT FALSE,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tabela de defeitos
+CREATE TABLE defeitos (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER REFERENCES usuarios(id),
+    titulo VARCHAR(255) NOT NULL,
+    descricao TEXT,
+    categoria VARCHAR(100),
+    localizacao GEOGRAPHY(POINT, 4326) NOT TO NULL,
+    imagem_url VARCHAR(500),
+    status VARCHAR(50) DEFAULT 'pendente',
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Índices geoespaciais
+CREATE INDEX idx_defeitos_localizacao ON defeitos USING GIST (localizacao);
+```
+
+### IA (requirements.txt)
+```
+fastapi==0.110.3
+uvicorn==0.29.0
+transformers==4.38.0
+torch==2.2.0
+pydantic==2.6.1
 ```
 
 ### Banco de Dados (schema.sql)

@@ -3,13 +3,13 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Copiar package.json e package-lock.json
-COPY backend/package*.json ./
+COPY package*.json ./
 
 # Instalar dependências
 RUN npm install
 
 # Copiar o restante dos arquivos
-COPY backend/ .
+COPY . .
 
 # Expor porta
 EXPOSE 5000

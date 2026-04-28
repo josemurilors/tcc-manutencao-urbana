@@ -1,6 +1,3 @@
-const { default: app1, logo, vite: app2 } = await import('/vite.svg')
-// import './App.css'
-
 function App() {
   return (
     <div>
