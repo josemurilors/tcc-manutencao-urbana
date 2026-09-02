@@ -162,6 +162,44 @@ export type Estatisticas = {
   }[];
 };
 
+/** Nível/EXP do usuário, derivado do histórico (GET /defeitos/progresso/). */
+export type Progresso = {
+  xp: number;
+  nivel: number;
+  titulo: string;
+  /** XP acumulado onde o nível atual começa/termina (barra de progresso). */
+  xp_nivel: number;
+  xp_proximo: number;
+  chamados: number;
+  resolvidos: number;
+  confirmacoes: number;
+};
+
+export type RankingEntry = {
+  posicao: number;
+  usuario_id: string;
+  nome: string;
+  xp: number;
+  nivel: number;
+  titulo: string;
+  chamados: number;
+  resolvidos: number;
+  confirmacoes: number;
+};
+
+export type PeriodoRanking = 'tudo' | 'mes' | 'semana';
+
+/** Resposta de GET /defeitos/ranking/ — leaderboard por cidade ou geral. */
+export type Ranking = {
+  /** null = ranking geral (todas as cidades). */
+  municipio: { codigo: string; nome: string; uf_sigla: string } | null;
+  periodo: PeriodoRanking;
+  total_participantes: number;
+  ranking: RankingEntry[];
+  /** Linha do usuário logado, mesmo fora do top; null deslogado ou sem pontos. */
+  eu: RankingEntry | null;
+};
+
 /** Arquivo local selecionado pelo image picker, pronto para virar FormData. */
 export type PickedImage = {
   uri: string;

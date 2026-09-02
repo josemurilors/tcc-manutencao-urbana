@@ -15,10 +15,12 @@ import { SubScreen } from '@/components/ui/sub-screen';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
+import { useProgresso } from '@/services/progresso';
 
 export default function ContaScreen() {
   const colors = useColors();
   const { user, isAuthenticated } = useAuth();
+  const progresso = useProgresso(isAuthenticated);
 
   // Deslogado, a aba inteira é o convite para entrar — as preferências
   // (tema, idioma) só aparecem depois do login.
@@ -56,6 +58,40 @@ export default function ContaScreen() {
               }
             />
           </View>
+
+          {progresso ? (
+            <View style={styles.nivel}>
+              <View style={styles.nivelLinha}>
+                <Text style={[styles.nivelTitulo, { color: colors.gold500 }]}>
+                  Nível {progresso.nivel} · {progresso.titulo}
+                </Text>
+                <Text style={[styles.meta, { color: colors.textMuted }]}>
+                  {progresso.xp - progresso.xp_nivel}/{progresso.xp_proximo - progresso.xp_nivel}{' '}
+                  XP
+                </Text>
+              </View>
+              <View
+                style={[styles.barra, { backgroundColor: colors.bgElevated }]}
+                accessibilityLabel={`${progresso.xp} pontos de experiência, nível ${progresso.nivel}`}>
+                <View
+                  style={[
+                    styles.barraCheia,
+                    {
+                      backgroundColor: colors.gold500,
+                      width: `${Math.min(
+                        100,
+                        Math.round(
+                          ((progresso.xp - progresso.xp_nivel) /
+                            (progresso.xp_proximo - progresso.xp_nivel)) *
+                            100,
+                        ),
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : null}
         </Card>
       </View>
 
@@ -137,5 +173,27 @@ const styles = StyleSheet.create({
   },
   meta: {
     fontSize: FontSize.xs,
+  },
+  nivel: {
+    marginTop: Spacing[3],
+    gap: Spacing[1],
+  },
+  nivelLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  nivelTitulo: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+  },
+  barra: {
+    height: 6,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+  },
+  barraCheia: {
+    height: '100%',
+    borderRadius: Radius.full,
   },
 });

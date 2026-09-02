@@ -46,6 +46,7 @@ import { useToast } from '@/context/toast-context';
 import { GpsJoystick } from '@/dev/gps-joystick';
 import { useLocalizacao } from '@/hooks/use-localizacao';
 import { api } from '@/services/api';
+import { useProgresso } from '@/services/progresso';
 import type { Categoria, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
 import { concluidoEm } from '@/utils/format';
 import { caixaDosPontos, distanciaAte, regiaoDaCaixa, REGIAO_PADRAO } from '@/utils/geo';
@@ -66,7 +67,7 @@ export default function MapaScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const addToast = useToast();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { posicao, bussola, permitido, erro: erroGps, tentarNovamente } = useLocalizacao();
   // `?abrir=<id>`: o formulário de novo chamado manda para cá quando o backend
   // apontou um duplicado — abre o existente para a pessoa confirmar.
@@ -87,6 +88,8 @@ export default function MapaScreen() {
   const [carregandoVisao, setCarregandoVisao] = useState(false);
   const [apoiei, setApoiei] = useState<Set<number>>(new Set());
   const [sinalizei, setSinalizei] = useState<Map<number, TipoSinalizacao>>(new Map());
+  // Nível/EXP no cartão da conta; as ações que dão XP recarregam o store.
+  const progresso = useProgresso(isAuthenticated);
 
   // O mapa não é preso a município nenhum: qualquer cidade do país vale. Ele
   // abre num enquadramento neutro e pula para o GPS assim que houver posição.
@@ -438,27 +441,64 @@ export default function MapaScreen() {
           </View>
         ) : null}
 
-        {/* Canto superior esquerdo: menu (conta, tema, login). */}
+        {/* Canto superior esquerdo: cartão da conta — avatar e, logado, o
+            nível/EXP no mesmo cartão. */}
         <View style={styles.topoEsquerda}>
           <Pressable
             onPress={() => router.push('/conta')}
             accessibilityRole="button"
-            accessibilityLabel="Abrir menu da conta"
-            style={[
-              styles.botaoRedondo,
-              { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
-            ]}>
-            {/* Hamburger desenhado à mão: o glifo "menu" do Ionicons sai com
-                as barras desiguais em tamanhos pequenos no web. */}
-            <View style={styles.hamburger}>
-              <View style={[styles.hamburgerBarra, { backgroundColor: colors.textSecondary }]} />
-              <View style={[styles.hamburgerBarra, { backgroundColor: colors.textSecondary }]} />
-              <View style={[styles.hamburgerBarra, { backgroundColor: colors.textSecondary }]} />
+            accessibilityLabel={
+              isAuthenticated && progresso
+                ? `Abrir menu da conta. Nível ${progresso.nivel}, ${progresso.xp} pontos de experiência`
+                : 'Abrir menu da conta'
+            }
+            style={styles.contaCartao}>
+            <View
+              style={[
+                styles.contaAvatar,
+                { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
+              ]}>
+              {isAuthenticated && user?.nome ? (
+                <Text style={[styles.contaInicial, { color: colors.textPrimary }]}>
+                  {user.nome.charAt(0).toUpperCase()}
+                </Text>
+              ) : (
+                <Ionicons name="person" size={18} color={colors.textSecondary} />
+              )}
             </View>
+            {isAuthenticated && progresso ? (
+              <>
+                <View
+                  style={[
+                    styles.xpBarra,
+                    { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
+                  ]}>
+                  <View
+                    style={[
+                      styles.xpBarraCheia,
+                      {
+                        backgroundColor: colors.gold500,
+                        width: `${Math.min(
+                          100,
+                          Math.round(
+                            ((progresso.xp - progresso.xp_nivel) /
+                              (progresso.xp_proximo - progresso.xp_nivel)) *
+                              100,
+                          ),
+                        )}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.xpNivel, { color: colors.textPrimary }]}>
+                  Nv {progresso.nivel}
+                </Text>
+              </>
+            ) : null}
           </Pressable>
         </View>
 
-        {/* Canto superior direito: visão do município (cidade inteira + ranking). */}
+        {/* Canto superior direito: visão do município e ranking de cidadãos. */}
         <View style={styles.topoDireita}>
           <Pressable
             onPress={visao ? fecharVisaoMunicipio : abrirVisaoMunicipio}
@@ -478,6 +518,16 @@ export default function MapaScreen() {
               size={18}
               color={visao ? colors.textInverse : colors.textSecondary}
             />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/ranking')}
+            accessibilityRole="button"
+            accessibilityLabel="Ranking do município"
+            style={[
+              styles.botaoRedondo,
+              { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
+            ]}>
+            <Ionicons name="trophy" size={17} color={colors.gold500} />
           </Pressable>
         </View>
 
@@ -590,20 +640,64 @@ const styles = StyleSheet.create({
     zIndex: 1001,
     top: Spacing[3],
     right: Spacing[4],
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   topoEsquerda: {
     position: 'absolute',
     zIndex: 1001,
     top: Spacing[3],
     left: Spacing[4],
+    alignItems: 'flex-start',
   },
-  hamburger: {
-    gap: 4,
+  // Como no rascunho: o círculo do avatar "apoiado" na barra de EXP, com o
+  // nível logo abaixo — tudo um único toque.
+  contaCartao: {
+    alignItems: 'center',
+    width: 44,
   },
-  hamburgerBarra: {
-    width: 18,
-    height: 2,
-    borderRadius: 1,
+  contaAvatar: {
+    width: 44,
+    height: 44,
+    borderWidth: 1,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  // Centralização exata da letra: o line-height ocupa o miolo do círculo
+  // (44 - 2 de borda), senão a baseline da fonte empurra a letra do centro.
+  contaInicial: {
+    width: '100%',
+    height: 42,
+    lineHeight: 42,
+    textAlign: 'center',
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semibold,
+  },
+  xpNivel: {
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+    lineHeight: 12,
+    marginTop: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowRadius: 3,
+  },
+  xpBarra: {
+    width: 44,
+    height: 5,
+    marginTop: 3,
+    borderWidth: 1,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+  },
+  xpBarraCheia: {
+    height: '100%',
+    borderRadius: Radius.full,
   },
   pill: {
     flexDirection: 'row',

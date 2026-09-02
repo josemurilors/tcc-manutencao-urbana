@@ -1192,3 +1192,175 @@ class TestAtenderSoOperador:
         resp = auth_client.patch(reverse('defeitos-atender', args=[created['id']]), format='json')
         assert resp.status_code == 403
 
+
+
+def _progresso(cli):
+    resp = cli.get(reverse('defeitos-progresso'))
+    assert resp.status_code == 200
+    return resp.data
+
+
+def _id_do_usuario(cli):
+    return str(cli.get(reverse('auth-profile')).data['id'])
+
+
+class TestGamificacao:
+    """Nível/EXP derivados do histórico (ver `gamificacao.py`)."""
+
+    def test_curva_de_nivel(self):
+        from defeitos import gamificacao
+        assert gamificacao.progresso(0)['nivel'] == 1
+        assert gamificacao.progresso(29)['nivel'] == 1
+        # 3 chamados (30 XP) ou 5 confirmações (30 XP) sobem ao nível 2.
+        assert gamificacao.XP_CHAMADO * 3 == gamificacao.xp_para_nivel(2)
+        assert gamificacao.XP_CONFIRMACAO * 5 == gamificacao.xp_para_nivel(2)
+        dois = gamificacao.progresso(30)
+        assert dois['nivel'] == 2
+        assert dois['xp_nivel'] == 30
+        assert dois['xp_proximo'] == 90
+        assert gamificacao.progresso(90)['nivel'] == 3
+        assert gamificacao.progresso(10_000)['titulo'] == 'Lenda da Cidade'
+
+    def test_progresso_exige_login(self, client):
+        assert client.get(reverse('defeitos-progresso')).status_code == 401
+
+    def test_tres_chamados_sobem_de_nivel(self, client):
+        cli = _new_user_client(client)
+        for _ in range(3):
+            _create_defeito(cli)
+        dados = _progresso(cli)
+        assert dados['chamados'] == 3
+        assert dados['xp'] == 30
+        assert dados['nivel'] == 2
+
+    def test_cinco_confirmacoes_sobem_de_nivel(self, client, auth_client):
+        cli = _new_user_client(client)
+        for _ in range(5):
+            created = _create_defeito(auth_client)
+            resp = cli.post(reverse('defeitos-apoiar', args=[created['id']]), format='json')
+            assert resp.status_code == 201
+        dados = _progresso(cli)
+        assert dados['confirmacoes'] == 5
+        assert dados['xp'] == 30
+        assert dados['nivel'] == 2
+
+    def test_apoio_no_proprio_chamado_nao_pontua(self, client):
+        cli = _new_user_client(client)
+        created = _create_defeito(cli)
+        cli.post(reverse('defeitos-apoiar', args=[created['id']]), format='json')
+        dados = _progresso(cli)
+        assert dados['confirmacoes'] == 0
+        assert dados['xp'] == 10
+
+    def test_chamado_resolvido_da_bonus(self, client):
+        cli = _new_user_client(client)
+        created = _create_defeito(cli)
+        Defeito.objects.filter(id=created['id']).update(status='concluido')
+        dados = _progresso(cli)
+        assert dados['resolvidos'] == 1
+        assert dados['xp'] == 25
+
+    def test_strike_desconta_sem_ficar_negativo(self, client):
+        from defeitos.models import Strike
+        cli = _new_user_client(client)
+        _create_defeito(cli)
+        Strike.objects.create(
+            usuario_id=_id_do_usuario(cli), titulo='t', criado_em=timezone.now(),
+        )
+        assert _progresso(cli)['xp'] == 0
+
+    def test_chamado_apagado_leva_o_xp_junto(self, client):
+        cli = _new_user_client(client)
+        created = _create_defeito(cli)
+        assert _progresso(cli)['xp'] == 10
+        resp = cli.post(
+            reverse('defeitos-sinalizar', args=[created['id']]),
+            {'tipo': 'nao_existe'}, format='json',
+        )
+        assert resp.data['resultado'] == 'inexistente'
+        assert _progresso(cli)['xp'] == 0
+
+
+class TestRanking:
+    """Leaderboard por município: contribuição na cidade (chamados + confirmações)."""
+
+    CIDADE = '9999910'
+
+    def _cria_municipio(self):
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute("""
+                INSERT INTO municipios (codigo, nome, uf, uf_sigla, min_lat, max_lat, min_lng, max_lng, polygon_geom)
+                VALUES ('9999910', 'Cidade Ranking', '35', 'SP', -27.1, -26.9, -54.4, -54.2,
+                        ST_Multi(ST_GeomFromText('POLYGON((-54.4 -27.1, -54.2 -27.1, -54.2 -26.9, -54.4 -26.9, -54.4 -27.1))', 4326)))
+                ON CONFLICT (codigo) DO NOTHING
+            """)
+
+    def _report(self, cli, lat):
+        return _create_defeito(cli, latitude=lat, longitude=-54.3, categoria='Entulho')
+
+    def test_parametros_obrigatorios(self, client):
+        assert client.get(reverse('defeitos-ranking')).status_code == 400
+        resp = client.get(reverse('defeitos-ranking'), {'municipio': '0000000'})
+        assert resp.status_code == 404
+
+    def test_ordena_por_contribuicao_na_cidade(self, client):
+        self._cria_municipio()
+        autor, outro = _new_user_client(client), _new_user_client(client)
+        id_autor, id_outro = _id_do_usuario(autor), _id_do_usuario(outro)
+
+        # autor: 2 chamados (20 XP); outro: 1 chamado + 2 confirmações (22 XP).
+        a1 = self._report(autor, -27.01)
+        a2 = self._report(autor, -27.03)
+        self._report(outro, -27.05)
+        for criado in (a1, a2):
+            outro.post(reverse('defeitos-apoiar', args=[criado['id']]), format='json')
+
+        resp = autor.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE})
+        assert resp.status_code == 200
+        assert resp.data['municipio']['nome'] == 'Cidade Ranking'
+        posicoes = {i['usuario_id']: i for i in resp.data['ranking']}
+        assert posicoes[id_outro]['xp'] == 22
+        assert posicoes[id_autor]['xp'] == 20
+        assert posicoes[id_outro]['posicao'] < posicoes[id_autor]['posicao']
+        assert resp.data['eu']['usuario_id'] == id_autor
+
+        # Chamado do autor resolvido: bônus vira 35 XP e ele passa à frente.
+        Defeito.objects.filter(id=a1['id']).update(status='concluido')
+        resp = client.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE})
+        posicoes = {i['usuario_id']: i for i in resp.data['ranking']}
+        assert posicoes[id_autor]['xp'] == 35
+        assert posicoes[id_autor]['posicao'] < posicoes[id_outro]['posicao']
+        assert resp.data['eu'] is None
+
+    def test_resolve_municipio_pelo_ponto(self, client, auth_client):
+        self._cria_municipio()
+        self._report(auth_client, -27.07)
+        resp = client.get(reverse('defeitos-ranking'), {'lat': -27.0, 'lng': -54.3})
+        assert resp.status_code == 200
+        assert resp.data['municipio']['codigo'] == self.CIDADE
+
+    def test_geral_e_periodo(self, client):
+        self._cria_municipio()
+        cli = _new_user_client(client)
+        meu_id = _id_do_usuario(cli)
+        antigo = self._report(cli, -27.081)
+        # Um chamado "de um mês atrás": sai do recorte semanal, fica no geral.
+        Defeito.objects.filter(id=antigo['id']).update(
+            criado_em=timezone.now() - timedelta(days=31),
+        )
+        self._report(cli, -27.083)
+
+        geral = client.get(reverse('defeitos-ranking'), {'geral': '1'})
+        assert geral.status_code == 200
+        assert geral.data['municipio'] is None
+        linha = next(i for i in geral.data['ranking'] if i['usuario_id'] == meu_id)
+        assert linha['chamados'] == 2
+
+        semana = client.get(reverse('defeitos-ranking'), {'geral': '1', 'periodo': 'semana'})
+        linha = next(i for i in semana.data['ranking'] if i['usuario_id'] == meu_id)
+        assert linha['chamados'] == 1
+
+        assert client.get(
+            reverse('defeitos-ranking'), {'geral': '1', 'periodo': 'ano'},
+        ).status_code == 400

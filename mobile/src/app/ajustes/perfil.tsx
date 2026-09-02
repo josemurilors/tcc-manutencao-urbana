@@ -17,6 +17,7 @@ import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { api } from '@/services/api';
+import { limparProgresso } from '@/services/progresso';
 import { formatarCpf } from '@/utils/format';
 
 export default function PerfilScreen() {
@@ -150,6 +151,7 @@ export default function PerfilScreen() {
         variant="danger"
         onPress={async () => {
           await logout();
+          limparProgresso();
           addToast('Sessão encerrada.');
           router.replace('/(tabs)/mapa');
         }}

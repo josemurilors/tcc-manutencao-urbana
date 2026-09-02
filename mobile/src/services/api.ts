@@ -22,7 +22,10 @@ import type {
   Defeito,
   Estatisticas,
   Municipio,
+  PeriodoRanking,
   PickedImage,
+  Progresso,
+  Ranking,
   TipoSinalizacao,
   User,
 } from '@/types';
@@ -394,6 +397,31 @@ export const api = {
 
   sinalizei: () =>
     request<{ sinalizacoes: Record<string, TipoSinalizacao> }>('/api/v1/defeitos/sinalizei/'),
+
+  /** Nível, XP e barra de progresso do usuário logado. */
+  progresso: () => request<Progresso>('/api/v1/defeitos/progresso/'),
+
+  /**
+   * Leaderboard de contribuição — por código IBGE, pelo ponto onde o usuário
+   * está ou geral (Brasil); `periodo` recorta a semana/mês (padrão: tudo).
+   */
+  ranking: (params: {
+    municipio?: string;
+    lat?: number;
+    lng?: number;
+    geral?: boolean;
+    periodo?: PeriodoRanking;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.geral) q.set('geral', '1');
+    else if (params.municipio) q.set('municipio', params.municipio);
+    else if (params.lat != null && params.lng != null) {
+      q.set('lat', String(params.lat));
+      q.set('lng', String(params.lng));
+    }
+    if (params.periodo) q.set('periodo', params.periodo);
+    return request<Ranking>(`/api/v1/defeitos/ranking/?${q.toString()}`);
+  },
 
   detalharDefeito: (id: number) => request<Defeito>(`/api/v1/defeitos/${id}/`),
 

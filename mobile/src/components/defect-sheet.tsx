@@ -25,6 +25,7 @@ import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { api } from '@/services/api';
+import { recarregarProgresso } from '@/services/progresso';
 import type { Defeito, PickedImage, TipoSinalizacao } from '@/types';
 import { totalApoios } from '@/utils/format';
 import { formatarDistancia } from '@/utils/geo';
@@ -67,7 +68,7 @@ export function DefectSheet({
 }: Props) {
   const colors = useColors();
   const addToast = useToast();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
   const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null);
 
@@ -112,13 +113,18 @@ export function DefectSheet({
       onPatch(id, {
         total_apoios: res.apoiado ? atual + 1 : Math.max(0, atual - 1),
       });
+      // Confirmar chamado de outra pessoa rende XP (o próprio, não).
+      const deOutro =
+        !defeito!.usuario || String(defeito!.usuario.id) !== String(user?.id ?? '');
+      const xp = res.apoiado && deOutro ? ' +6 XP' : '';
+      recarregarProgresso();
       addToast(
         modoConfirmacao
           ? res.apoiado
-            ? 'Demanda confirmada no local!'
+            ? `Demanda confirmada no local!${xp}`
             : 'Confirmação removida.'
           : res.apoiado
-            ? 'Apoio registrado!'
+            ? `Apoio registrado!${xp}`
             : 'Apoio removido.',
       );
     });
@@ -129,6 +135,8 @@ export function DefectSheet({
     return comAcao('sinalizar:' + tipo, async () => {
       const res = await api.sinalizarDefeito(id, tipo);
       onSinalizacaoChange?.(id, res.tipo);
+      // Fechar/apagar o próprio chamado mexe no XP (bônus ou perda).
+      if (res.resultado) recarregarProgresso();
 
       if (res.resultado === 'inexistente') {
         addToast('Chamado removido. Obrigado por avisar!');

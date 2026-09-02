@@ -20,9 +20,11 @@ import { Button } from '@/components/ui/button';
 import { RAIO_DUPLICADO_M } from '@/constants/proximidade';
 import { STATUS_ABERTOS } from '@/constants/status';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { api, DefeitoDuplicadoError } from '@/services/api';
+import { recarregarProgresso } from '@/services/progresso';
 import type { Categoria, Defeito, PickedImage } from '@/types';
 import { distanciaAte, formatarDistancia } from '@/utils/geo';
 import { ImagemMuitoGrandeError, tirarFoto } from '@/utils/image';
@@ -40,6 +42,7 @@ const CATEGORIAS_PADRAO: Categoria[] = [
 export default function NovoChamadoScreen() {
   const colors = useColors();
   const addToast = useToast();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { lat, lng } = useLocalSearchParams<{ lat?: string; lng?: string }>();
 
@@ -132,7 +135,10 @@ export default function NovoChamadoScreen() {
         await api.apoiarDefeito(d.id);
         addToast('Você já tinha confirmado este chamado.', 'info');
       } else {
-        addToast('Chamado confirmado!');
+        // Confirmar chamado de outra pessoa rende XP (o próprio, não).
+        const deOutro = !d.usuario || String(d.usuario.id) !== String(user?.id ?? '');
+        addToast(deOutro ? 'Chamado confirmado! +6 XP' : 'Chamado confirmado!');
+        recarregarProgresso();
       }
       router.back();
     } catch (err) {
@@ -172,7 +178,10 @@ export default function NovoChamadoScreen() {
         imagem,
       });
       if ('offline' in resultado) addToast(resultado.message, 'info');
-      else addToast('Chamado enviado!');
+      else {
+        addToast('Chamado enviado! +10 XP');
+        recarregarProgresso();
+      }
       router.back();
     } catch (err) {
       if (err instanceof DefeitoDuplicadoError) {

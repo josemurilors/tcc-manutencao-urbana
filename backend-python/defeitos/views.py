@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db.models import Count, Q
 from .models import Defeito, Apoio, Sinalizacao
-from . import regras
+from . import gamificacao, regras
 from .serializers import (
     municipio_do_ponto,
     DefeitoListSerializer, DefeitoDetailSerializer,
@@ -91,7 +91,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ('create', 'apoiar', 'meus', 'apoiados', 'apoiei', 'atender', 'status',
-                           'sinalizar', 'sinalizei',
+                           'sinalizar', 'sinalizei', 'progresso',
                            'batch_status', 'ordem_servico', 'operacao',
                            'update', 'partial_update', 'destroy', 'anexar'):
             return (permissions.IsAuthenticated(),)
@@ -376,6 +376,67 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'mais_antigos': [d['id'] for d in mais_antigos],
             'mais_apoiados': [d['id'] for d in mais_apoiados if (d.get('total_apoios') or 0) > 0],
             'defeitos': dados,
+        })
+
+    @action(detail=False, methods=['get'])
+    def progresso(self, request):
+        """Nível, XP e barra de progresso do usuário logado (ver `gamificacao.py`)."""
+        return Response(gamificacao.resumo_do_usuario(request.user))
+
+    @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
+    def ranking(self, request):
+        """
+        Leaderboard de contribuição: ?municipio=<código IBGE>, ?lat=&lng=
+        (resolve a cidade do ponto) ou ?geral=1 (Brasil inteiro). ?periodo=
+        semana|mes recorta ao que aconteceu no período (padrão: tudo).
+        `eu` traz a linha do usuário logado mesmo fora do top.
+        """
+        periodo = request.query_params.get('periodo') or 'tudo'
+        dias = {'semana': 7, 'mes': 30, 'tudo': None}
+        if periodo not in dias:
+            return Response({'detail': 'Período inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        desde = None
+        if dias[periodo]:
+            from datetime import timedelta
+            desde = timezone.now() - timedelta(days=dias[periodo])
+
+        codigo = request.query_params.get('municipio')
+        if request.query_params.get('geral'):
+            municipio = None
+        elif codigo:
+            municipio = _municipio_por_codigo(codigo)
+            if not municipio['nome']:
+                return Response({'detail': 'Município não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            try:
+                lat = float(request.query_params.get('lat', ''))
+                lng = float(request.query_params.get('lng', ''))
+            except ValueError:
+                return Response(
+                    {'detail': 'Informe municipio, lat/lng ou geral=1.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            municipio = municipio_do_ponto(lat, lng)
+            if not municipio:
+                return Response({'detail': 'Nenhum município neste ponto.'}, status=status.HTTP_404_NOT_FOUND)
+
+        completo = gamificacao.ranking_de(
+            municipio_id=municipio['codigo'] if municipio else None,
+            desde=desde,
+        )
+        eu = None
+        if request.user.is_authenticated:
+            eu = next((i for i in completo if i['usuario_id'] == str(request.user.id)), None)
+        return Response({
+            'municipio': {
+                'codigo': municipio['codigo'],
+                'nome': municipio['nome'],
+                'uf_sigla': municipio['uf_sigla'],
+            } if municipio else None,
+            'periodo': periodo,
+            'total_participantes': len(completo),
+            'ranking': completo[:20],
+            'eu': eu,
         })
 
     @action(detail=False, methods=['get'])

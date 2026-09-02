@@ -250,9 +250,9 @@ export function GpsJoystick({ posicaoReal: _posicaoReal }: Props) {
 const styles = StyleSheet.create({
   painel: {
     position: 'absolute',
-    // Abaixo do controle de zoom do Leaflet, longe da bandeja do rodapé.
+    // Abaixo do botão da conta + pill de nível, longe da bandeja do rodapé.
     left: Spacing[4],
-    top: 72,
+    top: 104,
     zIndex: 1100,
     width: 250,
     padding: Spacing[3],
