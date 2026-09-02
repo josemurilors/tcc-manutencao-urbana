@@ -80,7 +80,7 @@ A aplicação está no ar e em uso contínuo em `tcc.josemurilors.com.br`. O bac
 - `Mapa de clusters`: auto-agrupamento de defeitos próximos com ações em lote, toggle de heatmap
 - `Sistema de upvotes`: apoio cidadão aos defeitos
 - `Anexos`: atualizações de texto/imagem em defeitos abertos
-- `Gestão de usuários`: validação de CPF (BrasilAPI), hierarquia admin, verificação de e-mail
+- `Gestão de usuários`: hierarquia admin, verificação de e-mail, CPF opcional no cadastro
 - `Notificações push`: Web Push API com chaves VAPID
 - `Tema claro/escuro`: respeita preferência do sistema, toggle manual, persistido em localStorage
 - `Navegação por teclado`: atalhos `g + tecla` (m=mapa, a=admin, d=dashboard, t=tema, ?=ajuda)
@@ -89,6 +89,13 @@ A aplicação está no ar e em uso contínuo em `tcc.josemurilors.com.br`. O bac
 - `PWA`: service worker com cache-first para assets estáticos, manifest com splash screen
 - `Privacidade`: ofuscação de imagem via blur gaussiano em todas as fotos enviadas para atenuação de privacidade (sigma configurável)
 - `Tolerância de GPS`: validação de perímetro com ST_Buffer (~1km) + bounding box fallback para erros de GPS na borda do município
+- `Entrada por e-mail`: fluxo único — o e-mail decide se é login ou cadastro, com código de verificação enviado por e-mail
+- `Login com Google`: ID token validado no backend (web e app nativo), sem senha
+- `Criação rápida no mapa`: long-press no toque e botão direito no PC plantam a bandeira e abrem o formulário
+- `Sinalização cidadã`: em chamados abertos, o cidadão sinaliza "já foi resolvido" ou "não existe" — insumo para o operador (o autor resolve na hora; terceiros, com confirmação)
+- `Quarentena (anti-spam)`: strikes expiram em 90 dias; com 3+ ativos, novos reports nascem restritos (só autor, operadores e quem está a ≤ 500 m veem) até a 1ª confirmação
+- `Recusa de reports implausíveis`: deslocamento GPS improvável e duplicado da mesma categoria a < 10 m são recusados
+- `Gamificação`: nível, EXP e ranking por cidade — 10 XP por chamado, 6 por confirmação em chamado de terceiros, +15 quando um chamado seu é resolvido e −20 por strike ativo (XP derivado do histórico, sem tabela nova; títulos de Novato a Lenda da Cidade)
 
 ### Demonstração
 
@@ -219,40 +226,54 @@ Todos os serviços comunicam-se sobre a rede bridge do Docker (`app-network`). O
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| POST | `/api/v1/auth/register/` | — | Registro com CPF e município |
+| POST | `/api/v1/auth/existe/` | — | Verifica se o e-mail já tem conta (fluxo único de entrada) |
+| POST | `/api/v1/auth/register/` | — | Cadastro com nome/e-mail/senha (CPF opcional) |
 | POST | `/api/v1/auth/login/` | — | Login (retorna JWT + usuário) |
-| POST | `/api/v1/auth/validate-cpf/` | — | Valida CPF via BrasilAPI |
+| POST | `/api/v1/auth/google/` | — | Login/cadastro com Google (ID token) |
+| POST | `/api/v1/auth/refresh/` | — | Renova o access token (rotação do refresh) |
 | GET | `/api/v1/auth/profile/` | JWT | Perfil do usuário |
-| PATCH | `/api/v1/auth/password/` | JWT | Alterar senha |
+| POST | `/api/v1/auth/senha/` | JWT | Alterar senha |
+| POST | `/api/v1/auth/municipio/` | JWT | Atualizar o município do usuário |
 | POST | `/api/v1/auth/verify-email/` | JWT | Verificar e-mail com código |
 | POST | `/api/v1/auth/resend-code/` | JWT | Reenviar código de verificação |
-| GET | `/api/v1/auth/push/key/` | — | Chave pública VAPID |
-| POST | `/api/v1/auth/push/subscribe/` | JWT | Salvar inscrição push |
+| GET | `/api/v1/auth/public-key/` | — | Chave pública VAPID (push) |
+| POST | `/api/v1/auth/subscribe/` | JWT | Salvar inscrição push |
 | GET | `/api/v1/auth/admin/users/` | Admin | Listar todos os usuários |
-| GET | `/api/v1/auth/admin/statistics/` | Admin | Métricas do painel |
-| PATCH | `/api/v1/auth/admin/users/:id/` | Admin | Atualizar usuário |
-| PATCH | `/api/v1/auth/admin/users/:id/admin/` | Super | Promover/remover admin |
+| GET | `/api/v1/auth/admin/estatisticas/` | Admin | Métricas do painel |
+| POST | `/api/v1/auth/admin/users/:id/admin/` | Super | Promover/remover admin |
+| POST | `/api/v1/auth/admin/users/:id/municipio/` | Admin | Vincular município ao usuário |
 
 ### Defeitos `/api/v1/defeitos/*`
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| GET | `/api/v1/defeitos/` | — | Listar todos (paginação, contagem de apoios) |
+| GET | `/api/v1/defeitos/` | — | Listar (paginação, apoios, `sinalizacoes`, `visibilidade`) |
 | GET | `/api/v1/defeitos/meus/` | JWT | Listar defeitos do próprio usuário |
-| GET | `/api/v1/defeitos/clusters/` | — | GeoJSON agrupado para o mapa |
-| GET | `/api/v1/defeitos/:id/` | — | Detalhe completo com anexos |
-| POST | `/api/v1/defeitos/` | JWT | Criar (foto + desc + GPS → IA classifica) |
-| POST | `/api/v1/defeitos/:id/support/` | JWT | Alternar upvote |
+| GET | `/api/v1/defeitos/apoiados/` | JWT | Listar defeitos que o usuário apoiou |
+| GET | `/api/v1/defeitos/apoiei/` | JWT | IDs de defeitos apoiados pelo usuário |
+| GET | `/api/v1/defeitos/sinalizei/` | JWT | Sinalizações do usuário (`{id: tipo}`) |
+| GET | `/api/v1/defeitos/progresso/` | JWT | Nível, XP e barra de progresso do usuário logado |
+| GET | `/api/v1/defeitos/ranking/` | — | Ranking por cidade ou Brasil (`?municipio=`, `?lat=&lng=`, `?geral=1`; `?periodo=semana\|mes`; `eu` traz a posição do usuário) |
+| GET | `/api/v1/defeitos/operacao/` | Admin | Filas da operação (meus/todos, município do operador) |
+| GET | `/api/v1/defeitos/municipio/` | — | Chamados liberados por proximidade (visibilidade restrita) |
+| GET | `/api/v1/defeitos/:id/` | — | Detalhe completo com anexos e sinalizações |
+| GET | `/api/v1/defeitos/:id/ordem-servico/` | Admin | PDF da ordem de serviço |
+| POST | `/api/v1/defeitos/` | JWT | Criar (foto + desc + GPS; recusa duplicado <10m e deslocamento implausível) |
+| POST | `/api/v1/defeitos/:id/apoiar/` | JWT | Alternar apoio |
+| POST | `/api/v1/defeitos/:id/sinalizar/` | JWT | Sinalizar "resolvido" ou "não existe" |
+| POST | `/api/v1/defeitos/imagem/` | JWT | Upload de imagem (inclui foto de resolução) |
 | PATCH | `/api/v1/defeitos/:id/` | Admin | Atualizar status/prioridade/secretaria |
-| PATCH | `/api/v1/defeitos/:id/attach/` | JWT | Anexar atualização de imagem/texto |
-| POST | `/api/v1/defeitos/batch-close/` | Admin | Fechar em lote por IDs |
-| GET | `/api/v1/defeitos/vinculados/` | Admin | Listar defeitos com atendente atribuído |
+| PATCH | `/api/v1/defeitos/:id/status/` | Admin | Atualizar status |
+| PATCH | `/api/v1/defeitos/:id/atender/` | Admin | Atribuir atendente / iniciar atendimento |
+| PATCH | `/api/v1/defeitos/:id/anexar/` | JWT | Anexar atualização de imagem/texto |
+| PATCH | `/api/v1/defeitos/batch-status/` | Admin | Atualizar status em lote |
 
 ### Municípios & Categorias `/api/v1/*`
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
 | GET/POST | `/api/v1/municipios/` | variado | Lookup de municípios |
+| GET | `/api/v1/municipios/lista/` | — | Lista achatada `{codigo, nome, uf_sigla}` de todos os municípios (cache 1h) |
 | GET | `/api/v1/categorias/` | — | Listar categorias |
 
 ### Admin Django `/api/v1/admin/*`
@@ -297,6 +318,7 @@ Todos os serviços comunicam-se sobre a rede bridge do Docker (`app-network`). O
 - **Validação:** serializers DRF em todas as entradas
 - **2FA:** TOTP de dois fatores opcional
 - **Chave de criptografia:** AES-256-GCM (32 bytes / 64 hex chars), gerada via `openssl rand -hex 32`
+- **Login Google / e-mail:** `GOOGLE_CLIENT_ID_WEB` / `GOOGLE_CLIENT_ID_ANDROID` / `GOOGLE_CLIENT_ID_IOS` (ID token validado pelo `aud` no backend) e `RESEND_API_KEY` (envio dos códigos de verificação) — todos via variáveis de ambiente, nunca em código
 
 ## PostGIS & Geoespacial
 
@@ -434,13 +456,16 @@ Os atalhos são desabilitados quando o foco está em elemento input/textarea/sel
 
 ## Pessoas Contribuidoras
 
-Até o momento não há contribuidores externos além do autor. O repositório é mantido individualmente como parte de um trabalho de conclusão de curso (TCC).
+| Usuário | Contribuições |
+|---|---|
+| [caiocinel](https://github.com/caiocinel) | App mobile (Expo), login com Google e fluxo único por e-mail, sinalização cidadã e quarentena, criação de chamado por long-press/clique direito, app de operação, rotas inteligentes |
 
 ## Autores
 
 | Foto do Autor | Nome | Link |
 |---|---|---|
 | <img src="https://github.com/josemurilors.png" width=115 alt="José Murilo Rodrigues Sabalo"> | José Murilo Rodrigues Sabalo | [Perfil no GitHub](https://github.com/josemurilors) |
+| <img src="https://github.com/caiocinel.png" width=115 alt="caiocinel"> | caiocinel | [Perfil no GitHub](https://github.com/caiocinel) |
 
 Demais membros do grupo do TCC serão adicionados aqui posteriormente.
 
@@ -511,7 +536,7 @@ The Django backend is the active production backend. The application is deployed
 - `Cluster map`: auto-grouping of nearby defects with batch actions, heatmap toggle
 - `Upvote system`: citizen support for defects
 - `Attachments`: text/image updates on open defects
-- `User management`: CPF validation (BrasilAPI), admin hierarchy, email verification
+- `User management`: admin hierarchy, email verification, optional CPF at signup
 - `Push notifications`: Web Push API with VAPID keys
 - `Dark/light theme`: respects system preference, manual toggle, persisted in localStorage
 - `Keyboard navigation`: `g + key` shortcuts (m=map, a=admin, d=dashboard, t=theme, ?=help)
@@ -520,6 +545,13 @@ The Django backend is the active production backend. The application is deployed
 - `PWA`: service worker with cache-first for static assets, manifest with splash screen
 - `Privacy`: Gaussian blur on all uploaded photos to protect faces and license plates (configurable sigma)
 - `GPS tolerance`: perimeter validation with ST_Buffer (~1km) + bounding box fallback for city border GPS errors
+- `Email-only entry`: single flow — the email decides login vs signup, with a verification code sent by email
+- `Google sign-in`: ID token validated on the backend (web and native app), no password
+- `Quick map creation`: long-press on touch and right-click on desktop plant a flag and open the form
+- `Citizen signaling`: on open calls, citizens flag "already resolved" or "doesn't exist" — input for the operator (the author resolves immediately; third parties need confirmation)
+- `Quarantine (anti-spam)`: strikes expire after 90 days; with 3+ active, new reports are born restricted (only the author, operators, and people within 500 m see them) until the first confirmation
+- `Implausible report rejection`: unlikely GPS displacement and same-category duplicates within 10 m are rejected
+- `Gamification`: level, XP and city ranking — 10 XP per call, 6 per confirmation on someone else's call, +15 when one of your calls is resolved, and −20 per active strike (XP derived from history, no new table; titles from Novato to Lenda da Cidade)
 
 ### Demo
 
@@ -652,38 +684,54 @@ All services communicate over a Docker bridge network (`app-network`). Nginx ser
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/auth/register/` | — | Register with CPF and municipality |
+| POST | `/api/v1/auth/existe/` | — | Check if the email already has an account (single entry flow) |
+| POST | `/api/v1/auth/register/` | — | Register with name/email/password (CPF optional) |
 | POST | `/api/v1/auth/login/` | — | Login (returns JWT + user) |
-| POST | `/api/v1/auth/validate-cpf/` | — | Validate CPF via BrasilAPI |
-| PATCH | `/api/v1/auth/password/` | JWT | Change password |
+| POST | `/api/v1/auth/google/` | — | Google login/signup (ID token) |
+| POST | `/api/v1/auth/refresh/` | — | Renew access token (refresh rotation) |
+| GET | `/api/v1/auth/profile/` | JWT | User profile |
+| POST | `/api/v1/auth/senha/` | JWT | Change password |
+| POST | `/api/v1/auth/municipio/` | JWT | Update the user's municipality |
 | POST | `/api/v1/auth/verify-email/` | JWT | Verify email with code |
 | POST | `/api/v1/auth/resend-code/` | JWT | Resend verification code |
-| POST | `/api/v1/auth/push/subscribe/` | JWT | Save push subscription |
+| GET | `/api/v1/auth/public-key/` | — | VAPID public key (push) |
+| POST | `/api/v1/auth/subscribe/` | JWT | Save push subscription |
 | GET | `/api/v1/auth/admin/users/` | Admin | List all users |
-| GET | `/api/v1/auth/admin/statistics/` | Admin | Dashboard metrics |
-| PATCH | `/api/v1/auth/admin/users/:id/` | Admin | Update user |
-| PATCH | `/api/v1/auth/admin/users/:id/admin/` | Super | Promote/remove admin |
+| GET | `/api/v1/auth/admin/estatisticas/` | Admin | Dashboard metrics |
+| POST | `/api/v1/auth/admin/users/:id/admin/` | Super | Promote/remove admin |
+| POST | `/api/v1/auth/admin/users/:id/municipio/` | Admin | Link municipality to user |
 
 ### Defeitos `/api/v1/defeitos/*`
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/api/v1/defeitos/` | — | List all (paginated, with support count) |
-| GET | `/api/v1/defeitos/meus/` | JWT | List user's own defects |
-| GET | `/api/v1/defeitos/clusters/` | — | GeoJSON clustered for map |
-| GET | `/api/v1/defeitos/:id/` | — | Full detail with attachments |
-| POST | `/api/v1/defeitos/` | JWT | Create (photo + desc + GPS → IA classify) |
-| POST | `/api/v1/defeitos/:id/support/` | JWT | Toggle upvote |
+| GET | `/api/v1/defeitos/` | — | List (paginated, with supports, `sinalizacoes`, `visibilidade`) |
+| GET | `/api/v1/defeitos/meus/` | JWT | List the user's own defects |
+| GET | `/api/v1/defeitos/apoiados/` | JWT | List defects the user supported |
+| GET | `/api/v1/defeitos/apoiei/` | JWT | IDs of defects supported by the user |
+| GET | `/api/v1/defeitos/sinalizei/` | JWT | User's signals (`{id: tipo}`) |
+| GET | `/api/v1/defeitos/progresso/` | JWT | Logged user's level, XP and progress bar |
+| GET | `/api/v1/defeitos/ranking/` | — | City/Brazil leaderboard (`?municipio=`, `?lat=&lng=`, `?geral=1`; `?periodo=semana\|mes`; `eu` returns the user's position) |
+| GET | `/api/v1/defeitos/operacao/` | Admin | Operation queues (mine/all, operator's municipality) |
+| GET | `/api/v1/defeitos/municipio/` | — | Defects released by proximity (restricted visibility) |
+| GET | `/api/v1/defeitos/:id/` | — | Full detail with attachments and signals |
+| GET | `/api/v1/defeitos/:id/ordem-servico/` | Admin | Work order PDF |
+| POST | `/api/v1/defeitos/` | JWT | Create (photo + desc + GPS; rejects <10m duplicates and implausible displacement) |
+| POST | `/api/v1/defeitos/:id/apoiar/` | JWT | Toggle support |
+| POST | `/api/v1/defeitos/:id/sinalizar/` | JWT | Signal "resolved" or "doesn't exist" |
+| POST | `/api/v1/defeitos/imagem/` | JWT | Upload image (including resolution photo) |
 | PATCH | `/api/v1/defeitos/:id/` | Admin | Update status/priority/secretaria |
-| PATCH | `/api/v1/defeitos/:id/attach/` | JWT | Attach image/text update |
-| POST | `/api/v1/defeitos/batch-close/` | Admin | Batch close by IDs |
-| GET | `/api/v1/defeitos/vinculados/` | Admin | List defects with assigned attendant |
+| PATCH | `/api/v1/defeitos/:id/status/` | Admin | Update status |
+| PATCH | `/api/v1/defeitos/:id/atender/` | Admin | Assign attendant / start service |
+| PATCH | `/api/v1/defeitos/:id/anexar/` | JWT | Attach image/text update |
+| PATCH | `/api/v1/defeitos/batch-status/` | Admin | Batch status update |
 
 ### Municipios & Categorias
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
 | GET | `/api/v1/municipios/` | varied | Django municipios lookup |
+| GET | `/api/v1/municipios/lista/` | — | Flat `{codigo, nome, uf_sigla}` list of all municipalities (1h cache) |
 | GET | `/api/v1/categorias/` | — | Django categories |
 
 ### Admin `/api/v1/admin/*`
@@ -728,6 +776,7 @@ All services communicate over a Docker bridge network (`app-network`). Nginx ser
 - **Validation:** DRF serializers on all inputs
 - **2FA:** Optional TOTP-based two-factor authentication
 - **Encryption key:** AES-256-GCM (32 bytes / 64 hex chars), generated via `openssl rand -hex 32`
+- **Google login / email:** `GOOGLE_CLIENT_ID_WEB` / `GOOGLE_CLIENT_ID_ANDROID` / `GOOGLE_CLIENT_ID_IOS` (ID token validated by `aud` on the backend) and `RESEND_API_KEY` (verification codes) — all via environment variables, never in code
 
 ## PostGIS & Geospatial
 
@@ -863,13 +912,16 @@ Shortcuts are disabled when focus is inside input/textarea/select elements.
 
 ## Contributors
 
-There are no external contributors yet beyond the author. Contributions are welcome under the project's MIT license.
+| User | Contributions |
+|---|---|
+| [caiocinel](https://github.com/caiocinel) | Mobile app (Expo), Google sign-in and single email flow, citizen signaling and quarantine, long-press/right-click call creation, operations app, smart routes |
 
 ## Authors
 
 | Avatar | Name | Link |
 |---|---|---|
 | <img src="https://github.com/josemurilors.png" width=115> | José Murilo Rodrigues Sabalo | [josemurilors](https://github.com/josemurilors) |
+| <img src="https://github.com/caiocinel.png" width=115> | caiocinel | [caiocinel](https://github.com/caiocinel) |
 
 Additional TCC group members will be added here later.
 
