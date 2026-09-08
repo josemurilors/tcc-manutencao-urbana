@@ -118,6 +118,39 @@ class TestProfile:
         resp = client.get(reverse(self.URL))
         assert resp.status_code == 401
 
+    def test_delete_account(self, auth_client, user_creds, client):
+        resp = auth_client.delete(reverse(self.URL))
+        assert resp.status_code == 204
+        assert not User.objects.filter(email=user_creds['email']).exists()
+        # O token antigo deixa de valer e o login também.
+        assert auth_client.get(reverse(self.URL)).status_code == 401
+        resp = client.post(
+            reverse('auth-login'),
+            {'email': user_creds['email'], 'password': user_creds['password']},
+            format='json',
+        )
+        assert resp.status_code == 401
+
+    def test_delete_account_anonimiza_chamados(self, auth_client, user_creds):
+        from defeitos.models import Defeito
+        from django.utils import timezone
+
+        me = auth_client.get(reverse(self.URL)).data
+        agora = timezone.now()
+        defeito = Defeito.objects.create(
+            usuario_id=me['id'],
+            usuario_email=user_creds['email'],
+            titulo='Buraco na rua',
+            latitude=-23.55,
+            longitude=-46.63,
+            criado_em=agora,
+            atualizado_em=agora,
+        )
+        assert auth_client.delete(reverse(self.URL)).status_code == 204
+        defeito.refresh_from_db()
+        assert defeito.usuario_id is None
+        assert defeito.usuario_email == ''
+
 
 class TestChangePassword:
 

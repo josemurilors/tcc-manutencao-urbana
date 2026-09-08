@@ -175,12 +175,24 @@ class RefreshView(TokenRefreshView):
         return super().post(request, *args, **kwargs)
 
 
-class ProfileView(generics.RetrieveUpdateAPIView):
+class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UserSerializer
     permission_classes = (permissions.IsAuthenticated,)
 
     def get_object(self):
         return self.request.user
+
+    def perform_destroy(self, user):
+        """
+        Exclusão da própria conta (exigência das lojas de apps).
+
+        Os chamados continuam no banco porque são informação pública sobre a
+        cidade, mas perdem o vínculo com a pessoa: a FK vira NULL e o e-mail
+        gravado no chamado é apagado. Apoios, sinalizações, strikes e inscrições
+        de push são removidos em cascata pelo próprio modelo.
+        """
+        user.defeitos_defeitos.update(usuario=None, usuario_email='')
+        user.delete()
 
 
 class ChangePasswordView(APIView):
