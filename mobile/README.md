@@ -281,14 +281,48 @@ executaria o Leaflet no Node, onde não há `window`.
 
 ## Build de produção
 
+Os perfis ficam em `eas.json`. Todos os builds nativos rodam no EAS Build
+(nuvem da Expo); a máquina local não precisa de JDK nem Android SDK.
+
 ```bash
 npm install -g eas-cli
-eas login
-eas build:configure
+eas login            # uma vez por máquina
+eas init             # uma vez por projeto: vincula ao projectId da Expo
+```
 
-# Android (defina GOOGLE_MAPS_API_KEY_ANDROID antes)
+Variáveis de ambiente do build vêm de dois lugares: o `env` do perfil em
+`eas.json` (só `EXPO_PUBLIC_API_URL`, que não é segredo) e as variáveis do
+projeto na Expo (expo.dev → projeto → Environment variables), onde está
+`GOOGLE_MAPS_API_KEY_ANDROID` marcada como *sensitive* nos três ambientes.
+Cada perfil declara qual ambiente da Expo usa via `environment`. Sem a chave
+do Maps o plugin do `react-native-maps` não entra no build e o mapa nativo
+fica em branco.
+
+Para autenticar o CLI sem prompt, defina `EXPO_TOKEN` com um access token
+gerado em expo.dev → Account settings → Access tokens.
+
+| Perfil        | Gera            | Uso                                                     |
+| ------------- | --------------- | ------------------------------------------------------- |
+| `apk`         | `.apk` assinado | Instalar direto no celular (demonstração, banca)        |
+| `development` | `.apk` dev client | Rodar contra o Metro com módulos nativos (login Google) |
+| `production`  | `.aab`          | Play Store                                              |
+
+```bash
+# APK pra instalar no celular (aponta pra API de produção)
+eas build --platform android --profile apk
+
+# Play Store
 eas build --platform android --profile production
 
 # iOS
 eas build --platform ios --profile production
 ```
+
+Materiais da Play Store (descrições, feature graphic, respostas do
+formulário de segurança de dados e checklist) estão em `docs/play-store/`.
+A política de privacidade e a página de exclusão de conta exigidas pela
+loja ficam em `frontend/public/` e são servidas na raiz do domínio.
+
+O primeiro build gera a keystore Android na conta Expo. Pegue o SHA-1 com
+`eas credentials --platform android` e cadastre no client ID Android do Google
+Cloud para o login com Google funcionar no APK.

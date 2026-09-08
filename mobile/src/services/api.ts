@@ -359,6 +359,9 @@ export const api = {
   updateProfile: (data: Record<string, unknown>) =>
     request<User>('/api/v1/auth/profile/', { method: 'PATCH', body: data }),
 
+  /** Apaga a própria conta. Chamados ficam no mapa, mas sem vínculo com a pessoa. */
+  deleteAccount: () => request('/api/v1/auth/profile/', { method: 'DELETE' }),
+
   updatePassword: (senhaAtual: string, novaSenha: string) =>
     request('/api/v1/auth/senha/', {
       method: 'PATCH',

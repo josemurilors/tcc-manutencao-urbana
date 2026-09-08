@@ -95,5 +95,11 @@ module.exports = {
       typedRoutes: true,
       reactCompiler: true,
     },
+    extra: {
+      eas: {
+        projectId: 'c2a38d38-63b7-4e86-bb5f-5f771f7145dc',
+      },
+    },
+    owner: 'caiocinel',
   },
 };

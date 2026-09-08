@@ -1,12 +1,13 @@
 /**
- * Submenu "Conta": nome, verificação de e-mail, troca de senha e sair.
+ * Submenu "Conta": nome, verificação de e-mail, troca de senha, sair e
+ * excluir a conta (exigência da Play Store / App Store).
  * Aberto a partir do hub da aba Conta.
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, router } from 'expo-router';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Alert, Platform, View } from 'react-native';
 
 import { Button } from '@/components/ui/button';
 import { Card, SectionHeading } from '@/components/ui/screen';
@@ -34,6 +35,7 @@ export default function PerfilScreen() {
   const [codigo, setCodigo] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [verificando, setVerificando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   if (!isAuthenticated) {
     return <Redirect href="/(tabs)/conta" />;
@@ -89,6 +91,40 @@ export default function PerfilScreen() {
     } catch (err) {
       addToast('Erro: ' + (err instanceof Error ? err.message : ''), 'error');
     }
+  }
+
+  async function excluirConta() {
+    setExcluindo(true);
+    try {
+      await api.deleteAccount();
+      await logout();
+      limparProgresso();
+      addToast('Sua conta foi excluída.');
+      router.replace('/(tabs)/mapa');
+    } catch (err) {
+      addToast(
+        'Erro ao excluir: ' + (err instanceof Error ? err.message : 'tente novamente'),
+        'error',
+      );
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  function confirmarExclusao() {
+    const mensagem =
+      'Isso apaga seu cadastro, apoios e sinalizações. Os chamados que você abriu ' +
+      'continuam no mapa, sem seu nome. Não dá para desfazer.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Excluir conta?
+
+${mensagem}`)) excluirConta();
+      return;
+    }
+    Alert.alert('Excluir conta?', mensagem, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: excluirConta },
+    ]);
   }
 
   return (
@@ -157,6 +193,15 @@ export default function PerfilScreen() {
         }}
         icon={<Ionicons name="log-out" size={16} color={colors.error} />}>
         Sair
+      </Button>
+
+      <Button
+        block
+        variant="ghost"
+        onPress={confirmarExclusao}
+        loading={excluindo}
+        icon={<Ionicons name="trash-outline" size={16} color={colors.textSecondary} />}>
+        Excluir minha conta
       </Button>
     </SubScreen>
   );
