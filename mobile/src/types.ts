@@ -47,6 +47,8 @@ export type Defeito = {
   /** A listagem devolve o nome da categoria neste campo; o detalhe, em `categoria`. */
   categoria_nome?: string;
   status: string;
+  /** 'urgente' | 'alta' | 'media' | 'baixa' (vazio quando não triado). */
+  prioridade?: string;
   latitude: number;
   longitude: number;
   rua?: string;
@@ -91,6 +93,20 @@ export type VisaoMunicipio = {
   /** IDs (em `defeitos`) dos mais antigos e dos mais confirmados. */
   mais_antigos: (number | string)[];
   mais_apoiados: (number | string)[];
+  defeitos: Defeito[];
+};
+
+/**
+ * Resposta de GET /defeitos/area/ — chamados abertos no retângulo visível,
+ * já rareados por quadrante conforme o zoom.
+ */
+export type AreaDoMapa = {
+  /** Lado da célula da grade, em graus (potência de 2, alinhada ao globo). */
+  celula_graus: number;
+  /** Abertos no retângulo antes do corte. */
+  total: number;
+  /** Contagem real por célula (centro de massa), para o mapa de calor. */
+  celulas: { latitude: number; longitude: number; total: number }[];
   defeitos: Defeito[];
 };
 

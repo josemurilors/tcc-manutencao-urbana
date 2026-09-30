@@ -30,6 +30,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
     onLongPressMapa,
     onPressMarcador,
     onArrastar,
+    onRegiaoMudou,
     onPronto,
     direcao,
     escuro,
@@ -62,6 +63,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
       initialRegion={regiaoInicial}
       onLongPress={(e) => onLongPressMapa(e.nativeEvent.coordinate)}
       onPanDrag={onArrastar}
+      onRegionChangeComplete={(regiao) => onRegiaoMudou?.(regiao)}
       onMapReady={onPronto}
       showsUserLocation={false}
       showsMyLocationButton={false}

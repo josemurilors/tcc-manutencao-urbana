@@ -14,7 +14,9 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 
+import type { Caixa } from '@/utils/rarear';
 import type {
+  AreaDoMapa,
   AuthResponse,
   Categoria,
   VisaoMunicipio,
@@ -327,6 +329,24 @@ export const api = {
   },
 
   createDefeito,
+
+  /**
+   * Abertos no retângulo do mapa, rareados por quadrante conforme o zoom.
+   * A posição do usuário libera os restritos que estão perto dele.
+   */
+  defeitosNaArea: (caixa: Caixa, posicao?: { latitude: number; longitude: number } | null) => {
+    const q = new URLSearchParams({
+      min_lat: String(caixa.min_lat),
+      max_lat: String(caixa.max_lat),
+      min_lng: String(caixa.min_lng),
+      max_lng: String(caixa.max_lng),
+    });
+    if (posicao) {
+      q.set('lat', String(posicao.latitude));
+      q.set('lng', String(posicao.longitude));
+    }
+    return request<AreaDoMapa>(`/api/v1/defeitos/area/?${q}`);
+  },
 
   /** Cidade onde o ponto caiu, chamados abertos dela e rankings (visão expandida). */
   visaoMunicipio: (lat: number, lng: number) =>

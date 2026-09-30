@@ -10,8 +10,9 @@
  *   chamado na posição atual —
  *   sem tocar no mapa;
  *   toque longo ainda permite posicionar em outro ponto;
- * - as pendências são filtradas por um raio ao redor do usuário e listadas na
- *   bandeja inferior ordenadas por distância;
+ * - o mapa busca as pendências da área visível (`/defeitos/area/`): afastar
+ *   o zoom amplia a busca, mas cada quadrante da tela mostra só alguns pinos
+ *   (os mais apoiados/urgentes) — ver `utils/rarear.ts`;
  * - dentro de `RAIO_CONFIRMACAO_M` o pino ganha anel dourado e o detalhe
  *   libera "Confirmar no local";
  * - o botão do canto superior direito abre a **visão do município**: enquadra a
@@ -37,7 +38,7 @@ import type {
   MarcadorMapa,
   Regiao,
 } from '@/components/map-surface.types';
-import { RAIO_BUSCA_PADRAO_M, RAIO_CONFIRMACAO_M } from '@/constants/proximidade';
+import { RAIO_CONFIRMACAO_M } from '@/constants/proximidade';
 import { getStatusColor, STATUS_ABERTOS } from '@/constants/status';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -48,7 +49,7 @@ import { useLocalizacao } from '@/hooks/use-localizacao';
 import { api } from '@/services/api';
 import { useProgresso } from '@/services/progresso';
 import { lerUltimaPosicao, ultimaPosicaoEmCache, type Ponto } from '@/services/ultima-posicao';
-import type { Categoria, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
+import type { AreaDoMapa, Categoria, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
 import { concluidoEm } from '@/utils/format';
 import {
   caixaDosPontos,
@@ -58,7 +59,14 @@ import {
   regiaoEmTorno,
   REGIAO_PADRAO,
 } from '@/utils/geo';
-import { agruparParaHeatmap, corDoPeso, raioDoPeso } from '@/utils/heatmap';
+import { agruparParaHeatmap, corDoPeso, raioDoPeso, type HeatCell } from '@/utils/heatmap';
+import {
+  caixaComFolga,
+  celulaDaCaixa,
+  rarear,
+  regiaoDentroDaCaixa,
+  type Caixa,
+} from '@/utils/rarear';
 
 type ItemProximo = {
   defeito: Defeito;
@@ -71,6 +79,8 @@ type ItemProximo = {
 const MOSTRAR_JOYSTICK = __DEV__ && Platform.OS === 'web';
 /** Quanto o mapa espera o GPS antes de abrir no enquadramento padrão. */
 const ESPERA_GPS_MS = 3000;
+/** Espera a câmera assentar antes de buscar a área (zoom com pinça dispara vários eventos). */
+const ESPERA_BUSCA_MS = 300;
 
 export default function MapaScreen() {
   const colors = useColors();
@@ -86,8 +96,12 @@ export default function MapaScreen() {
   const mapRef = useRef<MapSurfaceHandle>(null);
   const [defeitos, setDefeitos] = useState<Defeito[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
-  // Sem menu de filtros: o mapa mostra sempre as pendências no raio padrão.
-  const raio = RAIO_BUSCA_PADRAO_M;
+  // Contagem real por quadrante (o mapa de calor dos visitantes usa isto,
+  // não os pinos já cortados) e o lado do quadrante em graus.
+  const [celulas, setCelulas] = useState<AreaDoMapa['celulas']>([]);
+  const [celulaGraus, setCelulaGraus] = useState(0);
+  // Região visível atual; `null` até a câmera se mexer pela primeira vez.
+  const [regiao, setRegiao] = useState<Regiao | null>(null);
   const [seguindo, setSeguindo] = useState(true);
   // O mapa nativo ignora `seguir` antes de `onMapReady`; o efeito abaixo
   // depende disto para centralizar assim que ele estiver pronto.
@@ -147,19 +161,57 @@ export default function MapaScreen() {
     return mapa;
   }, [categorias]);
 
-  const carregarDefeitos = useCallback(async () => {
+  // A posição só entra na busca para liberar restritos por perto; ler por ref
+  // evita uma busca nova a cada atualização do GPS.
+  const posicaoRef = useRef(posicao);
+  posicaoRef.current = posicao;
+  const buscadaRef = useRef<{ caixa: Caixa; celula: number } | null>(null);
+  const buscaSeqRef = useRef(0);
+
+  /**
+   * Busca os chamados da área visível. Pula quando a tela ainda cabe na
+   * caixa da última busca e o zoom (tamanho do quadrante) não mudou.
+   */
+  const carregarArea = useCallback(async (r: Regiao, forcar = false) => {
+    const caixa = caixaComFolga(r);
+    const celula = celulaDaCaixa(caixa);
+    const anterior = buscadaRef.current;
+    if (
+      !forcar &&
+      anterior &&
+      anterior.celula === celula &&
+      regiaoDentroDaCaixa(r, anterior.caixa)
+    ) {
+      return;
+    }
+    const seq = ++buscaSeqRef.current;
     try {
-      setDefeitos(await api.listDefeitos());
+      const area = await api.defeitosNaArea(caixa, posicaoRef.current);
+      if (seq !== buscaSeqRef.current) return;
+      buscadaRef.current = { caixa, celula };
+      setDefeitos(area.defeitos);
+      setCelulas(area.celulas);
+      setCelulaGraus(area.celula_graus);
     } catch {
       // Sem rede o mapa apenas fica sem marcadores.
     }
   }, []);
 
+  const regiaoAtual = regiao ?? regiaoInicial;
+  const regiaoAtualRef = useRef(regiaoAtual);
+  regiaoAtualRef.current = regiaoAtual;
+
+  useEffect(() => {
+    if (!regiaoAtual) return;
+    const id = setTimeout(() => carregarArea(regiaoAtual), ESPERA_BUSCA_MS);
+    return () => clearTimeout(id);
+  }, [regiaoAtual, carregarArea]);
+
   // Recarrega ao voltar do formulário de novo chamado.
   useFocusEffect(
     useCallback(() => {
-      carregarDefeitos();
-    }, [carregarDefeitos]),
+      if (regiaoAtualRef.current) carregarArea(regiaoAtualRef.current, true);
+    }, [carregarArea]),
   );
 
   useEffect(() => {
@@ -233,7 +285,7 @@ export default function MapaScreen() {
     [defeitos],
   );
 
-  /** Chamados dentro do raio, mais perto primeiro. Sem GPS, cai na lista inteira. */
+  /** Chamados da área visível, mais perto primeiro (sem GPS, na ordem do backend). */
   const proximos = useMemo<ItemProximo[]>(() => {
     if (!posicao) {
       return filtrados.map((defeito) => ({
@@ -253,14 +305,17 @@ export default function MapaScreen() {
           emAlcance: distancia <= RAIO_CONFIRMACAO_M && STATUS_ABERTOS.includes(defeito.status),
         };
       })
-      .filter((item) => item.distancia <= raio)
       .sort((a, b) => a.distancia - b.distancia);
-  }, [filtrados, posicao, raio, iconePorCategoria]);
+  }, [filtrados, posicao, iconePorCategoria]);
 
-  /** O que está no mapa: a cidade inteira (visão do município) ou o raio ao redor. */
+  /**
+   * O que está no mapa: a área visível ou, na visão do município, a cidade
+   * inteira — que vem sem corte do backend e é rareada aqui pelo zoom atual.
+   */
   const visiveis = useMemo<ItemProximo[]>(() => {
     if (!visao) return proximos;
-    return visao.defeitos.map((defeito) => ({
+    const lista = regiaoAtual ? rarear(visao.defeitos, regiaoAtual) : visao.defeitos;
+    return lista.map((defeito) => ({
       defeito,
       distancia: posicao
         ? distanciaAte(defeito, posicao.latitude, posicao.longitude)
@@ -268,12 +323,25 @@ export default function MapaScreen() {
       icone: iconePorCategoria.get(defeito.categoria ?? defeito.categoria_nome ?? ''),
       emAlcance: false,
     }));
-  }, [visao, proximos, posicao, iconePorCategoria]);
+  }, [visao, proximos, posicao, iconePorCategoria, regiaoAtual]);
 
-  const celulasCalor = useMemo(
-    () => agruparParaHeatmap(visiveis.map((p) => p.defeito)),
-    [visiveis],
+  // Calor com a contagem real: na visão do município a lista já é completa;
+  // na navegação, os quadrantes do backend (os pinos vêm cortados).
+  const celulasCalor = useMemo<HeatCell[]>(
+    () =>
+      visao
+        ? agruparParaHeatmap(visao.defeitos)
+        : celulas.map((c) => ({
+            key: `area-${c.latitude.toFixed(5)}:${c.longitude.toFixed(5)}`,
+            latitude: c.latitude,
+            longitude: c.longitude,
+            peso: c.total,
+          })),
+    [visao, celulas],
   );
+  // Com o zoom afastado o quadrante cobre quilômetros; o círculo cresce junto
+  // para continuar visível (o raio base é pensado para zoom de bairro).
+  const escalaCalor = visao ? 1 : Math.max(1, (celulaGraus * 111000) / 500);
   const pesoMaximo = useMemo(
     () => celulasCalor.reduce((max, c) => Math.max(max, c.peso), 1),
     [celulasCalor],
@@ -284,40 +352,29 @@ export default function MapaScreen() {
 
   const circulos = useMemo<CirculoMapa[]>(() => {
     const lista: CirculoMapa[] = [];
-    // Na visão do município os raios ao redor da pessoa só poluem.
-    if (posicao && !visao) {
-      const centro = { latitude: posicao.latitude, longitude: posicao.longitude };
+    // Na visão do município o raio ao redor da pessoa só polui.
+    if (posicao && !visao && isAuthenticated) {
       lista.push({
-        key: 'raio-busca',
-        centro,
-        raio,
-        corPreenchimento: 'rgba(59,130,246,0.05)',
-        corBorda: 'rgba(59,130,246,0.35)',
-        larguraBorda: 1,
+        key: 'raio-confirmacao',
+        centro: { latitude: posicao.latitude, longitude: posicao.longitude },
+        raio: RAIO_CONFIRMACAO_M,
+        corPreenchimento: 'rgba(212,175,55,0.10)',
+        corBorda: '#D4AF37',
+        larguraBorda: 2,
       });
-      if (isAuthenticated) {
-        lista.push({
-          key: 'raio-confirmacao',
-          centro,
-          raio: RAIO_CONFIRMACAO_M,
-          corPreenchimento: 'rgba(212,175,55,0.10)',
-          corBorda: '#D4AF37',
-          larguraBorda: 2,
-        });
-      }
     }
     if (mostrarCalor) {
       for (const celula of celulasCalor) {
         lista.push({
           key: celula.key,
           centro: { latitude: celula.latitude, longitude: celula.longitude },
-          raio: raioDoPeso(celula.peso, pesoMaximo),
+          raio: raioDoPeso(celula.peso, pesoMaximo) * escalaCalor,
           corPreenchimento: corDoPeso(celula.peso, pesoMaximo),
         });
       }
     }
     return lista;
-  }, [posicao, raio, isAuthenticated, mostrarCalor, celulasCalor, pesoMaximo, visao]);
+  }, [posicao, isAuthenticated, mostrarCalor, celulasCalor, pesoMaximo, escalaCalor, visao]);
 
   const marcadores = useMemo<MarcadorMapa[]>(
     () =>
@@ -468,6 +525,7 @@ export default function MapaScreen() {
               }
             }}
             onArrastar={() => setSeguindo(false)}
+            onRegiaoMudou={setRegiao}
             onPronto={() => setMapaPronto(true)}
             escuro={theme === 'dark'}
           />

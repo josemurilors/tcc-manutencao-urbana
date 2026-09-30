@@ -41,6 +41,12 @@ STATUS_FECHADOS = {'atendido', 'encerrado', 'concluido', 'rejeitado'}
 FORA_DO_MUNICIPIO = 'Chamado fora do seu município de operação'
 SEM_MUNICIPIO = 'Operador sem município vinculado'
 
+# Rarefação do mapa (`area`): células por lado do retângulo visível, chamados
+# por célula e teto absoluto da resposta.
+AREA_GRADE = 8
+AREA_POR_CELULA = 4
+AREA_LIMITE = 400
+
 
 class DefeitoViewSet(viewsets.ModelViewSet):
     # `distinct=True` em todos os Count: apoios e sinalizações são joins
@@ -376,6 +382,96 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'mais_antigos': [d['id'] for d in mais_antigos],
             'mais_apoiados': [d['id'] for d in mais_apoiados if (d.get('total_apoios') or 0) > 0],
             'defeitos': dados,
+        })
+
+    @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
+    def area(self, request):
+        """
+        Chamados abertos dentro do retângulo visível do mapa
+        (?min_lat=&max_lat=&min_lng=&max_lng=), rareados conforme o zoom.
+
+        O retângulo é dividido numa grade de ~`AREA_GRADE` células por lado e
+        cada célula devolve no máximo `AREA_POR_CELULA` chamados (os mais
+        apoiados/urgentes primeiro): com zoom de rua sai tudo; afastando, cada
+        célula cobre mais chão e o total visível fica estável. A célula é uma
+        potência de 2 em graus, alinhada ao globo — arrastar o mapa no mesmo
+        zoom não embaralha quais pinos aparecem.
+
+        `celulas` traz a contagem real de cada célula (centro de massa), para
+        o mapa de calor não perder a densidade que o corte escondeu.
+        ?lat=&lng= (posição do usuário) libera os restritos que estão perto.
+        """
+        import math
+        from django.db import connection
+        try:
+            min_lat = float(request.query_params['min_lat'])
+            max_lat = float(request.query_params['max_lat'])
+            min_lng = float(request.query_params['min_lng'])
+            max_lng = float(request.query_params['max_lng'])
+        except (KeyError, ValueError):
+            return Response(
+                {'detail': 'Informe min_lat, max_lat, min_lng e max_lng.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            lat = float(request.query_params['lat'])
+            lng = float(request.query_params['lng'])
+        except (KeyError, ValueError):
+            lat = lng = None
+
+        vao = max(max_lat - min_lat, max_lng - min_lng, 1e-6)
+        celula = 2 ** round(math.log2(vao / AREA_GRADE))
+        user = request.user
+        autenticado = user.is_authenticated
+        params = {
+            'min_lat': min_lat, 'max_lat': max_lat, 'min_lng': min_lng, 'max_lng': max_lng,
+            'celula': celula, 'por_celula': AREA_POR_CELULA, 'limite': AREA_LIMITE,
+            'fechados': tuple(STATUS_FECHADOS),
+            'admin': bool(autenticado and user.admin),
+            'uid': str(user.id) if autenticado else None,
+            'lat': lat, 'lng': lng, 'raio': regras.RAIO_VISIBILIDADE_RESTRITA_M,
+        }
+        base = """
+            SELECT d.id, d.latitude, d.longitude, d.criado_em, d.prioridade,
+                   floor(d.latitude / %(celula)s) AS cy, floor(d.longitude / %(celula)s) AS cx
+            FROM defeitos d
+            WHERE d.latitude BETWEEN %(min_lat)s AND %(max_lat)s
+              AND d.longitude BETWEEN %(min_lng)s AND %(max_lng)s
+              AND d.status NOT IN %(fechados)s
+              AND (d.visibilidade = 'publica' OR %(admin)s OR d.usuario = %(uid)s::uuid
+                   OR (%(lat)s::float8 IS NOT NULL AND ST_DWithin(
+                       ST_MakePoint(d.longitude, d.latitude)::geography,
+                       ST_MakePoint(%(lng)s::float8, %(lat)s::float8)::geography, %(raio)s)))
+        """
+        with connection.cursor() as cur:
+            cur.execute(f"""
+                SELECT id FROM (
+                    SELECT b.id, row_number() OVER (
+                        PARTITION BY b.cy, b.cx
+                        ORDER BY coalesce(a.total, 0) DESC,
+                                 CASE b.prioridade WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1
+                                                   WHEN 'media' THEN 2 ELSE 3 END,
+                                 b.criado_em DESC, b.id
+                    ) AS rn
+                    FROM ({base}) b
+                    LEFT JOIN (SELECT defeito_id, count(*) AS total FROM apoios GROUP BY 1) a
+                           ON a.defeito_id = b.id
+                ) x WHERE rn <= %(por_celula)s LIMIT %(limite)s
+            """, params)
+            ids = [row[0] for row in cur.fetchall()]
+            cur.execute(f"""
+                SELECT avg(latitude), avg(longitude), count(*) FROM ({base}) b GROUP BY cy, cx
+            """, params)
+            celulas = [
+                {'latitude': la, 'longitude': lo, 'total': n} for la, lo, n in cur.fetchall()
+            ]
+
+        defeitos = self.queryset.filter(id__in=ids)
+        return Response({
+            'celula_graus': celula,
+            'total': sum(c['total'] for c in celulas),
+            'celulas': celulas,
+            'defeitos': DefeitoListSerializer(defeitos, many=True).data,
         })
 
     @action(detail=False, methods=['get'])

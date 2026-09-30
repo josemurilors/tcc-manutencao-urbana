@@ -84,16 +84,30 @@ function iconeUsuario(direcao: number | null) {
 function EventosDoMapa({
   onLongPress,
   onArrastar,
+  onRegiaoMudou,
 }: {
   onLongPress: (coordenada: LatLng) => void;
   onArrastar: () => void;
+  onRegiaoMudou?: (regiao: Regiao) => void;
 }) {
-  useMapEvents({
+  const mapa = useMapEvents({
     // Botão direito no desktop, toque longo no touch.
     contextmenu(e) {
       onLongPress({ latitude: e.latlng.lat, longitude: e.latlng.lng });
     },
     dragstart: onArrastar,
+    // `moveend` também dispara ao fim do zoom e das animações de câmera.
+    moveend() {
+      if (!onRegiaoMudou) return;
+      const b = mapa.getBounds();
+      const c = b.getCenter();
+      onRegiaoMudou({
+        latitude: c.lat,
+        longitude: c.lng,
+        latitudeDelta: b.getNorth() - b.getSouth(),
+        longitudeDelta: b.getEast() - b.getWest(),
+      });
+    },
   });
   return null;
 }
@@ -108,6 +122,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
     onLongPressMapa,
     onPressMarcador,
     onArrastar,
+    onRegiaoMudou,
     onPronto,
     direcao,
     escuro,
@@ -144,7 +159,11 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
         className={escuro ? 'tiles-escuro' : undefined}
         noWrap
       />
-      <EventosDoMapa onLongPress={onLongPressMapa} onArrastar={onArrastar} />
+      <EventosDoMapa
+        onLongPress={onLongPressMapa}
+        onArrastar={onArrastar}
+        onRegiaoMudou={onRegiaoMudou}
+      />
 
       {circulos.map((circulo) => (
         <Circle

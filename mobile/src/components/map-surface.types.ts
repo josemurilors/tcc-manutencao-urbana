@@ -64,6 +64,8 @@ export type MapSurfaceProps = {
   onPressMarcador: (key: string) => void;
   /** O usuário arrastou o mapa — a tela sai do modo "seguir". */
   onArrastar: () => void;
+  /** A câmera parou (arrasto, zoom ou animação): região visível agora. */
+  onRegiaoMudou?: (regiao: Regiao) => void;
   /**
    * O mapa nativo já aceita comandos de câmera. Chamadas a `seguir`/`animarPara`
    * antes disso são ignoradas pelo react-native-maps, então a tela usa este
