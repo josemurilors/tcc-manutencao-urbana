@@ -2,7 +2,7 @@
  * Painel de simulação de GPS — só em desenvolvimento, no web (desktop).
  *
  * - Joystick: arraste o botão; a direção vira a bússola e a deflexão a
- *   velocidade (até ~6 m/s, uma corrida). Soltar para.
+ *   velocidade (até ~15 m/s, um carro na cidade). Soltar para.
  * - Lat/Lng/Rumo: teleporta para a coordenada digitada apontando para o rumo.
  *   Os campos já vêm com `POSICAO_DEV_PADRAO`; "Ligar" parte dela.
  * - "GPS real": desliga a simulação e volta a ouvir o aparelho.
@@ -22,7 +22,7 @@ import { gpsSimulado, type EstadoSimulado } from './gps-simulado';
 const RAIO_JOYSTICK = 44;
 const RAIO_BOTAO = 18;
 /** Velocidade com o joystick no limite, em m/s. */
-const VELOCIDADE_MAX = 6;
+const VELOCIDADE_MAX = 15;
 const INTERVALO_MS = 100;
 
 /** Ponto de partida da simulação (lat, lng e rumo em graus). */

@@ -25,7 +25,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DefectSheet } from '@/components/defect-sheet';
@@ -47,9 +47,17 @@ import { GpsJoystick } from '@/dev/gps-joystick';
 import { useLocalizacao } from '@/hooks/use-localizacao';
 import { api } from '@/services/api';
 import { useProgresso } from '@/services/progresso';
+import { lerUltimaPosicao, ultimaPosicaoEmCache, type Ponto } from '@/services/ultima-posicao';
 import type { Categoria, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
 import { concluidoEm } from '@/utils/format';
-import { caixaDosPontos, distanciaAte, regiaoDaCaixa, REGIAO_PADRAO } from '@/utils/geo';
+import {
+  caixaDosPontos,
+  DELTA_NAVEGACAO,
+  distanciaAte,
+  regiaoDaCaixa,
+  regiaoEmTorno,
+  REGIAO_PADRAO,
+} from '@/utils/geo';
 import { agruparParaHeatmap, corDoPeso, raioDoPeso } from '@/utils/heatmap';
 
 type ItemProximo = {
@@ -61,6 +69,8 @@ type ItemProximo = {
 
 /** Joystick de GPS só no desktop em desenvolvimento (no celular há GPS de verdade). */
 const MOSTRAR_JOYSTICK = __DEV__ && Platform.OS === 'web';
+/** Quanto o mapa espera o GPS antes de abrir no enquadramento padrão. */
+const ESPERA_GPS_MS = 3000;
 
 export default function MapaScreen() {
   const colors = useColors();
@@ -92,8 +102,44 @@ export default function MapaScreen() {
   const progresso = useProgresso(isAuthenticated);
 
   // O mapa não é preso a município nenhum: qualquer cidade do país vale. Ele
-  // abre num enquadramento neutro e pula para o GPS assim que houver posição.
-  const regiaoInicial: Regiao = REGIAO_PADRAO;
+  // só é montado quando sabe onde o usuário está, para não nascer num
+  // enquadramento genérico e voar até ele: na posição do GPS ou, enquanto o
+  // GPS não responde, na última posição guardada. Sem nenhuma das duas
+  // (primeiro uso com GPS negado, com erro ou lento), cai em `REGIAO_PADRAO`
+  // e segue o GPS quando ele chegar.
+  const [ultima, setUltima] = useState<Ponto | null | undefined>(ultimaPosicaoEmCache);
+  useEffect(() => {
+    if (ultima !== undefined) return;
+    let cancelado = false;
+    lerUltimaPosicao().then((p) => {
+      if (!cancelado) setUltima(p);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [ultima]);
+  const [esperouGps, setEsperouGps] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setEsperouGps(true), ESPERA_GPS_MS);
+    return () => clearTimeout(id);
+  }, []);
+  const [regiaoInicial, setRegiaoInicial] = useState<Regiao | null>(null);
+  if (!regiaoInicial) {
+    const alvo = posicao ?? ultima;
+    if (alvo) {
+      setRegiaoInicial(regiaoEmTorno(alvo.latitude, alvo.longitude, DELTA_NAVEGACAO));
+    } else if (esperouGps || (ultima === null && (permitido === false || erroGps))) {
+      setRegiaoInicial(REGIAO_PADRAO);
+    }
+  }
+  // Foco pedido antes de o mapa existir (ex.: "Ver no mapa" chega enquanto o
+  // GPS ainda responde); aplicado quando o mapa ficar pronto.
+  const focoPendenteRef = useRef<Regiao | null>(null);
+  useEffect(() => {
+    if (!mapaPronto || !focoPendenteRef.current) return;
+    mapRef.current?.animarPara(focoPendenteRef.current);
+    focoPendenteRef.current = null;
+  }, [mapaPronto]);
 
   const iconePorCategoria = useMemo(() => {
     const mapa = new Map<string, string>();
@@ -158,12 +204,14 @@ export default function MapaScreen() {
         // ponto em vez de continuar seguindo o GPS.
         if (d.latitude != null && d.longitude != null) {
           setSeguindo(false);
-          mapRef.current?.animarPara({
+          const foco = {
             latitude: d.latitude,
             longitude: d.longitude,
             latitudeDelta: 0.005,
             longitudeDelta: 0.005,
-          });
+          };
+          if (mapRef.current) mapRef.current.animarPara(foco);
+          else focoPendenteRef.current = foco;
         }
       })
       .catch(() => {});
@@ -401,27 +449,36 @@ export default function MapaScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.bgPrimary, paddingTop: insets.top }]}>
       <View style={styles.mapaWrapper}>
-        <MapSurface
-          ref={mapRef}
-          regiaoInicial={regiaoInicial}
-          circulos={circulos}
-          marcadores={marcadores}
-          usuario={posicao}
-          direcao={bussola ?? posicao?.heading ?? null}
-          onLongPressMapa={(c) => {
-            if (isAuthenticated) abrirNovoChamado(c);
-          }}
-          onPressMarcador={(key) => {
-            const item = visiveis.find((p) => String(p.defeito.id) === key);
-            if (item) {
-              setSeguindo(false);
-              abrirDetalhe(item.defeito);
-            }
-          }}
-          onArrastar={() => setSeguindo(false)}
-          onPronto={() => setMapaPronto(true)}
-          escuro={theme === 'dark'}
-        />
+        {regiaoInicial ? (
+          <MapSurface
+            ref={mapRef}
+            regiaoInicial={regiaoInicial}
+            circulos={circulos}
+            marcadores={marcadores}
+            usuario={posicao}
+            direcao={bussola ?? posicao?.heading ?? null}
+            onLongPressMapa={(c) => {
+              if (isAuthenticated) abrirNovoChamado(c);
+            }}
+            onPressMarcador={(key) => {
+              const item = visiveis.find((p) => String(p.defeito.id) === key);
+              if (item) {
+                setSeguindo(false);
+                abrirDetalhe(item.defeito);
+              }
+            }}
+            onArrastar={() => setSeguindo(false)}
+            onPronto={() => setMapaPronto(true)}
+            escuro={theme === 'dark'}
+          />
+        ) : (
+          <View style={styles.esperandoGps}>
+            <ActivityIndicator color={colors.gold500} />
+            <Text style={[styles.esperandoGpsTexto, { color: colors.textMuted }]}>
+              Obtendo sua localização...
+            </Text>
+          </View>
+        )}
 
         {/* Só o erro de GPS aparece no topo: é a única forma de tentar de novo. */}
         {permitido === false || erroGps ? (
@@ -520,7 +577,21 @@ export default function MapaScreen() {
             />
           </Pressable>
           <Pressable
-            onPress={() => router.push('/ranking')}
+            onPress={() =>
+              // Com a visão do município aberta, o ranking já abre nessa cidade.
+              router.push(
+                visao
+                  ? {
+                      pathname: '/ranking',
+                      params: {
+                        municipio: visao.municipio.codigo,
+                        nome: visao.municipio.nome,
+                        uf: visao.municipio.uf_sigla,
+                      },
+                    }
+                  : '/ranking',
+              )
+            }
             accessibilityRole="button"
             accessibilityLabel="Ranking do município"
             style={[
@@ -625,6 +696,15 @@ const styles = StyleSheet.create({
   },
   mapaWrapper: {
     flex: 1,
+  },
+  esperandoGps: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing[2],
+  },
+  esperandoGpsTexto: {
+    fontSize: FontSize.sm,
   },
   // Os panes do Leaflet (web) usam z-index 400; sem isso os overlays somem.
   topo: {

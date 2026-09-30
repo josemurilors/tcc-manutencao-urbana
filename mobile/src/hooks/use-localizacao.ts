@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { gpsSimulado, type EstadoSimulado } from '@/dev/gps-simulado';
+import { salvarUltimaPosicao } from '@/services/ultima-posicao';
 
 export type Posicao = {
   latitude: number;
@@ -160,6 +161,13 @@ export function useLocalizacao(ativo = true): EstadoLocalizacao {
   }, [ativo, permitido]);
 
   const tentarNovamente = useCallback(() => setTentativa((t) => t + 1), []);
+
+  // Guarda a posição que as telas estão vendo, para o mapa abrir nela da
+  // próxima vez em vez de esperar o GPS.
+  const posicaoAtual = simulado.ativo ? simulado.posicao : posicao;
+  useEffect(() => {
+    if (posicaoAtual) salvarUltimaPosicao(posicaoAtual);
+  }, [posicaoAtual]);
 
   if (simulado.ativo) {
     return {

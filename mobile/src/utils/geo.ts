@@ -69,13 +69,19 @@ export function caixaDosPontos(pontos: { latitude: number; longitude: number }[]
   );
 }
 
-/** Enquadramento inicial antes do GPS responder (Criciúma/SC, como no web). */
+/** Enquadramento de fallback quando não há GPS nem chamados (São Paulo/SP). */
 export const REGIAO_PADRAO = {
-  latitude: -28.67,
-  longitude: -49.38,
+  latitude: -23.5505,
+  longitude: -46.6333,
   latitudeDelta: 0.2,
   longitudeDelta: 0.2,
 };
+
+/**
+ * Delta equivalente ao zoom de rua usado ao seguir o usuário (zoom 18 no
+ * Leaflet: 360 / 2^17 graus), para o mapa já nascer como fica ao navegar.
+ */
+export const DELTA_NAVEGACAO = 360 / 2 ** 17;
 
 export function regiaoEmTorno(lat: number, lng: number, delta = 0.08) {
   return { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta };

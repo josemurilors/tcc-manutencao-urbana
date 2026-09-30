@@ -115,13 +115,15 @@ export default function MeusChamadosScreen() {
             .filter(Boolean)
             .join(' · ');
           const apoios = totalApoios(d);
+          // "Ver no mapa" fica fora da área que abre os detalhes: no web, cada
+          // Pressable com role de botão vira <button>, e botão não pode conter botão.
           return (
-            <Pressable
-              key={d.id}
-              onPress={() => abrirDetalhe(d)}
-              accessibilityRole="button"
-              accessibilityLabel={`Detalhes do chamado ${d.titulo}`}>
-              <Card>
+            <Card key={d.id}>
+              <Pressable
+                onPress={() => abrirDetalhe(d)}
+                accessibilityRole="button"
+                accessibilityLabel={`Detalhes do chamado ${d.titulo}`}
+                style={styles.detalhes}>
                 <View style={styles.linhaTopo}>
                   <StatusBadge status={d.status} concluidoEm={concluidoEm(d)} />
                   <Text style={[styles.meta, { color: colors.textMuted }]}>
@@ -147,32 +149,32 @@ export default function MeusChamadosScreen() {
                     </Text>
                   </View>
                 ) : null}
+              </Pressable>
 
-                <View style={styles.rodape}>
-                  {apoios > 0 ? (
-                    <View style={styles.linha}>
-                      <Ionicons name="thumbs-up" size={12} color={colors.textMuted} />
-                      <Text style={[styles.meta, { color: colors.textMuted }]}>
-                        {apoios} {apoios === 1 ? 'apoio' : 'apoios'}
-                      </Text>
-                    </View>
-                  ) : (
-                    <View />
-                  )}
-                  <Pressable
-                    onPress={() => verNoMapa(d.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Ver no mapa"
-                    hitSlop={8}
-                    style={styles.verNoMapa}>
-                    <Ionicons name="map" size={14} color={colors.gold500} />
-                    <Text style={[styles.verNoMapaTexto, { color: colors.gold500 }]}>
-                      Ver no mapa
+              <View style={styles.rodape}>
+                {apoios > 0 ? (
+                  <View style={styles.linha}>
+                    <Ionicons name="thumbs-up" size={12} color={colors.textMuted} />
+                    <Text style={[styles.meta, { color: colors.textMuted }]}>
+                      {apoios} {apoios === 1 ? 'apoio' : 'apoios'}
                     </Text>
-                  </Pressable>
-                </View>
-              </Card>
-            </Pressable>
+                  </View>
+                ) : (
+                  <View />
+                )}
+                <Pressable
+                  onPress={() => verNoMapa(d.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver no mapa"
+                  hitSlop={8}
+                  style={styles.verNoMapa}>
+                  <Ionicons name="map" size={14} color={colors.gold500} />
+                  <Text style={[styles.verNoMapaTexto, { color: colors.gold500 }]}>
+                    Ver no mapa
+                  </Text>
+                </Pressable>
+              </View>
+            </Card>
           );
         })
       )}
@@ -194,6 +196,9 @@ export default function MeusChamadosScreen() {
 }
 
 const styles = StyleSheet.create({
+  detalhes: {
+    gap: Spacing[2],
+  },
   linhaTopo: {
     flexDirection: 'row',
     alignItems: 'center',

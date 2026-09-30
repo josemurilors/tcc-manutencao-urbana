@@ -8,6 +8,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -62,6 +63,8 @@ function normalizar(texto: string) {
 export default function RankingScreen() {
   const colors = useColors();
   const { user, isAuthenticated } = useAuth();
+  // Vindo do mapa com a visão do município aberta, começa nessa cidade.
+  const params = useLocalSearchParams<{ municipio?: string; nome?: string; uf?: string }>();
 
   const [dados, setDados] = useState<Ranking | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -70,7 +73,11 @@ export default function RankingScreen() {
   const [modo, setModo] = useState<Modo>('cidade');
   const [periodo, setPeriodo] = useState<PeriodoRanking>('tudo');
   // null = a cidade de onde o usuário está (GPS ou cadastro).
-  const [cidadeEscolhida, setCidadeEscolhida] = useState<Cidade | null>(null);
+  const [cidadeEscolhida, setCidadeEscolhida] = useState<Cidade | null>(() =>
+    params.municipio && params.nome && params.uf
+      ? { codigo: params.municipio, nome: params.nome, uf_sigla: params.uf }
+      : null,
+  );
 
   // Busca de cidade no próprio campo: a lista completa vem uma vez, o filtro é local.
   const [editando, setEditando] = useState(false);

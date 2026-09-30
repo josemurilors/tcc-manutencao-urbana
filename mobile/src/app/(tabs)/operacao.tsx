@@ -63,6 +63,7 @@ import {
   caixaDosPontos,
   distanciaAte,
   formatarDistancia,
+  haversineDistance,
   regiaoDaCaixa,
   REGIAO_PADRAO,
 } from '@/utils/geo';
@@ -75,6 +76,11 @@ const RAIOS_ROTA_M = [500, 1000, 2000, 5000, 0] as const;
 const RAIO_ROTA_PADRAO_M = 1000;
 /** Acima disso o 2-opt e o OSRM ficam lentos/recusam. */
 const MAX_PARADAS = 25;
+/**
+ * O operador só entra no enquadramento se estiver a até essa distância de algum
+ * chamado; mais longe (ex.: em outra cidade) o zoom abriria para cobrir as duas.
+ */
+const PERTO_PARA_ENQUADRAR_M = 5000;
 
 function rotuloRaio(raio: number) {
   if (raio === 0) return 'Todos';
@@ -119,7 +125,11 @@ export default function OperacaoScreen() {
   const [tracado, setTracado] = useState<LinhaMapa | null>(null);
   const [criandoRota, setCriandoRota] = useState(false);
 
-  const regiaoInicial: Regiao = REGIAO_PADRAO;
+  // Região em que o mapa nasce. Calculada uma vez, quando o mapa aparece (só
+  // depois da fila chegar), para ele já abrir nos chamados em vez de nascer em
+  // `REGIAO_PADRAO` e voar até eles. `enquadrado` diz se ela já cobre os
+  // chamados e dispensa o enquadramento animado.
+  const [inicial, setInicial] = useState<{ regiao: Regiao; enquadrado: boolean } | null>(null);
 
   const iconePorCategoria = useMemo(() => {
     const mapa = new Map<string, string>();
@@ -249,9 +259,21 @@ export default function OperacaoScreen() {
     }));
   }, [roteiro, paradasAtuais, lista, selecionado?.id, iconePorCategoria, modoSelecao, selecao]);
 
+  /** Os pontos a enquadrar, com a posição do operador só se ele estiver perto deles. */
+  function comPosicaoSePerto(pontos: { latitude: number; longitude: number }[]) {
+    if (!posicao) return pontos;
+    const perto =
+      pontos.length === 0 ||
+      pontos.some(
+        (p) =>
+          haversineDistance(p.latitude, p.longitude, posicao.latitude, posicao.longitude) <=
+          PERTO_PARA_ENQUADRAR_M,
+      );
+    return perto ? [...pontos, posicao] : pontos;
+  }
+
   function enquadrarPontos(pontos: { latitude: number; longitude: number }[]) {
-    const todos = posicao ? [...pontos, posicao] : pontos;
-    const caixa = caixaDosPontos(todos);
+    const caixa = caixaDosPontos(comPosicaoSePerto(pontos));
     if (!caixa) return false;
     mapRef.current?.animarPara(regiaoDaCaixa(caixa));
     return true;
@@ -264,14 +286,12 @@ export default function OperacaoScreen() {
 
   // Primeiro enquadramento: assim que mapa e dados existem.
   useEffect(() => {
-    if (!mapaPronto || enquadrouRef.current || defeitos.length === 0) return;
+    if (!mapaPronto || enquadrouRef.current || inicial?.enquadrado || defeitos.length === 0) return;
     enquadrouRef.current = true;
-    const pontos: { latitude: number; longitude: number }[] = lista.map((i) => i.defeito);
-    if (posicao) pontos.push(posicao);
-    const caixa = caixaDosPontos(pontos);
+    const caixa = caixaDosPontos(comPosicaoSePerto(lista.map((i) => i.defeito)));
     if (caixa) mapRef.current?.animarPara(regiaoDaCaixa(caixa));
     else if (posicao) mapRef.current?.seguir(posicao);
-  }, [mapaPronto, defeitos.length, lista, posicao]);
+  }, [mapaPronto, defeitos.length, lista, posicao, inicial]);
 
   function recentrar() {
     if (!posicao) {
@@ -482,6 +502,17 @@ export default function OperacaoScreen() {
   }
 
   const rodape = insets.bottom + Spacing[4];
+
+  const mapaVisivel = !bloqueio && !(carregando && defeitos.length === 0);
+  if (mapaVisivel && !inicial) {
+    const caixa = caixaDosPontos(comPosicaoSePerto(lista.map((i) => i.defeito)));
+    setInicial(
+      caixa
+        ? { regiao: regiaoDaCaixa(caixa), enquadrado: true }
+        : { regiao: REGIAO_PADRAO, enquadrado: false },
+    );
+  }
+  const regiaoInicial = inicial?.regiao ?? REGIAO_PADRAO;
 
   if (bloqueio || (carregando && defeitos.length === 0)) {
     return (
