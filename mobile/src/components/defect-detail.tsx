@@ -1,187 +1,199 @@
 /**
- * Casca do detalhe de chamado em bottom sheet: modal, puxador, cabeçalho com
- * status, descrição, fotos, histórico e metadados.
+ * Detalhe do chamado.
  *
- * As ações ficam de fora de propósito — o sheet do cidadão
- * (`defect-sheet.tsx`) e o do operador (`operacao-sheet.tsx`) mostram o mesmo
- * conteúdo, mas com botões completamente diferentes; cada um passa os seus
- * como `children`.
+ * `DefectDetailBody` é o conteúdo (cabeçalho com status, transparência —
+ * protocolo, órgão, prazo —, resposta da prefeitura, fotos de antes/depois e
+ * histórico real); `DefectDetail` o embrulha no bottom sheet usado pelo mapa,
+ * pela lista e pela operação. A página `/chamado/[id]` usa o corpo direto,
+ * em tela cheia.
+ *
+ * As ações ficam de fora de propósito — o cidadão (`defect-sheet.tsx`) e o
+ * operador (`operacao-sheet.tsx`) veem o mesmo conteúdo com botões
+ * completamente diferentes; cada um passa os seus como `children`.
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ImageViewer } from '@/components/ui/image-viewer';
-import { StatusBadge } from '@/components/ui/status-badge';
-import { Timeline } from '@/components/ui/timeline';
-import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { AndamentoChamado } from '@/components/chamado/andamento';
+import { FotosDoChamado } from '@/components/chamado/fotos';
+import { HistoricoChamado } from '@/components/chamado/historico';
+import { RespostaPublica } from '@/components/chamado/resposta-publica';
+import { StatusChamado } from '@/components/chamado/status-chamado';
+import { IconButton } from '@/components/ui/icon-button';
+import { AppText } from '@/components/ui/text';
+import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 import type { Defeito } from '@/types';
-import {
-  concluidoEm,
-  descreverSinalizacoes,
-  formatarData,
-  maskName,
-  parseImagensExtra,
-  totalApoios,
-} from '@/utils/format';
-import { getTimelineItems } from '@/utils/timeline';
+import type { ChamadoDetalhe } from '@/types/cidadao';
+import { descreverSinalizacoes, formatarData, totalApoios } from '@/utils/format';
+import type { VisaoTimeline } from '@/utils/timeline';
 
-type Props = {
+type BodyProps = {
   defeito: Defeito;
-  onClose: () => void;
   /** Como chamar os apoios no rodapé ("confirmações" no mapa, "apoios" na lista). */
   rotuloApoios?: 'apoios' | 'confirmacoes';
   /** Faixa opcional logo abaixo do cabeçalho (ex.: alerta de SLA do operador). */
   destaque?: React.ReactNode;
+  /** Bloco logo após o andamento (ex.: avaliação do autor na página do chamado). */
+  aposAndamento?: React.ReactNode;
+  /** Rótulos de status e histórico: do cidadão (padrão) ou da equipe. */
+  visao?: VisaoTimeline;
+  /** Botão de fechar no cabeçalho (só no sheet). */
+  onClose?: () => void;
   /** Barra de ações, específica de cada papel. */
   children?: React.ReactNode;
 };
 
-export function DefectDetail({ defeito, onClose, rotuloApoios, destaque, children }: Props) {
+export function DefectDetailBody({
+  defeito,
+  rotuloApoios,
+  destaque,
+  aposAndamento,
+  visao = 'cidadao',
+  onClose,
+  children,
+}: BodyProps) {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
-  const [imagemAberta, setImagemAberta] = useState<string | null>(null);
-
-  const imagensExtra = parseImagensExtra(defeito.imagens_extra);
+  const detalhe = defeito as ChamadoDetalhe;
   const apoios = totalApoios(defeito);
   const sinalizacoes = descreverSinalizacoes(defeito);
+  const categoria = defeito.categoria || defeito.categoria_nome;
+  const local = [
+    defeito.rua,
+    defeito.bairro,
+    defeito.municipio ? `${defeito.municipio.nome}/${defeito.municipio.uf_sigla}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const rotuloContagem =
+    rotuloApoios === 'confirmacoes'
+      ? apoios === 1
+        ? 'confirmação'
+        : 'confirmações'
+      : apoios === 1
+        ? 'apoio'
+        : 'apoios';
 
   return (
-    <>
-      <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable
-          style={[styles.backdrop, { backgroundColor: colors.overlay }]}
-          onPress={onClose}
-          accessibilityLabel="Fechar detalhes"
-        />
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: colors.bgSurface,
-              borderColor: colors.borderGold,
-              paddingBottom: insets.bottom + Spacing[4],
-            },
-          ]}>
-          <View style={styles.puxador}>
-            <View style={[styles.puxadorBarra, { backgroundColor: colors.borderHover }]} />
+    <View style={styles.corpo}>
+      <View style={styles.cabecalho}>
+        <View style={styles.cabecalhoTexto}>
+          <AppText variant="title" numberOfLines={2} accessibilityRole="header">
+            {defeito.titulo || categoria}
+          </AppText>
+          <View style={styles.linhaMeta}>
+            <StatusChamado status={defeito.status} visao={visao} />
+            {defeito.autor_nome ? (
+              <AppText variant="caption" tone="muted">
+                Aberto por {defeito.autor_nome}
+              </AppText>
+            ) : null}
           </View>
-
-          <ScrollView contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}>
-            <View style={styles.cabecalho}>
-              <View style={styles.cabecalhoTexto}>
-                <Text style={[styles.titulo, { color: colors.textPrimary }]} numberOfLines={2}>
-                  {defeito.titulo}
-                </Text>
-                <View style={styles.linhaMeta}>
-                  <StatusBadge status={defeito.status} concluidoEm={concluidoEm(defeito)} />
-                  <Text style={[styles.meta, { color: colors.textMuted }]}>
-                    {defeito.autor_nome || maskName(defeito.usuario?.nome)}
-                  </Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Fechar"
-                hitSlop={8}>
-                <Ionicons name="close" size={20} color={colors.textMuted} />
-              </Pressable>
-            </View>
-
-            {destaque}
-
-            {defeito.descricao ? (
-              <Text style={[styles.descricao, { color: colors.textSecondary }]}>
-                {defeito.descricao}
-              </Text>
-            ) : null}
-
-            {defeito.categoria || defeito.bairro ? (
-              <Text style={[styles.meta, { color: colors.textMuted }]}>
-                {[
-                  defeito.categoria,
-                  defeito.rua,
-                  defeito.bairro,
-                  defeito.municipio
-                    ? `${defeito.municipio.nome}/${defeito.municipio.uf_sigla}`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </Text>
-            ) : null}
-
-            {defeito.imagem_thumbnail ? (
-              <Pressable onPress={() => setImagemAberta(defeito.imagem_thumbnail!)}>
-                <Image
-                  source={{ uri: defeito.imagem_thumbnail }}
-                  style={styles.imagem}
-                  contentFit="cover"
-                  transition={150}
-                />
-              </Pressable>
-            ) : null}
-
-            {imagensExtra.map((url) => (
-              <Pressable key={url} onPress={() => setImagemAberta(url)}>
-                <Image
-                  source={{ uri: url }}
-                  style={styles.imagem}
-                  contentFit="cover"
-                  transition={150}
-                />
-              </Pressable>
-            ))}
-
-            <Text style={[styles.secao, { color: colors.textMuted }]}>Histórico</Text>
-            <Timeline items={getTimelineItems(defeito)} />
-
-            <View style={styles.rodapeMeta}>
-              <Text style={[styles.meta, { color: colors.textMuted }]}>
-                {formatarData(defeito.criado_em)}
-              </Text>
-              {apoios > 0 ? (
-                <View style={styles.apoios}>
-                  <Ionicons
-                    name={rotuloApoios === 'confirmacoes' ? 'checkmark-circle' : 'thumbs-up'}
-                    size={12}
-                    color={colors.textMuted}
-                  />
-                  <Text style={[styles.meta, { color: colors.textMuted }]}>
-                    {apoios}
-                    {rotuloApoios === 'confirmacoes'
-                      ? apoios === 1
-                        ? ' confirmação'
-                        : ' confirmações'
-                      : rotuloApoios === 'apoios'
-                        ? apoios === 1
-                          ? ' apoio'
-                          : ' apoios'
-                        : ''}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-
-            {sinalizacoes ? (
-              <View style={styles.apoios}>
-                <Ionicons name="flag" size={12} color={colors.warning} />
-                <Text style={[styles.meta, { color: colors.textMuted }]}>{sinalizacoes}</Text>
-              </View>
-            ) : null}
-
-            {children ? <View style={detailStyles.acoes}>{children}</View> : null}
-          </ScrollView>
         </View>
-      </Modal>
+        {onClose ? <IconButton icon="close" accessibilityLabel="Fechar detalhes" onPress={onClose} /> : null}
+      </View>
 
-      <ImageViewer uri={imagemAberta} onClose={() => setImagemAberta(null)} />
-    </>
+      {destaque}
+
+      <AndamentoChamado defeito={defeito} />
+
+      {aposAndamento}
+
+      <RespostaPublica
+        texto={defeito.resposta_publica}
+        orgao={defeito.secretaria_nome || defeito.secretaria_responsavel}
+      />
+
+      {local || categoria ? (
+        <View style={styles.linha} accessible accessibilityLabel={`Local: ${[categoria, local].filter(Boolean).join(', ')}`}>
+          <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+          <AppText variant="bodySm" tone="secondary" style={styles.flex}>
+            {[categoria, local].filter(Boolean).join(' · ')}
+          </AppText>
+        </View>
+      ) : null}
+
+      {defeito.descricao ? (
+        <AppText variant="body" tone="secondary">
+          {defeito.descricao}
+        </AppText>
+      ) : null}
+
+      <FotosDoChamado defeito={detalhe} />
+
+      <AppText variant="label" tone="muted" style={styles.secao} accessibilityRole="header">
+        Histórico
+      </AppText>
+      <HistoricoChamado defeito={defeito} visao={visao} />
+
+      <View style={styles.rodapeMeta}>
+        <AppText variant="caption" tone="muted">
+          Aberto em {formatarData(defeito.criado_em)}
+        </AppText>
+        {apoios > 0 ? (
+          <View style={styles.linha}>
+            <Ionicons
+              name={rotuloApoios === 'confirmacoes' ? 'checkmark-circle' : 'people'}
+              size={14}
+              color={colors.textMuted}
+            />
+            <AppText variant="caption" tone="muted">
+              {apoios} {rotuloContagem}
+            </AppText>
+          </View>
+        ) : null}
+      </View>
+
+      {sinalizacoes ? (
+        <View style={styles.linha}>
+          <Ionicons name="flag" size={14} color={colors.warning} />
+          <AppText variant="caption" tone="muted">
+            {sinalizacoes}
+          </AppText>
+        </View>
+      ) : null}
+
+      {children ? <View style={detailStyles.acoes}>{children}</View> : null}
+    </View>
+  );
+}
+
+type Props = Omit<BodyProps, 'onClose' | 'aposAndamento'> & {
+  onClose: () => void;
+};
+
+export function DefectDetail({ onClose, ...props }: Props) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable
+        style={[styles.backdrop, { backgroundColor: colors.overlay }]}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Fechar detalhes"
+      />
+      <View
+        style={[
+          styles.sheet,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.borderGold,
+            paddingBottom: insets.bottom + Spacing[4],
+          },
+        ]}>
+        <View style={styles.puxador}>
+          <View style={[styles.puxadorBarra, { backgroundColor: colors.borderHover }]} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}>
+          <DefectDetailBody {...props} onClose={onClose} />
+        </ScrollView>
+      </View>
+    </Modal>
   );
 }
 
@@ -210,10 +222,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: '85%',
+    maxHeight: '88%',
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: 1,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
   },
   puxador: {
     alignItems: 'center',
@@ -226,7 +240,13 @@ const styles = StyleSheet.create({
   },
   conteudo: {
     padding: Spacing[5],
+    paddingTop: Spacing[3],
+  },
+  corpo: {
     gap: Spacing[3],
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   cabecalho: {
     flexDirection: 'row',
@@ -237,31 +257,21 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing[2],
   },
-  titulo: {
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.semibold,
-  },
   linhaMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[2],
     flexWrap: 'wrap',
   },
-  meta: {
-    fontSize: FontSize.xs,
+  linha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[1.5],
   },
-  descricao: {
-    fontSize: FontSize.sm,
-    lineHeight: 20,
-  },
-  imagem: {
-    width: '100%',
-    height: 160,
-    borderRadius: Radius.md,
+  flex: {
+    flex: 1,
   },
   secao: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginTop: Spacing[2],
@@ -269,11 +279,7 @@ const styles = StyleSheet.create({
   rodapeMeta: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: Spacing[3],
-  },
-  apoios: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[1],
   },
 });
