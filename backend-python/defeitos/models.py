@@ -1,18 +1,34 @@
 import uuid
 from django.contrib.gis.db import models
 from django.contrib.gis.geos import Point
-from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connection
+from django.utils import timezone
 from users.models import User
 
 
+def gerar_protocolo(quando=None):
+    """Próximo protocolo `AAAA-NNNNNN` (sequência global `defeitos_protocolo_seq`)."""
+    ano = timezone.localtime(quando or timezone.now()).year
+    with connection.cursor() as cur:
+        cur.execute("SELECT nextval('defeitos_protocolo_seq')")
+        numero = cur.fetchone()[0]
+    return f'{ano}-{numero:06d}'
+
+
+class DefeitoQuerySet(models.QuerySet):
+    def ativos(self):
+        """Sem os removidos (soft delete); é o que toda listagem deve usar."""
+        return self.filter(removido_em__isnull=True)
+
+
 class Defeito(models.Model):
+    # Status canônicos (contrato v3, seção 1). Transições e rótulos em `fluxo.py`.
     STATUS_CHOICES = [
         ('pendente', 'Pendente'),
-        ('em_andamento', 'Em Andamento'),
-        ('vinculado_sem_resposta', 'Vinculado sem resposta'),
-        ('vinculado_com_resposta', 'Vinculado com resposta'),
-        ('atendido', 'Atendido'),
-        ('encerrado', 'Encerrado'),
+        ('em_analise', 'Em análise'),
+        ('agendado', 'Agendado'),
+        ('em_andamento', 'Em andamento'),
         ('concluido', 'Concluído'),
         ('rejeitado', 'Rejeitado'),
     ]
@@ -70,6 +86,41 @@ class Defeito(models.Model):
     criado_em = models.DateTimeField(db_column='criado_em')
     atualizado_em = models.DateTimeField(db_column='atualizado_em')
 
+    # --- v3 (contrato, seção 2) ---
+    # Gerado no primeiro save; o cidadão e a ouvidoria se referem ao chamado por ele.
+    protocolo = models.CharField(max_length=20, unique=True, null=True, blank=True, editable=False)
+    # Inteiro e não FK: `categoria` (o nome, texto) já ocupa o nome do campo.
+    categoria_id = models.IntegerField(null=True, blank=True, db_column='categoria_id')
+    secretaria = models.ForeignKey(
+        'gestao.Secretaria', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='defeitos', db_column='secretaria_id',
+    )
+    equipe = models.ForeignKey(
+        'gestao.Equipe', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='defeitos', db_column='equipe_id',
+    )
+    # Gravados só por `fluxo.py`.
+    triado_em = models.DateTimeField(null=True, blank=True)
+    atribuido_em = models.DateTimeField(null=True, blank=True)
+    iniciado_em = models.DateTimeField(null=True, blank=True)
+    resolvido_em = models.DateTimeField(null=True, blank=True)
+    fechado_em = models.DateTimeField(null=True, blank=True)
+    prazo_em = models.DateTimeField(null=True, blank=True)
+    reaberturas = models.IntegerField(default=0)
+    resposta_publica = models.TextField(blank=True, default='')
+    motivo_rejeicao = models.TextField(blank=True, default='')
+    duplicado_de = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='duplicados', db_column='duplicado_de',
+    )
+    avaliacao_nota = models.SmallIntegerField(null=True, blank=True)
+    avaliacao_comentario = models.TextField(blank=True, default='')
+    avaliado_em = models.DateTimeField(null=True, blank=True)
+    removido_em = models.DateTimeField(null=True, blank=True)
+    removido_motivo = models.TextField(blank=True, default='')
+
+    objects = DefeitoQuerySet.as_manager()
+
     class Meta:
         db_table = 'defeitos'
         managed = False
@@ -78,7 +129,12 @@ class Defeito(models.Model):
         ordering = ['-criado_em']
 
     def __str__(self):
-        return self.titulo
+        return self.protocolo or self.titulo
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and not self.protocolo:
+            self.protocolo = gerar_protocolo(self.criado_em)
+        super().save(*args, **kwargs)
 
 
 class Apoio(models.Model):
@@ -143,9 +199,9 @@ class Sinalizacao(models.Model):
 
 class Strike(models.Model):
     """
-    Marca contra quem reportou algo que a comunidade apagou como "nunca
-    existiu". O chamado some do banco; fica só o autor, o título (para auditoria)
-    e a data — strikes expiram (ver `regras.STRIKE_VALIDADE_DIAS`).
+    Marca contra quem reportou algo que a comunidade removeu como "nunca
+    existiu". O chamado sai das listagens (soft delete); o strike guarda o
+    autor, o título e a data — strikes expiram (ver `regras.STRIKE_VALIDADE_DIAS`).
     """
     id = models.AutoField(primary_key=True)
     usuario = models.ForeignKey(
@@ -163,3 +219,81 @@ class Strike(models.Model):
 
     def __str__(self):
         return f'{self.usuario_id} @ {self.criado_em:%Y-%m-%d}'
+
+
+class DefeitoEvento(models.Model):
+    """
+    Histórico do chamado (contrato v3): toda mudança passa por
+    `fluxo.registrar_evento`. `publico=False` (ex.: nota interna) só a equipe
+    do município vê. `papel` é o do autor no momento do evento.
+    """
+    TIPOS = (
+        'criado', 'status', 'atribuido', 'resposta_publica', 'nota_interna',
+        'apoio', 'sinalizacao', 'anexo', 'avaliacao', 'reaberto', 'prioridade',
+        'sla', 'removido', 'moderacao',
+    )
+
+    id = models.BigAutoField(primary_key=True)
+    defeito = models.ForeignKey(
+        Defeito, on_delete=models.CASCADE, related_name='eventos', db_column='defeito_id',
+    )
+    tipo = models.TextField()
+    de_status = models.TextField(null=True, blank=True)
+    para_status = models.TextField(null=True, blank=True)
+    autor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='autor_id',
+    )
+    papel = models.TextField(blank=True, default='')
+    publico = models.BooleanField(default=True)
+    texto = models.TextField(blank=True, default='')
+    dados = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    criado_em = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'defeito_eventos'
+        managed = False
+        ordering = ['criado_em', 'id']
+
+    def __str__(self):
+        return f'{self.defeito_id} {self.tipo} @ {self.criado_em:%Y-%m-%d %H:%M}'
+
+
+class DefeitoAnexo(models.Model):
+    """Foto extra do chamado: do cidadão, ou evidência de antes/depois da equipe."""
+    TIPOS = ('cidadao', 'antes', 'depois')
+
+    id = models.BigAutoField(primary_key=True)
+    defeito = models.ForeignKey(
+        Defeito, on_delete=models.CASCADE, related_name='anexos', db_column='defeito_id',
+    )
+    tipo = models.TextField()
+    imagem = models.BinaryField()
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    autor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='autor_id',
+    )
+    criado_em = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'defeito_anexos'
+        managed = False
+        ordering = ['criado_em', 'id']
+
+
+class RespostaPadrao(models.Model):
+    """Texto pronto que a equipe usa na resposta pública (por município/categoria)."""
+    id = models.AutoField(primary_key=True)
+    municipio_id = models.CharField(max_length=20)
+    titulo = models.TextField()
+    texto = models.TextField()
+    categoria_id = models.IntegerField(null=True, blank=True, db_column='categoria_id')
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'respostas_padrao'
+        managed = False
+        ordering = ['titulo']

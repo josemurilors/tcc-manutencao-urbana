@@ -13,7 +13,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { DefectDetail, detailStyles } from '@/components/defect-detail';
 import { Button } from '@/components/ui/button';
-import { STATUS_FECHADOS } from '@/constants/status';
+import { statusAberto, statusFechado } from '@/constants/status';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
@@ -30,8 +30,6 @@ type Props = {
   onReplace: (defeito: Defeito) => void;
 };
 
-const STATUS_VINCULADOS = ['vinculado_sem_resposta', 'vinculado_com_resposta'];
-
 export function OperacaoSheet({ defeito, onClose, onPatch, onReplace }: Props) {
   const colors = useColors();
   const addToast = useToast();
@@ -41,14 +39,13 @@ export function OperacaoSheet({ defeito, onClose, onPatch, onReplace }: Props) {
 
   if (!defeito) return null;
 
-  const fechado = STATUS_FECHADOS.includes(defeito.status);
+  const fechado = statusFechado(defeito.status);
   const temAtendente = !!defeito.atendente_id;
   const souAtendente = temAtendente && String(defeito.atendente_id) === String(user?.id);
-  const vinculado = STATUS_VINCULADOS.includes(defeito.status);
 
   const podeAtender = !temAtendente && !fechado;
   // Só quem assumiu avança o chamado; outro operador apenas acompanha.
-  const podeAvancar = souAtendente && vinculado;
+  const podeAvancar = souAtendente && statusAberto(defeito.status);
   const slaVencido = !!defeito.sla_vencido && !fechado;
   const sinalizacoes = !fechado ? descreverSinalizacoes(defeito) : null;
 
@@ -69,16 +66,7 @@ export function OperacaoSheet({ defeito, onClose, onPatch, onReplace }: Props) {
     return comAcao('atender', async () => {
       await api.atenderDefeito(id);
       addToast('Chamado assumido!');
-      onPatch(id, { status: 'vinculado_sem_resposta', atendente_id: user?.id ?? null });
-    });
-  }
-
-  function handleResponder() {
-    const id = defeito!.id;
-    return comAcao('responder', async () => {
-      await api.updateDefeito(id, { status: 'vinculado_com_resposta' });
-      addToast('Resposta registrada!');
-      onPatch(id, { status: 'vinculado_com_resposta' });
+      onPatch(id, { status: 'em_andamento', atendente_id: user?.id ?? null, tem_atendente: true });
     });
   }
 
@@ -87,7 +75,7 @@ export function OperacaoSheet({ defeito, onClose, onPatch, onReplace }: Props) {
     return comAcao('finalizar', async () => {
       await api.finalizarDefeito(id);
       addToast('Chamado finalizado!');
-      onPatch(id, { status: 'atendido', atendido_em: new Date().toISOString() });
+      onPatch(id, { status: 'concluido', atendido_em: new Date().toISOString() });
     });
   }
 
@@ -166,26 +154,14 @@ export function OperacaoSheet({ defeito, onClose, onPatch, onReplace }: Props) {
       ) : null}
 
       {podeAvancar ? (
-        <>
-          {defeito.status === 'vinculado_sem_resposta' ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onPress={handleResponder}
-              loading={acaoEmCurso === 'responder'}
-              icon={<Ionicons name="chatbox-ellipses" size={14} color={colors.textPrimary} />}>
-              Responder
-            </Button>
-          ) : null}
-          <Button
-            variant="danger"
-            size="sm"
-            onPress={handleFinalizar}
-            loading={acaoEmCurso === 'finalizar'}
-            icon={<Ionicons name="checkmark-done" size={14} color={colors.error} />}>
-            Finalizar
-          </Button>
-        </>
+        <Button
+          variant="danger"
+          size="sm"
+          onPress={handleFinalizar}
+          loading={acaoEmCurso === 'finalizar'}
+          icon={<Ionicons name="checkmark-done" size={14} color={colors.error} />}>
+          Finalizar
+        </Button>
       ) : null}
 
       {!fechado ? (

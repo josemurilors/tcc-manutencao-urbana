@@ -118,7 +118,7 @@ export default function ChamadosScreen() {
     const filtrados = defeitos.filter((d) => {
       if (filtro === 'pendentes') return STATUS_ABERTOS.includes(d.status);
       if (filtro === 'atendidos') return STATUS_FECHADOS.includes(d.status);
-      if (filtro === 'vinculados') return d.atendente_id != null;
+      if (filtro === 'vinculados') return !!d.tem_atendente || d.atendente_id != null;
       if (filtro === 'meus') return meusIds.has(d.id);
       return true;
     });
@@ -367,7 +367,7 @@ function ChamadoCard({
         </Text>
         <StatusBadge status={defeito.status} concluidoEm={concluidoEm(defeito)} />
         <Text style={[styles.cardMeta, { color: colors.textMuted }]} numberOfLines={1}>
-          {[defeito.categoria, defeito.bairro, maskName(defeito.usuario?.nome)]
+          {[defeito.categoria, defeito.bairro, defeito.autor_nome || maskName(defeito.usuario?.nome)]
             .filter(Boolean)
             .join(' · ')}
         </Text>

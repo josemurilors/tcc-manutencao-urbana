@@ -1,3 +1,7 @@
+import base64
+import json
+
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status, filters
@@ -5,26 +9,27 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db.models import Count, Q
-from .models import Defeito, Apoio, Sinalizacao
-from . import gamificacao, regras
+from core import auditoria, permissoes
+from .models import Defeito, Apoio, Sinalizacao, DefeitoAnexo, DefeitoEvento
+from . import fluxo, gamificacao, regras, sla
+from .fluxo import TransicaoInvalida, TransicaoNaoPermitida
 from .serializers import (
     municipio_do_ponto,
-    DefeitoListSerializer, DefeitoDetailSerializer,
-    DefeitoCreateSerializer, ApoioSerializer,
+    DefeitoListSerializer, DefeitoDetailSerializer, DefeitoEventoSerializer,
+    DefeitoCreateSerializer, DefeitoUpdateSerializer,
 )
-from users.models import User
+
+# Operar (assumir, mudar status, gerar OS) é restrito ao município a que o
+# operador está vinculado — sem exceção: todo operador, inclusive o super
+# admin, opera numa única cidade (`permissoes.pode_operar`). Como cidadão, o
+# mesmo usuário continua livre para reportar/apoiar onde quiser.
 
 
-def _pode_operar(user, defeito):
-    """
-    Operar (assumir, mudar status, gerar OS) é restrito ao município a que o
-    operador está vinculado — sem exceção: todo operador, inclusive o super
-    admin, opera numa única cidade. Como cidadão, o mesmo usuário continua
-    livre para reportar/apoiar onde quiser.
-    """
-    if not user.is_authenticated or not user.admin:
-        return False
-    return bool(user.municipio_id) and defeito.municipio_id == user.municipio_id
+def _negado(user):
+    return Response(
+        {'error': FORA_DO_MUNICIPIO if permissoes.eh_equipe(user) else 'Permissao negada'},
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 
 def _municipio_por_codigo(codigo):
@@ -37,7 +42,7 @@ def _municipio_por_codigo(codigo):
     return {'codigo': str(row[0]), 'nome': row[1], 'uf_sigla': row[2]}
 
 
-STATUS_FECHADOS = {'atendido', 'encerrado', 'concluido', 'rejeitado'}
+STATUS_FECHADOS = fluxo.STATUS_FECHADOS
 FORA_DO_MUNICIPIO = 'Chamado fora do seu município de operação'
 SEM_MUNICIPIO = 'Operador sem município vinculado'
 
@@ -47,12 +52,25 @@ AREA_GRADE = 8
 AREA_POR_CELULA = 4
 AREA_LIMITE = 400
 
+# Fotos extras por chamado (anexar): cada uma vai inteira em `defeito_anexos`
+# e a miniatura em `imagens_extra`; sem teto, a linha incharia sem limite.
+MAX_ANEXOS = 10
+
+# Edição do chamado (PATCH): o autor só corrige a descrição enquanto ninguém
+# triou; a equipe ajusta os dados de triagem. Status só pela action `status`.
+CAMPOS_EDITAVEIS_AUTOR = {'descricao'}
+CAMPOS_EDITAVEIS_EQUIPE = {'titulo', 'descricao', 'rua', 'bairro', 'prioridade', 'previsao_conclusao'}
+
+# Ações de listagem: não carregam as colunas BYTEA (foto e foto de resolução).
+ACOES_LISTAGEM = ('list', 'meus', 'apoiados', 'operacao', 'municipio', 'area')
+
 
 class DefeitoViewSet(viewsets.ModelViewSet):
     # `distinct=True` em todos os Count: apoios e sinalizações são joins
     # independentes e sem isso um multiplicaria a contagem do outro.
-    queryset = Defeito.objects.select_related(
-        'usuario',
+    # Removidos (soft delete) não existem para a API: nem listagem nem detalhe.
+    queryset = Defeito.objects.ativos().select_related(
+        'usuario', 'secretaria',
     ).annotate(
         total_apoios=Count('apoios', distinct=True),
         total_resolvido=Count(
@@ -78,11 +96,13 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         # ficam fora das listagens sem GPS — só o autor e operadores os veem
         # aqui. A visão do mapa (`municipio`) libera os que estão perto.
         qs = self.queryset
+        if self.action in ACOES_LISTAGEM:
+            qs = qs.defer('imagem_thumbnail', 'foto_resolucao')
         if self.action in ('list', 'apoiados'):
             user = self.request.user
             if not user.is_authenticated:
                 qs = qs.filter(visibilidade=Defeito.VISIBILIDADE_PUBLICA)
-            elif not user.admin:
+            elif not permissoes.eh_equipe(user):
                 qs = qs.filter(Q(visibilidade=Defeito.VISIBILIDADE_PUBLICA) | Q(usuario=user))
         return qs
 
@@ -91,9 +111,17 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             return DefeitoListSerializer
         if self.action == 'retrieve':
             return DefeitoDetailSerializer
-        if self.action in ('create', 'update', 'partial_update'):
+        if self.action == 'create':
             return DefeitoCreateSerializer
+        if self.action in ('update', 'partial_update'):
+            return DefeitoUpdateSerializer
         return DefeitoDetailSerializer
+
+    def _lista(self, defeitos):
+        return DefeitoListSerializer(defeitos, many=True, context=self.get_serializer_context()).data
+
+    def _detalhe(self, defeito):
+        return DefeitoDetailSerializer(defeito, context=self.get_serializer_context()).data
 
     def get_permissions(self):
         if self.action in ('create', 'apoiar', 'meus', 'apoiados', 'apoiei', 'atender', 'status',
@@ -141,19 +169,32 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             result = process_image(self.request.FILES['imagem'].read())
             webp = result['webp_bytes']
 
-        from services.ia_client import routing
-        categoria = self.request.data.get('categoria', '')
-        rota = routing(categoria) if categoria else {}
+        # Em qual cidade o ponto caiu — gravado no chamado, não no usuário. É
+        # a cidade que decide o roteamento (a prefeitura pode ter regra própria).
+        dados = serializer.validated_data
+        lat, lng = dados.get('latitude'), dados.get('longitude')
+        municipio = municipio_do_ponto(lat, lng) if lat and lng else None
+        municipio_id = municipio['codigo'] if municipio else None
+        regra = sla.regra_para(dados.get('categoria', ''), municipio_id)
 
-        serializer.save(
-            usuario=self.request.user,
-            criado_em=timezone.now(),
-            atualizado_em=timezone.now(),
-            visibilidade=regras.visibilidade_inicial(self.request.user),
-            imagem_thumbnail=webp,
-            secretaria_responsavel=rota.get('secretaria', ''),
-            prazo_sla_dias=rota.get('prazo_sla_dias', 0),
-        )
+        agora = timezone.now()
+        with transaction.atomic():
+            defeito = serializer.save(
+                usuario=self.request.user,
+                criado_em=agora,
+                atualizado_em=agora,
+                status='pendente',
+                municipio_id=municipio_id,
+                visibilidade=regras.visibilidade_inicial(self.request.user),
+                imagem_thumbnail=webp,
+                categoria_id=regra['categoria_id'],
+                prioridade=regra['prioridade'],
+                secretaria_id=regra['secretaria_id'],
+                secretaria_responsavel=regra['secretaria_nome'],
+                prazo_sla_dias=regra['prazo_sla_dias'],
+                prazo_em=sla.calcular_prazo(agora, regra['prazo_sla_dias']),
+            )
+            fluxo.registrar_evento(defeito, 'criado', self.request.user, para_status='pendente')
 
     @action(detail=True, methods=['post'])
     def apoiar(self, request, pk=None):
@@ -204,6 +245,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
         resultado = None
         if meu_tipo is not None:
+            # Interno: insumo de moderação, não aparece na linha do tempo pública.
+            fluxo.registrar_evento(
+                defeito, 'sinalizacao', request.user, publico=False, dados={'tipo': meu_tipo},
+            )
             resultado = regras.aplicar_sinalizacao(defeito, request.user, meu_tipo)
 
         if resultado == regras.RESULTADO_INEXISTENTE:
@@ -220,7 +265,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'tipo': meu_tipo,
             'sinalizacoes': regras.contar_sinalizacoes(defeito),
             'resultado': resultado,
-            'defeito': DefeitoDetailSerializer(atualizado).data,
+            'defeito': self._detalhe(atualizado),
         })
 
     @action(detail=False, methods=['get'])
@@ -231,48 +276,154 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['patch'])
     def status(self, request, pk=None):
+        """
+        Muda o status pelo `fluxo` (transições, timestamps, histórico e aviso
+        ao cidadão). Aceita `resposta_publica`, `texto`, `motivo` e
+        `duplicado_de` (rejeição) e `foto_resolucao` (evidência do serviço).
+        """
         defeito = self.get_object()
-        e_atendente = bool(defeito.atendente_id) and defeito.atendente == request.user
-        if not (e_atendente or _pode_operar(request.user, defeito)):
-            return Response(
-                {'error': FORA_DO_MUNICIPIO if request.user.admin else 'Permissao negada'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        novo_status = request.data.get('status')
-        if novo_status not in dict(Defeito.STATUS_CHOICES):
+        if not permissoes.pode_operar(request.user, defeito):
+            return _negado(request.user)
+        novo_status = fluxo.normalizar_status(request.data.get('status'))
+        if novo_status not in fluxo.TRANSICOES:
             return Response(
                 {'error': 'Invalid status'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        resolvidos = {'atendido', 'encerrado', 'concluido'}
         # Foto de resolução é opcional: se vier, fica guardada como registro
         # do serviço feito; sem ela o chamado é finalizado do mesmo jeito.
+        foto = None
         arquivo = request.FILES.get('foto_resolucao')
         if arquivo is not None:
             from services.image_processor import process_image
             try:
-                result = process_image(arquivo.read())
-                defeito.foto_resolucao = result['webp_bytes']
+                foto = process_image(arquivo.read())['webp_bytes']
             except Exception:
                 return Response(
                     {'error': 'Imagem de resolucao invalida'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        defeito.status = novo_status
-        if novo_status in resolvidos and not defeito.atendido_em:
-            defeito.atendido_em = timezone.now().isoformat()
-        defeito.save()
-        return Response(DefeitoDetailSerializer(defeito).data)
+        try:
+            with transaction.atomic():
+                fluxo.transicionar(
+                    defeito, novo_status, request.user,
+                    texto=request.data.get('texto') or '',
+                    resposta_publica=request.data.get('resposta_publica') or '',
+                    motivo=request.data.get('motivo') or '',
+                    duplicado_de=request.data.get('duplicado_de') or None,
+                )
+                if foto is not None:
+                    defeito.foto_resolucao = foto
+                    defeito.save(update_fields=['foto_resolucao'])
+                    DefeitoAnexo.objects.create(defeito=defeito, tipo='depois', imagem=foto, autor=request.user)
+                    fluxo.registrar_evento(defeito, 'anexo', request.user, dados={'tipo': 'depois'})
+        except TransicaoNaoPermitida as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TransicaoInvalida as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._detalhe(defeito))
+
+    @action(detail=True, methods=['get'])
+    def eventos(self, request, pk=None):
+        """
+        Histórico do chamado. Público para todos; os internos (notas,
+        atribuições, sinalizações) só para a equipe do município.
+        """
+        defeito = self.get_object()
+        equipe = permissoes.pode_operar(request.user, defeito)
+        qs = DefeitoEvento.objects.filter(defeito=defeito).select_related('autor')
+        if not equipe:
+            qs = qs.filter(publico=True)
+        contexto = {**self.get_serializer_context(), 'equipe': equipe}
+        return Response(DefeitoEventoSerializer(qs, many=True, context=contexto).data)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Edição parcial sempre (PUT vira PATCH). Autor: só `descricao` e só
+        enquanto `pendente`. Equipe do município: dados de triagem. Campos
+        fora da lista são recusados — status, município, SLA e atendente
+        têm caminhos próprios.
+        """
+        defeito = self.get_object()
+        user = request.user
+        if permissoes.pode_operar(user, defeito):
+            permitidos = CAMPOS_EDITAVEIS_EQUIPE
+        elif defeito.usuario_id == user.id:
+            if defeito.status != 'pendente':
+                return Response(
+                    {'error': 'O chamado já está em atendimento e não pode mais ser editado.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            permitidos = CAMPOS_EDITAVEIS_AUTOR
+        else:
+            return _negado(user)
+        proibidos = sorted(set(request.data.keys()) - permitidos)
+        if proibidos:
+            return Response(
+                {'error': f'Campos não editáveis: {", ".join(proibidos)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = self.get_serializer(defeito, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        mudancas = {
+            campo: [getattr(defeito, campo), valor]
+            for campo, valor in serializer.validated_data.items()
+            if getattr(defeito, campo) != valor
+        }
+        if mudancas:
+            with transaction.atomic():
+                for campo, (_, valor) in mudancas.items():
+                    setattr(defeito, campo, valor)
+                defeito.atualizado_em = timezone.now()
+                defeito.save(update_fields=[*mudancas, 'atualizado_em'])
+                prioridade = mudancas.pop('prioridade', None)
+                if prioridade:
+                    fluxo.registrar_evento(
+                        defeito, 'prioridade', user, publico=False,
+                        dados={'de': prioridade[0], 'para': prioridade[1]},
+                    )
+                if mudancas:
+                    fluxo.registrar_evento(
+                        defeito, 'moderacao', user, publico=False,
+                        texto='Dados do chamado editados', dados={'campos': mudancas},
+                    )
+        return Response(self._detalhe(defeito))
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Soft delete. O autor exclui o próprio chamado enquanto pendente; a
+        gestão do município remove (moderação, com motivo e auditoria).
+        """
+        defeito = self.get_object()
+        user = request.user
+        eh_autor = defeito.usuario_id == user.id
+        if eh_autor and defeito.status == 'pendente':
+            regras.remover(defeito, user, 'autor', texto='Excluído pelo próprio autor')
+        elif permissoes.pode_gerir(user, defeito.municipio_id) and permissoes.eh_equipe(user):
+            motivo = (request.data.get('motivo') if hasattr(request.data, 'get') else '') or 'moderacao'
+            with transaction.atomic():
+                regras.remover(defeito, user, 'moderacao', texto=motivo)
+                auditoria.registrar(
+                    request, 'defeito.remover', 'defeito', defeito.id,
+                    dados={'motivo': motivo, 'protocolo': defeito.protocolo},
+                    municipio_id=defeito.municipio_id,
+                )
+        elif eh_autor:
+            return Response(
+                {'error': 'O chamado já está em atendimento e não pode mais ser excluído.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        else:
+            return _negado(user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'])
     def meus(self, request):
         qs = self.get_queryset().filter(usuario=request.user)
         page = self.paginate_queryset(qs)
         if page is not None:
-            return self.get_paginated_response(
-                DefeitoListSerializer(page, many=True).data,
-            )
-        return Response(DefeitoListSerializer(qs, many=True).data)
+            return self.get_paginated_response(self._lista(page))
+        return Response(self._lista(qs))
 
     @action(detail=False, methods=['get'])
     def apoiados(self, request):
@@ -282,45 +433,72 @@ class DefeitoViewSet(viewsets.ModelViewSet):
          qs = self.get_queryset().filter(id__in=list(ids))
          page = self.paginate_queryset(qs)
          if page is not None:
-             return self.get_paginated_response(
-                 DefeitoListSerializer(page, many=True).data,
-             )
-         return Response(DefeitoListSerializer(qs, many=True).data)
+             return self.get_paginated_response(self._lista(page))
+         return Response(self._lista(qs))
 
     @action(detail=True, methods=['patch'])
     def atender(self, request, pk=None):
+        """Operador assume o chamado: vira o atendente e o chamado passa a em execução."""
         defeito = self.get_object()
-        if not _pode_operar(request.user, defeito):
-            return Response(
-                {'error': FORA_DO_MUNICIPIO if request.user.admin else 'Permissao negada'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not permissoes.pode_operar(request.user, defeito):
+            return _negado(request.user)
         if defeito.atendente_id:
             return Response(
                 {'error': 'Chamado já possui atendente'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        defeito.atendente = request.user
-        defeito.status = 'vinculado_sem_resposta'
-        defeito.atendido_em = timezone.now().isoformat()
-        defeito.save()
+        try:
+            with transaction.atomic():
+                fluxo.atribuir(defeito, request.user, atendente_id=request.user.id)
+                if defeito.status != 'em_andamento':
+                    fluxo.transicionar(defeito, 'em_andamento', request.user)
+        except TransicaoNaoPermitida as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TransicaoInvalida as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'Chamado vinculado com sucesso'})
 
     @action(detail=True, methods=['post'])
     def anexar(self, request, pk=None):
+        """
+        Foto extra: do autor (`cidadao`) ou da equipe do município (`antes`/
+        `depois`, via `tipo`). Terceiros não anexam em chamado alheio.
+        """
         defeito = self.get_object()
+        user = request.user
+        if permissoes.pode_operar(user, defeito):
+            tipo = request.data.get('tipo') if request.data.get('tipo') in ('antes', 'depois') else 'antes'
+        elif defeito.usuario_id == user.id:
+            tipo = 'cidadao'
+        else:
+            return _negado(user)
         file = request.FILES.get('file')
         if not file:
             return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+        if DefeitoAnexo.objects.filter(defeito=defeito).count() >= MAX_ANEXOS:
+            return Response(
+                {'error': f'Limite de {MAX_ANEXOS} fotos por chamado atingido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         from services.image_processor import process_image
-        import json, base64
-        result = process_image(file.read())
+        try:
+            result = process_image(file.read())
+        except Exception:
+            return Response({'error': 'Imagem invalida'}, status=status.HTTP_400_BAD_REQUEST)
         extras = json.loads(defeito.imagens_extra or '[]')
         b64 = base64.b64encode(result['thumbnail_bytes']).decode('ascii')
         extras.append(f'data:image/webp;base64,{b64}')
-        defeito.imagens_extra = json.dumps(extras)
-        defeito.save()
-        return Response(DefeitoDetailSerializer(defeito).data)
+        with transaction.atomic():
+            DefeitoAnexo.objects.create(
+                defeito=defeito, tipo=tipo, imagem=result['webp_bytes'], autor=user,
+                latitude=_float_ou_none(request.data.get('latitude')),
+                longitude=_float_ou_none(request.data.get('longitude')),
+            )
+            defeito.imagens_extra = json.dumps(extras)
+            defeito.atualizado_em = timezone.now()
+            defeito.save(update_fields=['imagens_extra', 'atualizado_em'])
+            fluxo.registrar_evento(defeito, 'anexo', user, dados={'tipo': tipo})
+        return Response(self._detalhe(defeito))
 
     @action(detail=False, methods=['get'])
     def operacao(self, request):
@@ -329,14 +507,14 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         vinculado (sem paginação), mais o município em si para o cabeçalho.
         """
         user = request.user
-        if not user.admin:
+        if not permissoes.eh_equipe(user):
             return Response({'error': 'Permissao negada'}, status=status.HTTP_403_FORBIDDEN)
         if not user.municipio_id:
             return Response({'error': SEM_MUNICIPIO}, status=status.HTTP_403_FORBIDDEN)
         qs = self.get_queryset().filter(municipio_id=user.municipio_id)
         return Response({
             'municipio': _municipio_por_codigo(user.municipio_id),
-            'defeitos': DefeitoListSerializer(qs[:2000], many=True).data,
+            'defeitos': self._lista(qs[:2000]),
         })
 
     @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
@@ -358,11 +536,11 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         abertos = (
             self.get_queryset()
             .filter(municipio_id=municipio['codigo'])
-            .exclude(status__in=('atendido', 'encerrado', 'concluido', 'rejeitado'))[:2000]
+            .exclude(status__in=STATUS_FECHADOS)[:2000]
         )
         # Chamados restritos só para quem está perto (ou é o autor/operador).
         abertos = [d for d in abertos if regras.visivel_para(d, request.user, lat, lng)]
-        dados = DefeitoListSerializer(abertos, many=True).data
+        dados = self._lista(abertos)
 
         por_categoria = {}
         for d in dados:
@@ -427,7 +605,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'min_lat': min_lat, 'max_lat': max_lat, 'min_lng': min_lng, 'max_lng': max_lng,
             'celula': celula, 'por_celula': AREA_POR_CELULA, 'limite': AREA_LIMITE,
             'fechados': tuple(STATUS_FECHADOS),
-            'admin': bool(autenticado and user.admin),
+            'admin': permissoes.eh_equipe(user),
             'uid': str(user.id) if autenticado else None,
             'lat': lat, 'lng': lng, 'raio': regras.RAIO_VISIBILIDADE_RESTRITA_M,
         }
@@ -438,6 +616,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             WHERE d.latitude BETWEEN %(min_lat)s AND %(max_lat)s
               AND d.longitude BETWEEN %(min_lng)s AND %(max_lng)s
               AND d.status NOT IN %(fechados)s
+              AND d.removido_em IS NULL
               AND (d.visibilidade = 'publica' OR %(admin)s OR d.usuario = %(uid)s::uuid
                    OR (%(lat)s::float8 IS NOT NULL AND ST_DWithin(
                        ST_MakePoint(d.longitude, d.latitude)::geography,
@@ -466,12 +645,12 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 {'latitude': la, 'longitude': lo, 'total': n} for la, lo, n in cur.fetchall()
             ]
 
-        defeitos = self.queryset.filter(id__in=ids)
+        defeitos = self.queryset.defer('imagem_thumbnail', 'foto_resolucao').filter(id__in=ids)
         return Response({
             'celula_graus': celula,
             'total': sum(c['total'] for c in celulas),
             'celulas': celulas,
-            'defeitos': DefeitoListSerializer(defeitos, many=True).data,
+            'defeitos': self._lista(defeitos),
         })
 
     @action(detail=False, methods=['get'])
@@ -543,21 +722,23 @@ class DefeitoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def ordem_servico(self, request, pk=None):
         defeito = self.get_object()
-        if not _pode_operar(request.user, defeito):
-            return Response(
-                {'error': FORA_DO_MUNICIPIO if request.user.admin else 'Permissao negada'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not permissoes.pode_operar(request.user, defeito):
+            return _negado(request.user)
         from services.ordem_servico import gerar_ordem_servico
         pdf_bytes = gerar_ordem_servico(defeito)
-        id_curto = str(defeito.id)[:8]
+        id_curto = defeito.protocolo or str(defeito.id)[:8]
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="OS-{id_curto}.pdf"'
         return response
 
     @action(detail=False, methods=['patch'])
     def batch_status(self, request):
-        if not request.user.admin:
+        """
+        Mesmo `status` para vários chamados do município do operador, um a um
+        pelo `fluxo` (cada um com histórico e aviso). Os que não aceitam a
+        transição voltam em `erros` ({id: motivo}) sem travar o resto.
+        """
+        if not permissoes.eh_equipe(request.user):
             return Response(
                 {'error': 'Permissao negada'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -573,21 +754,28 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 {'error': 'Maximo de 100 chamados por lote'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        novo_status = request.data.get('status')
-        if novo_status not in dict(Defeito.STATUS_CHOICES):
+        novo_status = fluxo.normalizar_status(request.data.get('status'))
+        if novo_status not in fluxo.TRANSICOES:
             return Response(
                 {'error': 'Invalid status'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not request.user.municipio_id:
             return Response({'error': SEM_MUNICIPIO}, status=status.HTTP_403_FORBIDDEN)
-        qs = self.get_queryset().filter(id__in=ids, municipio_id=request.user.municipio_id)
-        agora = timezone.now()
-        if novo_status in {'atendido', 'encerrado', 'concluido'}:
-            # Marca quando foi resolvido, sem sobrescrever quem já tinha data.
-            qs.filter(atendido_em='').update(atendido_em=agora.isoformat())
-        updated = qs.update(status=novo_status, atualizado_em=agora)
-        return Response({'updated': updated})
+        qs = Defeito.objects.ativos().filter(id__in=ids, municipio_id=request.user.municipio_id)
+        atualizados, erros = 0, {}
+        for defeito in qs:
+            try:
+                fluxo.transicionar(
+                    defeito, novo_status, request.user,
+                    texto=request.data.get('texto') or '',
+                    resposta_publica=request.data.get('resposta_publica') or '',
+                    motivo=request.data.get('motivo') or '',
+                )
+                atualizados += 1
+            except TransicaoInvalida as e:
+                erros[str(defeito.id)] = str(e)
+        return Response({'updated': atualizados, 'erros': erros})
 
     @action(detail=False, methods=['post'])
     def imagem(self, request):
@@ -603,3 +791,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'image': result['webp_bytes'].hex(),
             'thumbnail': result['thumbnail_bytes'].hex(),
         })
+
+
+def _float_ou_none(valor):
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None

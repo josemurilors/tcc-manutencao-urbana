@@ -1,23 +1,24 @@
 import base64
 import math
-from datetime import timedelta
 from rest_framework import serializers
 from django.conf import settings
 from django.db import connection
 from django.db.models import Count
-from .models import Defeito, Apoio
+from core import permissoes
+from . import fluxo, sla
+from .models import Defeito, Apoio, DefeitoEvento
 
-RESOLVIDOS = {'atendido', 'encerrado', 'concluido'}
+PRIORIDADES = ('urgente', 'alta', 'media', 'baixa')
 
 
-def _is_sla_vencido(obj):
-    if obj.status in RESOLVIDOS or not obj.prazo_sla_dias:
-        return False
-    if not obj.criado_em:
-        return False
-    from django.utils import timezone
-    prazo = obj.criado_em + timedelta(days=obj.prazo_sla_dias)
-    return timezone.now() > prazo
+def mascarar_nome(nome):
+    """'Maria Silva Souza' -> 'Maria S.' (LGPD: o público não vê o nome completo do autor)."""
+    partes = (nome or '').split()
+    if not partes:
+        return ''
+    if len(partes) == 1:
+        return partes[0]
+    return f'{partes[0]} {partes[-1][0].upper()}.'
 
 
 def _sinalizacoes(obj):
@@ -48,22 +49,48 @@ class ThumbnailField(serializers.Field):
         return data
 
 
-class DefeitoListSerializer(serializers.ModelSerializer):
-    autor_nome = serializers.CharField(source='usuario.nome', read_only=True, default='')
-    categoria_nome = serializers.CharField(source='categoria', read_only=True, default='')
-    total_apoios = serializers.SerializerMethodField()
-    sinalizacoes = serializers.SerializerMethodField()
-    sla_vencido = serializers.SerializerMethodField()
+class _VisaoMixin:
+    """
+    O que cada um enxerga do chamado. A equipe do município do chamado vê o
+    nome completo do autor e quem atende; o resto (cidadão, anônimo, equipe
+    de outra cidade) vê o nome mascarado e nenhum id de usuário. Sem
+    `request` no contexto vale a visão pública.
+    """
 
-    class Meta:
-        model = Defeito
-        fields = (
-            'id', 'titulo', 'status', 'categoria_nome',
-            'autor_nome', 'latitude', 'longitude', 'municipio_id',
-            'rua', 'bairro', 'prioridade', 'atendente_id',
-            'total_apoios', 'sinalizacoes', 'criado_em', 'imagem_url',
-            'sla_vencido', 'visibilidade',
-        )
+    def _usuario(self):
+        request = self.context.get('request')
+        return getattr(request, 'user', None)
+
+    def _eh_equipe_do_chamado(self, obj):
+        return permissoes.pode_operar(self._usuario(), obj)
+
+    def get_autor_nome(self, obj):
+        nome = obj.usuario.nome if obj.usuario_id and obj.usuario else ''
+        usuario = self._usuario()
+        eh_autor = usuario is not None and getattr(usuario, 'id', None) == obj.usuario_id
+        if eh_autor or self._eh_equipe_do_chamado(obj):
+            return nome
+        return mascarar_nome(nome)
+
+    def get_eh_autor(self, obj):
+        usuario = self._usuario()
+        return bool(obj.usuario_id) and getattr(usuario, 'id', None) == obj.usuario_id
+
+    def get_atendente_id(self, obj):
+        if obj.atendente_id and self._eh_equipe_do_chamado(obj):
+            return str(obj.atendente_id)
+        return None
+
+    def get_tem_atendente(self, obj):
+        return bool(obj.atendente_id)
+
+    def get_status_rotulo(self, obj):
+        return fluxo.ROTULOS_CIDADAO.get(obj.status, obj.status)
+
+    def get_secretaria_nome(self, obj):
+        if obj.secretaria_id and obj.secretaria:
+            return obj.secretaria.nome
+        return obj.secretaria_responsavel
 
     def get_total_apoios(self, obj):
         return getattr(obj, 'total_apoios', 0)
@@ -72,31 +99,63 @@ class DefeitoListSerializer(serializers.ModelSerializer):
         return _sinalizacoes(obj)
 
     def get_sla_vencido(self, obj):
-        return _is_sla_vencido(obj)
+        return sla.sla_vencido(obj)
+
+    def get_sla_restante_horas(self, obj):
+        return sla.sla_restante_horas(obj)
 
 
-class DefeitoDetailSerializer(serializers.ModelSerializer):
-    autor_nome = serializers.CharField(source='usuario.nome', read_only=True, default='')
-    # Os clientes leem `atendente_id` (mesmo nome da listagem); o ModelSerializer
-    # sozinho só emitiria `atendente`.
-    atendente_id = serializers.PrimaryKeyRelatedField(source='atendente', read_only=True)
+# Campos comuns de listagem e detalhe. Nada de `usuario`, `usuario_email` ou
+# ids de usuário: `atendente_id` só sai preenchido para a equipe do município.
+CAMPOS_LISTA = (
+    'id', 'protocolo', 'titulo', 'status', 'status_rotulo', 'categoria_nome', 'categoria_id',
+    'autor_nome', 'eh_autor', 'latitude', 'longitude', 'municipio_id',
+    'rua', 'bairro', 'prioridade', 'atendente_id', 'tem_atendente', 'equipe_id',
+    'secretaria_id', 'secretaria_nome',
+    'total_apoios', 'sinalizacoes', 'criado_em', 'atualizado_em', 'resolvido_em', 'imagem_url',
+    'prazo_em', 'sla_vencido', 'sla_restante_horas', 'visibilidade', 'avaliacao_nota',
+)
+
+
+class DefeitoListSerializer(_VisaoMixin, serializers.ModelSerializer):
+    autor_nome = serializers.SerializerMethodField()
+    eh_autor = serializers.SerializerMethodField()
+    atendente_id = serializers.SerializerMethodField()
+    tem_atendente = serializers.SerializerMethodField()
+    status_rotulo = serializers.SerializerMethodField()
     categoria_nome = serializers.CharField(source='categoria', read_only=True, default='')
+    equipe_id = serializers.ReadOnlyField()
+    secretaria_id = serializers.ReadOnlyField()
+    secretaria_nome = serializers.SerializerMethodField()
     total_apoios = serializers.SerializerMethodField()
     sinalizacoes = serializers.SerializerMethodField()
-    imagem_thumbnail = ThumbnailField()
-    foto_resolucao_url = ThumbnailField(source='foto_resolucao', read_only=True)
     sla_vencido = serializers.SerializerMethodField()
+    sla_restante_horas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Defeito
+        fields = CAMPOS_LISTA
+
+
+class DefeitoDetailSerializer(DefeitoListSerializer):
+    imagem_thumbnail = ThumbnailField(read_only=True)
+    foto_resolucao_url = ThumbnailField(source='foto_resolucao', read_only=True)
+    duplicado_de = serializers.SerializerMethodField()
     municipio = serializers.SerializerMethodField()
 
     class Meta:
         model = Defeito
-        exclude = ('foto_resolucao',)
+        fields = CAMPOS_LISTA + (
+            'descricao', 'categoria', 'previsao_conclusao', 'atendido_em',
+            'secretaria_responsavel', 'prazo_sla_dias',
+            'imagem_thumbnail', 'foto_resolucao_url', 'imagens_extra', 'atualizacoes',
+            'municipio', 'triado_em', 'atribuido_em', 'iniciado_em', 'fechado_em',
+            'reaberturas', 'resposta_publica', 'motivo_rejeicao', 'duplicado_de',
+            'avaliacao_comentario', 'avaliado_em',
+        )
 
-    def get_total_apoios(self, obj):
-        return getattr(obj, 'total_apoios', 0)
-
-    def get_sinalizacoes(self, obj):
-        return _sinalizacoes(obj)
+    def get_duplicado_de(self, obj):
+        return str(obj.duplicado_de_id) if obj.duplicado_de_id else None
 
     def get_municipio(self, obj):
         """{codigo, nome, uf_sigla} do município do chamado, ou None."""
@@ -107,8 +166,35 @@ class DefeitoDetailSerializer(serializers.ModelSerializer):
             row = cur.fetchone()
         return {'codigo': str(row[0]), 'nome': row[1], 'uf_sigla': row[2]} if row else None
 
-    def get_sla_vencido(self, obj):
-        return _is_sla_vencido(obj)
+
+class DefeitoEventoSerializer(serializers.ModelSerializer):
+    """Linha do histórico. Quem fez só aparece com nome para a equipe do município."""
+    autor_nome = serializers.SerializerMethodField()
+    para_status_rotulo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DefeitoEvento
+        fields = (
+            'id', 'tipo', 'de_status', 'para_status', 'para_status_rotulo', 'papel',
+            'publico', 'texto', 'dados', 'criado_em', 'autor_nome',
+        )
+
+    def get_autor_nome(self, obj):
+        nome = obj.autor.nome if obj.autor_id and obj.autor else ''
+        if self.context.get('equipe'):
+            return nome
+        if obj.papel == 'cidadao':
+            return mascarar_nome(nome)
+        if obj.papel in permissoes.PAPEIS_EQUIPE:
+            return 'Prefeitura'
+        if obj.papel == 'comunidade':
+            return 'Comunidade'
+        return ''
+
+    def get_para_status_rotulo(self, obj):
+        if not obj.para_status:
+            return None
+        return fluxo.ROTULOS_CIDADAO.get(obj.para_status, obj.para_status)
 
 
 def municipio_do_ponto(lat, lng):
@@ -161,12 +247,12 @@ def _mesma_categoria_perto(lat, lng, categoria, raio_m):
     """Chamado aberto da mesma categoria a até `raio_m` do ponto, ou None."""
     deg = raio_m / 111000 * 1.5  # caixa folgada; a distância real é conferida abaixo
     candidatos = (
-        Defeito.objects.filter(
+        Defeito.objects.ativos().filter(
             categoria__iexact=categoria,
             latitude__range=(lat - deg, lat + deg),
             longitude__range=(lng - deg, lng + deg),
         )
-        .exclude(status__in=RESOLVIDOS | {'rejeitado'})
+        .exclude(status__in=fluxo.STATUS_FECHADOS)
         .values('id', 'latitude', 'longitude')[:20]
     )
     mais_perto = None
@@ -178,13 +264,18 @@ def _mesma_categoria_perto(lat, lng, categoria, raio_m):
 
 
 class DefeitoCreateSerializer(serializers.ModelSerializer):
-    imagem_thumbnail = ThumbnailField(read_only=True)
-    # Quem decide é `regras.visibilidade_inicial`, nunca o cliente.
-    visibilidade = serializers.CharField(read_only=True)
+    """
+    Só o que o cidadão informa ao abrir o chamado. Status, roteamento, SLA,
+    município, visibilidade e protocolo são decididos no backend
+    (`perform_create`); a resposta usa a visão de detalhe.
+    """
 
     class Meta:
         model = Defeito
-        exclude = ('usuario', 'criado_em', 'atualizado_em')
+        fields = ('titulo', 'descricao', 'latitude', 'longitude', 'rua', 'bairro', 'categoria')
+
+    def to_representation(self, instance):
+        return DefeitoDetailSerializer(instance, context=self.context).data
 
     def create(self, validated_data):
         lat = validated_data.get('latitude')
@@ -213,9 +304,12 @@ class DefeitoCreateSerializer(serializers.ModelSerializer):
                     code='duplicate_defect',
                 )
 
-        # Em qual cidade o ponto caiu — gravado no chamado, não no usuário.
-        municipio = municipio_do_ponto(lat, lng) if lat and lng else None
-        validated_data['municipio_id'] = municipio['codigo'] if municipio else None
+        # Em qual cidade o ponto caiu — gravado no chamado, não no usuário. A
+        # view já resolve antes (o roteamento depende da cidade); aqui só se
+        # alguém salvar o serializer sem passar por ela.
+        if 'municipio_id' not in validated_data:
+            municipio = municipio_do_ponto(lat, lng) if lat and lng else None
+            validated_data['municipio_id'] = municipio['codigo'] if municipio else None
 
         # 2) Similaridade de texto (IA) num raio maior, só quando há descrição.
         if lat and lng and descricao:
@@ -228,11 +322,11 @@ class DefeitoCreateSerializer(serializers.ModelSerializer):
 
             deg_approx = radius_m / 111000
 
-            candidatos_qs = Defeito.objects.filter(
+            candidatos_qs = Defeito.objects.ativos().filter(
                 latitude__range=(lat - deg_approx, lat + deg_approx),
                 longitude__range=(lng - deg_approx, lng + deg_approx),
             ).exclude(
-                status__in=['concluido', 'encerrado', 'rejeitado']
+                status__in=fluxo.STATUS_FECHADOS
             ).exclude(
                 descricao=''
             ).values('id', 'descricao', 'latitude', 'longitude')[:20]
@@ -280,6 +374,22 @@ class DefeitoCreateSerializer(serializers.ModelSerializer):
                             )
 
         return super().create(validated_data)
+
+
+class DefeitoUpdateSerializer(serializers.ModelSerializer):
+    """
+    Edição do chamado. Quais campos cada um pode mandar é decidido na view
+    (autor: só a descrição, enquanto pendente; equipe: dados de triagem).
+    Status nunca muda por aqui — só por `fluxo.transicionar`.
+    """
+    prioridade = serializers.ChoiceField(choices=PRIORIDADES, required=False)
+
+    class Meta:
+        model = Defeito
+        fields = ('titulo', 'descricao', 'rua', 'bairro', 'prioridade', 'previsao_conclusao')
+
+    def to_representation(self, instance):
+        return DefeitoDetailSerializer(instance, context=self.context).data
 
 
 class ApoioSerializer(serializers.ModelSerializer):

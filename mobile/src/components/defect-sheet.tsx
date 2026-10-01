@@ -19,7 +19,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { DefectDetail, detailStyles } from '@/components/defect-detail';
 import { Button } from '@/components/ui/button';
 import { RAIO_CONFIRMACAO_M } from '@/constants/proximidade';
-import { STATUS_FECHADOS } from '@/constants/status';
+import { statusFechado } from '@/constants/status';
 import { FontSize, FontWeight, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
@@ -68,13 +68,13 @@ export function DefectSheet({
 }: Props) {
   const colors = useColors();
   const addToast = useToast();
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null);
 
   if (!defeito) return null;
 
-  const aberto = !STATUS_FECHADOS.includes(defeito.status) && defeito.status !== 'rejeitado';
+  const aberto = !statusFechado(defeito.status);
 
   // Modo "confirmar no local": só quando a tela informa a distância.
   const modoConfirmacao = distanciaM !== undefined;
@@ -114,8 +114,7 @@ export function DefectSheet({
         total_apoios: res.apoiado ? atual + 1 : Math.max(0, atual - 1),
       });
       // Confirmar chamado de outra pessoa rende XP (o próprio, não).
-      const deOutro =
-        !defeito!.usuario || String(defeito!.usuario.id) !== String(user?.id ?? '');
+      const deOutro = !defeito!.eh_autor;
       const xp = res.apoiado && deOutro ? ' +6 XP' : '';
       recarregarProgresso();
       addToast(
@@ -222,14 +221,17 @@ export function DefectSheet({
             {rotuloConfirmar}
           </Button>
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onPress={handleAnexar}
-            loading={acaoEmCurso === 'anexar'}
-            icon={<Ionicons name="image" size={14} color={colors.textSecondary} />}>
-            Anexar
-          </Button>
+          {/* Foto extra só do autor; a equipe anexa pela tela de operação. */}
+          {defeito.eh_autor ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onPress={handleAnexar}
+              loading={acaoEmCurso === 'anexar'}
+              icon={<Ionicons name="image" size={14} color={colors.textSecondary} />}>
+              Anexar
+            </Button>
+          ) : null}
 
           {aberto ? (
             <View style={styles.sinalizar}>

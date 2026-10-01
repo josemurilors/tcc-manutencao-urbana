@@ -23,7 +23,9 @@ export type User = {
   nome: string;
   email: string;
   cpf?: string | null;
-  admin?: boolean;
+  admin?: boolean | number;
+  /** 'cidadao' | 'operador' | 'gestor' | 'admin_municipal' | 'super_admin' */
+  papel?: string;
   super_admin?: boolean;
   municipio_id?: string | null;
   municipio?: Municipio | null;
@@ -61,7 +63,7 @@ export type Defeito = {
   atualizado_em?: string;
   atendido_em?: string | null;
   atendente_id?: number | string | null;
-  /** Só na listagem: prazo da categoria estourado e chamado ainda aberto. */
+  /** Prazo (SLA) estourado e chamado ainda aberto. */
   sla_vencido?: boolean;
   total_apoios?: number;
   apoios_total?: number;
@@ -73,7 +75,58 @@ export type Defeito = {
   atualizacoes?: string;
   imagem_thumbnail?: string | null;
   imagens_extra?: string | null;
+  /** Legado: o backend não expõe mais o usuário; use `autor_nome` e `eh_autor`. */
   usuario?: { id: number | string; nome?: string } | null;
+
+  // --- Contrato v3 ---
+  /** Número legível do chamado, `AAAA-NNNNNN`. */
+  protocolo?: string | null;
+  categoria_id?: number | null;
+  /** Rótulo do status para o cidadão (ver `rotuloCidadao`). */
+  status_rotulo?: string;
+  /** Nome do autor, mascarado ("Maria S.") para quem não é da prefeitura. */
+  autor_nome?: string;
+  /** O usuário logado é o autor do chamado. */
+  eh_autor?: boolean;
+  /** Há alguém atendendo (o id em `atendente_id` só vai para a equipe do município). */
+  tem_atendente?: boolean;
+  equipe_id?: number | null;
+  secretaria_id?: number | null;
+  secretaria_nome?: string;
+  secretaria_responsavel?: string;
+  prazo_sla_dias?: number;
+  /** Vencimento do SLA (criado_em + prazo da categoria). */
+  prazo_em?: string | null;
+  /** Horas até o prazo (negativo = atrasado); null fechado ou sem prazo. */
+  sla_restante_horas?: number | null;
+  triado_em?: string | null;
+  atribuido_em?: string | null;
+  iniciado_em?: string | null;
+  resolvido_em?: string | null;
+  fechado_em?: string | null;
+  reaberturas?: number;
+  resposta_publica?: string;
+  motivo_rejeicao?: string;
+  /** Id do chamado original quando rejeitado como duplicado. */
+  duplicado_de?: string | null;
+  avaliacao_nota?: number | null;
+  avaliacao_comentario?: string;
+  avaliado_em?: string | null;
+};
+
+/** Linha do histórico (GET /defeitos/<id>/eventos/). */
+export type DefeitoEvento = {
+  id: number;
+  tipo: string;
+  de_status: string | null;
+  para_status: string | null;
+  para_status_rotulo: string | null;
+  papel: string;
+  publico: boolean;
+  texto: string;
+  dados: Record<string, unknown>;
+  criado_em: string;
+  autor_nome: string;
 };
 
 /** Resposta de GET /defeitos/municipio/?lat&lng — visão expandida do mapa. */

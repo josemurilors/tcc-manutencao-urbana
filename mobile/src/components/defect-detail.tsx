@@ -80,7 +80,7 @@ export function DefectDetail({ defeito, onClose, rotuloApoios, destaque, childre
                 <View style={styles.linhaMeta}>
                   <StatusBadge status={defeito.status} concluidoEm={concluidoEm(defeito)} />
                   <Text style={[styles.meta, { color: colors.textMuted }]}>
-                    {maskName(defeito.usuario?.nome)}
+                    {defeito.autor_nome || maskName(defeito.usuario?.nome)}
                   </Text>
                 </View>
               </View>

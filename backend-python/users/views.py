@@ -2,6 +2,7 @@ import secrets
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.db import connection
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .serializers import RegisterSerializer, UserSerializer
 from .models import User, PushSubscription
+from core import auditoria, permissoes
 from services.email_service import send_verification_code
 
 
@@ -223,9 +225,20 @@ class ChangePasswordView(APIView):
 
 
 class UpdateMunicipioView(APIView):
+    """
+    Cidade do cidadão (preferência dele). Para a equipe da prefeitura o
+    município é o de operação: trocar por aqui daria acesso a outra cidade,
+    então só o admin da prefeitura (ou o super admin) vincula — ver
+    `AdminVinculateMunicipioView`.
+    """
     permission_classes = (permissions.IsAuthenticated,)
 
     def patch(self, request):
+        if permissoes.eh_equipe(request.user) and permissoes.papel(request.user) != 'super_admin':
+            return Response(
+                {'error': 'O município de operação da equipe é definido pela prefeitura.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         municipio_id = request.data.get('municipio_id')
         if not municipio_id:
             return Response(
@@ -310,24 +323,52 @@ class ResendCodeView(APIView):
         return Response({'message': 'Código reenviado'})
 
 
+def _alvo_gerenciavel(gestor, alvo):
+    """
+    Se `gestor` (admin municipal+) pode mexer no papel/vínculo de `alvo`.
+    Super admin: qualquer um. Admin municipal: cidadãos (recrutar para a
+    equipe) e a equipe do próprio município — nunca a de outra cidade, nem
+    alguém de nível acima do seu.
+    """
+    if permissoes.papel(gestor) == 'super_admin':
+        return True
+    if permissoes.nivel(alvo) > permissoes.nivel(gestor):
+        return False
+    if not permissoes.eh_equipe(alvo):
+        return True
+    return bool(gestor.municipio_id) and str(alvo.municipio_id or '') == str(gestor.municipio_id)
+
+
+def _eh_super_admin(user):
+    super_admin_email = getattr(settings, 'SUPER_ADMIN_EMAIL', None)
+    return user.papel == 'super_admin' or bool(super_admin_email and user.email == super_admin_email)
+
+
 class AdminUsersView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    """
+    Usuários que o admin da prefeitura gerencia: os do seu município (equipe
+    e cidadãos que moram lá). `?email=` acha uma pessoa específica para
+    trazer à equipe. O super admin vê todos. Nunca a base inteira para a
+    prefeitura (LGPD).
+    """
+    permission_classes = (permissions.IsAuthenticated, permissoes.EhAdminMunicipal)
 
     def get(self, request):
-        if not request.user.admin:
-            return Response(
-                {'error': 'Acesso negado'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        super_admin_email = getattr(settings, 'SUPER_ADMIN_EMAIL', None)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                'SELECT id::text, nome, email, admin, municipio_id FROM users ORDER BY nome',
-            )
-            rows = cursor.fetchall()
-            mun_ids = list(set(str(r[4]) for r in rows if r[4]))
-            municipios = {}
-            if mun_ids:
+        user = request.user
+        qs = User.objects.order_by('nome')
+        if permissoes.papel(user) != 'super_admin':
+            if not user.municipio_id:
+                return Response({'error': 'Operador sem município vinculado'}, status=status.HTTP_403_FORBIDDEN)
+            filtro = Q(municipio_id=user.municipio_id)
+            email = (request.query_params.get('email') or '').strip().lower()
+            if email:
+                filtro |= Q(email__iexact=email)
+            qs = qs.filter(filtro)
+        rows = list(qs.values_list('id', 'nome', 'email', 'papel', 'municipio_id'))
+        mun_ids = list({str(r[4]) for r in rows if r[4]})
+        municipios = {}
+        if mun_ids:
+            with connection.cursor() as cursor:
                 cursor.execute(
                     'SELECT codigo::text, nome, uf_sigla FROM municipios WHERE codigo = ANY(%s)',
                     [mun_ids],
@@ -336,70 +377,103 @@ class AdminUsersView(APIView):
                     municipios[str(mrow[0])] = {
                         'codigo': mrow[0], 'nome': mrow[1], 'uf_sigla': mrow[2],
                     }
-            users = []
-            for r in rows:
-                admin = bool(r[3])
-                users.append({
-                    'id': r[0],
-                    'nome': r[1],
-                    'email': r[2],
-                    'admin': admin,
-                    'super_admin': bool(super_admin_email and r[2] == super_admin_email),
-                    'municipio': municipios.get(r[4]) if r[4] else None,
-                })
-        return Response(users)
+        return Response([
+            {
+                'id': str(r[0]),
+                'nome': r[1],
+                'email': r[2],
+                'papel': r[3],
+                'admin': r[3] != 'cidadao',
+                'super_admin': r[3] == 'super_admin',
+                'municipio': municipios.get(str(r[4])) if r[4] else None,
+            }
+            for r in rows
+        ])
 
 
 class AdminToggleAdminView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    """
+    Define o papel de um usuário: `{"papel": "operador"|"gestor"|...}` ou o
+    legado `{"admin": true|false}` (true = operador). Ninguém concede papel
+    acima do próprio; o admin municipal traz a pessoa para o SEU município.
+    """
+    permission_classes = (permissions.IsAuthenticated, permissoes.EhAdminMunicipal)
 
     def patch(self, request, pk):
-        if not request.user.admin:
-            return Response(
-                {'error': 'Acesso negado'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        admin = request.data.get('admin')
-        if admin is None or not isinstance(admin, bool):
-            return Response(
-                {'error': 'Campo "admin" booleano é obrigatório'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        super_admin_email = getattr(settings, 'SUPER_ADMIN_EMAIL', None)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                'SELECT id, email FROM users WHERE id = %s',
-                [pk],
-            )
-            row = cursor.fetchone()
-            if not row:
+        gestor = request.user
+        novo = request.data.get('papel')
+        if novo is None:
+            admin = request.data.get('admin')
+            if admin is None or not isinstance(admin, bool):
                 return Response(
-                    {'error': 'Usuário não encontrado'},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-            if super_admin_email and row[1] == super_admin_email:
-                return Response(
-                    {'error': 'Não é possível alterar status do super admin'},
+                    {'error': 'Campo "admin" booleano é obrigatório'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            cursor.execute(
-                'UPDATE users SET admin = %s, atualizado_em = %s WHERE id = %s',
-                [1 if admin else 0, timezone.now().isoformat(), pk],
+            novo = 'operador' if admin else 'cidadao'
+        if novo not in permissoes.NIVEIS:
+            return Response({'error': 'Papel inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        alvo = User.objects.filter(pk=pk).first()
+        if alvo is None:
+            return Response(
+                {'error': 'Usuário não encontrado'},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        msg = 'Usuário promovido a admin' if admin else 'Admin removido do usuário'
-        return Response({'message': msg})
+        if _eh_super_admin(alvo):
+            return Response(
+                {'error': 'Não é possível alterar status do super admin'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if alvo.pk == gestor.pk:
+            return Response({'error': 'Não é possível alterar o próprio papel'}, status=status.HTTP_400_BAD_REQUEST)
+        if permissoes.NIVEIS[novo] > permissoes.nivel(gestor) or (
+            novo == 'super_admin' and permissoes.papel(gestor) != 'super_admin'
+        ):
+            return Response({'error': 'Papel acima do seu'}, status=status.HTTP_403_FORBIDDEN)
+        if not _alvo_gerenciavel(gestor, alvo):
+            return Response({'error': 'Usuário de outro município'}, status=status.HTTP_403_FORBIDDEN)
+        if permissoes.papel(gestor) != 'super_admin' and not gestor.municipio_id:
+            return Response({'error': 'Operador sem município vinculado'}, status=status.HTTP_403_FORBIDDEN)
+
+        antes = {'papel': alvo.papel, 'municipio_id': alvo.municipio_id}
+        alvo.papel = novo
+        campos = ['papel']
+        if novo != 'cidadao' and permissoes.papel(gestor) != 'super_admin':
+            # Quem entra na equipe entra na equipe DESTE município.
+            alvo.municipio_id = gestor.municipio_id
+            campos.append('municipio_id')
+        alvo.save(update_fields=campos)
+        auditoria.registrar(
+            request, 'usuario.papel', 'usuario', alvo.pk,
+            dados={'antes': antes, 'depois': {'papel': alvo.papel, 'municipio_id': alvo.municipio_id}},
+        )
+        msg = 'Admin removido do usuário' if novo == 'cidadao' else 'Usuário promovido a admin'
+        return Response({'message': msg, 'papel': alvo.papel})
 
 
 class AdminVinculateMunicipioView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    """
+    Município de operação de um usuário. O super admin vincula a qualquer
+    cidade; o admin municipal só ao próprio município (ou desvincula) e só
+    quem ele gerencia — senão um operador da cidade A virava da cidade B.
+    """
+    permission_classes = (permissions.IsAuthenticated, permissoes.EhAdminMunicipal)
 
     def patch(self, request, pk):
-        if not request.user.admin:
-            return Response(
-                {'error': 'Acesso negado'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        gestor = request.user
         municipio_id = request.data.get('municipio_id')
+        alvo = User.objects.filter(pk=pk).first()
+        if alvo is None:
+            return Response({'error': 'Usuário não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        if permissoes.papel(gestor) != 'super_admin':
+            if not gestor.municipio_id:
+                return Response({'error': 'Operador sem município vinculado'}, status=status.HTTP_403_FORBIDDEN)
+            if municipio_id is not None and str(municipio_id) != str(gestor.municipio_id):
+                return Response(
+                    {'error': 'Só é possível vincular ao seu município'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if not _alvo_gerenciavel(gestor, alvo) or _eh_super_admin(alvo):
+                return Response({'error': 'Usuário de outro município'}, status=status.HTTP_403_FORBIDDEN)
         with connection.cursor() as cursor:
             if municipio_id is not None:
                 cursor.execute(
@@ -411,10 +485,13 @@ class AdminVinculateMunicipioView(APIView):
                         {'error': 'Município não encontrado'},
                         status=status.HTTP_404_NOT_FOUND,
                     )
-            cursor.execute(
-                'UPDATE users SET municipio_id = %s, atualizado_em = %s WHERE id = %s',
-                [municipio_id, timezone.now().isoformat(), pk],
-            )
+        antes = alvo.municipio_id
+        alvo.municipio_id = municipio_id
+        alvo.save(update_fields=['municipio_id'])
+        auditoria.registrar(
+            request, 'usuario.municipio', 'usuario', alvo.pk,
+            dados={'antes': antes, 'depois': municipio_id},
+        )
         return Response({'message': 'Município atualizado com sucesso'})
 
 
@@ -422,15 +499,18 @@ class AdminEstatisticasView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
-        if not request.user.admin:
+        # BI é de gestor+ (contrato, seção 3), sempre da cidade dele, pelo
+        # município em que o chamado caiu (d.municipio_id), não pelo do autor.
+        # Só o super admin sem vínculo vê o agregado geral — antes bastava
+        # desvincular um operador para ele enxergar todas as prefeituras.
+        user = request.user
+        if not permissoes.pode_gerir(user, user.municipio_id) or (
+            not user.municipio_id and permissoes.papel(user) != 'super_admin'
+        ):
             return Response(
                 {'error': 'Acesso negado'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        # Operador vinculado a um municipio ve as estatisticas da cidade dele,
-        # pelo municipio em que o chamado caiu (d.municipio_id), nao pelo do
-        # autor. Admin sem vinculo (gestao) ve o agregado geral.
-        user = request.user
         is_mun_admin = bool(user.municipio_id)
         mun_join = ''
         mun_where = ' WHERE d.municipio_id = %s' if is_mun_admin else ''
@@ -451,17 +531,17 @@ class AdminEstatisticasView(APIView):
             cursor.execute(f'SELECT d.status, COUNT(*) as total {from_clause} GROUP BY d.status', mun_params)
             por_status = [{'status': r[0], 'total': r[1]} for r in cursor.fetchall()]
 
-            pendentes_status = ['pendente', 'em_andamento', 'vinculado_sem_resposta', 'vinculado_com_resposta']
-            resolvidos_status = ['atendido', 'encerrado', 'concluido']
+            pendentes_status = ['pendente', 'em_analise', 'agendado', 'em_andamento']
+            resolvidos_status = ['concluido']
             pendentes = sum(s['total'] for s in por_status if s['status'] in pendentes_status)
             resolvidos = sum(s['total'] for s in por_status if s['status'] in resolvidos_status)
             resolucao_rate = min(round((resolvidos / total) * 100), 100) if total > 0 else 0
 
-            sla_join = ' WHERE d.status IN (%s,%s)' + (' AND d.municipio_id = %s' if is_mun_admin else '')
-            sla_params = ['atendido', 'encerrado'] + (mun_params if is_mun_admin else [])
+            sla_join = ' WHERE d.status = %s' + (' AND d.municipio_id = %s' if is_mun_admin else '')
+            sla_params = ['concluido'] + (mun_params if is_mun_admin else [])
             cursor.execute(f'''
                 SELECT AVG(
-                    EXTRACT(EPOCH FROM (COALESCE(d.atendido_em::timestamp, d.atualizado_em::timestamp) - d.criado_em::timestamp)) / 60
+                    EXTRACT(EPOCH FROM (COALESCE(d.resolvido_em::timestamp, NULLIF(d.atendido_em, '')::timestamp, d.atualizado_em::timestamp) - d.criado_em::timestamp)) / 60
                 ) FROM defeitos d{sla_join}
             ''', sla_params)
             sla = cursor.fetchone()[0]
@@ -551,10 +631,10 @@ class AdminEstatisticasView(APIView):
 
             cursor.execute(f'''
                 SELECT COALESCE(d.categoria, 'sem_categoria'),
-                    AVG(EXTRACT(EPOCH FROM (COALESCE(d.atendido_em::timestamp, d.atualizado_em::timestamp) - d.criado_em::timestamp)) / 60),
+                    AVG(EXTRACT(EPOCH FROM (COALESCE(d.resolvido_em::timestamp, NULLIF(d.atendido_em, '')::timestamp, d.atualizado_em::timestamp) - d.criado_em::timestamp)) / 60),
                     COUNT(*)
                 FROM defeitos d
-                WHERE d.status IN ('atendido', 'encerrado'){' AND d.municipio_id = %s' if is_mun_admin else ''}
+                WHERE d.status = 'concluido'{' AND d.municipio_id = %s' if is_mun_admin else ''}
                 GROUP BY d.categoria
                 ORDER BY 2 DESC
             ''', mun_params)
@@ -564,7 +644,7 @@ class AdminEstatisticasView(APIView):
                 'total_resolvidos': r[2],
             } for r in cursor.fetchall()]
 
-            resolvidos_status_sql = "('atendido','encerrado','concluido')"
+            resolvidos_status_sql = "('concluido','rejeitado')"
             now_iso = timezone.now().isoformat()
             sla_vencidos_total = 0
             sla_vencidos = []
@@ -594,7 +674,7 @@ class AdminEstatisticasView(APIView):
 
             cursor.execute(f'''
                 SELECT d.bairro, COUNT(*),
-                    SUM(CASE WHEN d.status IN ('atendido','encerrado') THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN d.status = 'concluido' THEN 1 ELSE 0 END)
                 FROM defeitos d{mun_join}
                 {mun_where_and} d.bairro IS NOT NULL AND d.bairro != ''
                 GROUP BY d.bairro ORDER BY COUNT(*) DESC LIMIT 10

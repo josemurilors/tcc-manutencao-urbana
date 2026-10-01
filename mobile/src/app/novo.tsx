@@ -20,7 +20,6 @@ import { Button } from '@/components/ui/button';
 import { RAIO_DUPLICADO_M } from '@/constants/proximidade';
 import { STATUS_ABERTOS } from '@/constants/status';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
-import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { api, DefeitoDuplicadoError } from '@/services/api';
@@ -42,7 +41,6 @@ const CATEGORIAS_PADRAO: Categoria[] = [
 export default function NovoChamadoScreen() {
   const colors = useColors();
   const addToast = useToast();
-  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { lat, lng } = useLocalSearchParams<{ lat?: string; lng?: string }>();
 
@@ -136,7 +134,7 @@ export default function NovoChamadoScreen() {
         addToast('Você já tinha confirmado este chamado.', 'info');
       } else {
         // Confirmar chamado de outra pessoa rende XP (o próprio, não).
-        const deOutro = !d.usuario || String(d.usuario.id) !== String(user?.id ?? '');
+        const deOutro = !d.eh_autor;
         addToast(deOutro ? 'Chamado confirmado! +6 XP' : 'Chamado confirmado!');
         recarregarProgresso();
       }

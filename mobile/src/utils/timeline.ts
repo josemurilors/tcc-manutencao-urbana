@@ -1,5 +1,6 @@
 /** Histórico do chamado — porte de `frontend/src/utils/timeline.js`. */
 
+import { normalizarStatus } from '@/constants/status';
 import type { Defeito } from '@/types';
 
 import { formatarDataHora, maskName } from './format';
@@ -12,50 +13,46 @@ export type TimelineItem = {
   meta?: string;
 };
 
-const STATUS_VINCULADOS = [
-  'vinculado_sem_resposta',
-  'vinculado_com_resposta',
-  'atendido',
-  'encerrado',
-  'concluido',
-];
-
-const STATUS_CONCLUIDOS = ['atendido', 'encerrado', 'concluido'];
-
 export function getTimelineItems(d: Defeito): TimelineItem[] {
+  const status = normalizarStatus(d.status);
   const items: TimelineItem[] = [
     {
       id: 'criado',
       title: 'Chamado Criado',
       description: d.descricao?.slice(0, 120),
       date: formatarDataHora(d.criado_em),
-      meta: `Por ${maskName(d.usuario?.nome)}`,
+      // O backend já manda o nome mascarado para quem não é da prefeitura.
+      meta: `Por ${d.autor_nome || maskName(d.usuario?.nome)}`,
     },
   ];
 
-  if (STATUS_VINCULADOS.includes(d.status)) {
+  if (d.triado_em) {
+    items.push({ id: 'triado', title: 'Em análise', date: formatarDataHora(d.triado_em) });
+  }
+
+  if (d.iniciado_em || status === 'em_andamento') {
     items.push({
-      id: 'vinculado',
-      title: 'Profissional Vinculado',
-      date: formatarDataHora(d.atualizado_em),
+      id: 'execucao',
+      title: 'Em execução',
+      date: formatarDataHora(d.iniciado_em ?? d.atualizado_em),
     });
   }
 
-  if (d.status === 'vinculado_com_resposta') {
-    items.push({
-      id: 'resposta',
-      title: 'Resposta Enviada',
-      date: formatarDataHora(d.atualizado_em),
-    });
+  if (d.resposta_publica) {
+    items.push({ id: 'resposta', title: 'Resposta da prefeitura', description: d.resposta_publica });
   }
 
-  if (STATUS_CONCLUIDOS.includes(d.status)) {
+  if (status === 'concluido') {
     items.push({
       id: 'concluido',
-      title: 'Chamado Concluído',
-      date: formatarDataHora(d.atendido_em),
+      title: 'Chamado Resolvido',
+      date: formatarDataHora(d.resolvido_em ?? d.atendido_em),
       meta: ultimaAtualizacao(d),
     });
+  }
+
+  if (status === 'rejeitado') {
+    items.push({ id: 'rejeitado', title: 'Não procede', date: formatarDataHora(d.fechado_em) });
   }
 
   return items;

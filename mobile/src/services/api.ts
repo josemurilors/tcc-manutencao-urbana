@@ -106,7 +106,7 @@ function baseHeaders(extra?: Record<string, string>, publico = false) {
   } as Record<string, string>;
 }
 
-async function request<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const headers = baseHeaders(options.headers, options.publico);
   const isFormData = options.body instanceof FormData;
 
@@ -177,7 +177,7 @@ async function request<T = any>(endpoint: string, options: RequestOptions = {}):
 }
 
 /** Endpoints paginados do DRF devolvem `{ results: [...] }`. */
-async function paginated<T>(endpoint: string, options?: RequestOptions): Promise<T[]> {
+export async function paginated<T>(endpoint: string, options?: RequestOptions): Promise<T[]> {
   const data = await request<any>(endpoint, options);
   return (data?.results ?? data) as T[];
 }
@@ -363,7 +363,7 @@ export const api = {
   /** Finaliza o chamado; a foto de resolução é opcional. */
   finalizarDefeito: async (id: number, fotoResolucao?: PickedImage) => {
     const fd = new FormData();
-    fd.append('status', 'atendido');
+    fd.append('status', 'concluido');
     if (fotoResolucao) await appendImage(fd, 'foto_resolucao', fotoResolucao);
     return request<Defeito>(`/api/v1/defeitos/${id}/status/`, { method: 'PATCH', body: fd });
   },

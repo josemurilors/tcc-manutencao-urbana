@@ -132,7 +132,14 @@ ${mensagem}`)) excluirConta();
       <Card>
         <SectionHeading title="Dados" subtitle={user?.email} />
         <TextField label="Nome completo" value={nome} onChangeText={setNomeEditado} />
-        {user?.cpf ? <TextField label="CPF" value={formatarCpf(user.cpf)} editable={false} /> : null}
+        {/* O backend manda o CPF já mascarado ('***.456.789-**'). */}
+        {user?.cpf ? (
+          <TextField
+            label="CPF"
+            value={user.cpf.includes('*') ? user.cpf : formatarCpf(user.cpf)}
+            editable={false}
+          />
+        ) : null}
       </Card>
 
       {!user?.email_verificado ? (

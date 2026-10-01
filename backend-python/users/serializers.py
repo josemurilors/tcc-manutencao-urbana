@@ -48,11 +48,42 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+def mascarar_cpf(cifrado):
+    """CPF guardado cifrado -> '***.456.789-**'. Nunca devolve o texto cifrado nem o CPF inteiro."""
+    if not cifrado:
+        return None
+    try:
+        from services.encryption import decrypt_text
+        nums = decrypt_text(cifrado)
+    except Exception:
+        return None
+    if len(nums) != 11:
+        return None
+    return f'***.{nums[3:6]}.{nums[6:9]}-**'
+
+
 class UserSerializer(serializers.ModelSerializer):
+    """
+    Perfil do próprio usuário. Só `nome` é editável: e-mail exige nova
+    verificação, CPF passa por cifra + hash (cadastro), e município/papel
+    têm endpoints próprios com regra de quem pode mudar o quê.
+    """
+    cpf = serializers.SerializerMethodField()
+    super_admin = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = (
-            'id', 'email', 'nome', 'cpf', 'admin', 'municipio_id',
+            'id', 'email', 'nome', 'cpf', 'admin', 'papel', 'super_admin', 'municipio_id',
+            'secretaria_id', 'equipe_id', 'email_verified', 'criado_em',
+        )
+        read_only_fields = (
+            'id', 'email', 'admin', 'papel', 'municipio_id', 'secretaria_id', 'equipe_id',
             'email_verified', 'criado_em',
         )
-        read_only_fields = ('id', 'admin', 'email_verified', 'criado_em')
+
+    def get_cpf(self, obj):
+        return mascarar_cpf(obj.cpf)
+
+    def get_super_admin(self, obj):
+        return obj.papel == 'super_admin'

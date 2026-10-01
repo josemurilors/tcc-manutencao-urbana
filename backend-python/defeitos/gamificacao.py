@@ -4,7 +4,7 @@ Gamificação: nível, EXP e ranking por município.
 Nada disso vive em coluna própria — o XP é **derivado** das tabelas que já
 existem, então fica sempre coerente com a moderação comunitária (`regras.py`):
 
-* chamado apagado como "não existe" some do banco e leva o XP junto;
+* chamado removido como "não existe" (soft delete) leva o XP junto;
 * strike ativo desconta XP enquanto não expira;
 * nenhum backfill/migração: contas antigas já nascem com o XP do histórico.
 
@@ -22,7 +22,7 @@ nível 4 aos 180... Cada nível carrega um título (`TITULOS`).
 
 O ranking é por município e mede **contribuição naquela cidade** (chamados
 abertos lá + confirmações em chamados de lá); strikes são reputação global e
-ficam de fora — o chamado apagado já deixou de pontuar.
+ficam de fora — o chamado removido já deixou de pontuar.
 """
 
 from django.db.models import Count, F, Q
@@ -38,7 +38,7 @@ XP_STRIKE = -20
 # XP acumulado para estar no nível n: XP_BASE_NIVEL * n * (n-1).
 XP_BASE_NIVEL = 15
 
-STATUS_RESOLVIDOS = ('atendido', 'encerrado', 'concluido')
+STATUS_RESOLVIDOS = ('concluido',)
 
 # Título por nível; do último em diante o título não muda mais.
 TITULOS = [
@@ -90,11 +90,11 @@ def _xp_total(chamados, resolvidos, confirmacoes, strikes=0):
 
 def resumo_do_usuario(usuario):
     """Progresso completo do usuário logado (tela de conta)."""
-    chamados = Defeito.objects.filter(usuario=usuario)
+    chamados = Defeito.objects.ativos().filter(usuario=usuario)
     total = chamados.count()
     resolvidos = chamados.filter(status__in=STATUS_RESOLVIDOS).count()
     confirmacoes = (
-        Apoio.objects.filter(usuario=usuario)
+        Apoio.objects.filter(usuario=usuario, defeito__removido_em__isnull=True)
         .exclude(defeito__usuario=usuario)
         .count()
     )
@@ -126,8 +126,8 @@ def ranking_de(municipio_id=None, desde=None):
             }
         return linhas[chave]
 
-    reports = Defeito.objects.exclude(usuario=None)
-    apoios = Apoio.objects.exclude(usuario=F('defeito__usuario'))
+    reports = Defeito.objects.ativos().exclude(usuario=None)
+    apoios = Apoio.objects.filter(defeito__removido_em__isnull=True).exclude(usuario=F('defeito__usuario'))
     if municipio_id is not None:
         reports = reports.filter(municipio_id=municipio_id)
         apoios = apoios.filter(defeito__municipio_id=municipio_id)

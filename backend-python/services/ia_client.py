@@ -8,26 +8,6 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 3.0
 
-SECRETARIAS = {
-    'Buraco': 'Secretaria de Obras e Infraestrutura',
-    'Iluminacao': 'Secretaria de Iluminacao Publica',
-    'Semafaro': 'Secretaria de Transito e Mobilidade',
-    'Arvore Caida': 'Secretaria de Meio Ambiente',
-    'Entulho': 'Secretaria de Limpeza Urbana',
-    'Calcada Danificada': 'Secretaria de Obras e Infraestrutura',
-    'Outro': 'Secretaria de Servicos Urbanos',
-}
-
-PRAZOS = {
-    'Buraco': 7,
-    'Iluminacao': 5,
-    'Semafaro': 2,
-    'Arvore Caida': 2,
-    'Entulho': 15,
-    'Calcada Danificada': 7,
-    'Outro': 15,
-}
-
 
 class CircuitBreaker:
     KEY_TEMPLATE = 'ia:circuit:{name}'
@@ -118,8 +98,16 @@ async def check_spam(text: str, redis_client=None) -> dict | None:
     return await _call_ia('/check-spam', {'text': text}, redis_client)
 
 
-def routing(categoria: str) -> dict:
+def routing(categoria: str, municipio_id=None) -> dict:
+    """
+    Secretaria e prazo da categoria. A regra mora em `defeitos.sla`, que casa
+    o nome sem acento (antes as chaves daqui eram 'Iluminacao', 'Semafaro'...
+    e as categorias com acento caíam todas em 'Outro').
+    """
+    from defeitos.sla import regra_para
+
+    regra = regra_para(categoria, municipio_id)
     return {
-        'secretaria': SECRETARIAS.get(categoria, SECRETARIAS['Outro']),
-        'prazo_sla_dias': PRAZOS.get(categoria, PRAZOS['Outro']),
+        'secretaria': regra['secretaria_nome'],
+        'prazo_sla_dias': regra['prazo_sla_dias'],
     }

@@ -108,7 +108,7 @@ CIDADE_TESTES = '9999900'
 
 @pytest.fixture
 def admin_client(auth_client, user_creds):
-    """Operador vinculado à cidade de teste (que cobre os chamados padrão)."""
+    """Admin municipal da cidade de teste (que cobre os chamados padrão)."""
     from django.db import connection
     from users.models import User
     with connection.cursor() as cur:
@@ -119,9 +119,9 @@ def admin_client(auth_client, user_creds):
             ON CONFLICT (codigo) DO NOTHING
         """, [CIDADE_TESTES])
     user = User.objects.get(email=user_creds['email'])
-    user.admin = 1
+    user.papel = 'admin_municipal'
     user.municipio_id = CIDADE_TESTES
-    user.save(update_fields=['admin', 'municipio_id'])
+    user.save(update_fields=['papel', 'municipio_id'])
     return auth_client
 
 

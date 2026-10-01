@@ -7,8 +7,9 @@ Cidadãos sinalizam um chamado aberto como "já foi resolvido" ou "não existe"
 * **Já foi resolvido** — fecha o chamado (`concluido`) quando o próprio autor
   sinaliza ou quando `RESOLVIDO_MIN` pessoas sinalizam. Continua nos
   relatórios: o problema existiu e foi resolvido.
-* **Não existe** — apaga o chamado de verdade (nunca aparece em lugar nenhum).
-  Pelo autor, apaga na hora e sem penalidade (foi engano). Por terceiros, a
+* **Não existe** — remove o chamado (soft delete: `removido_em`, sai de
+  todas as listagens mas fica no histórico e na auditoria da prefeitura).
+  Pelo autor, remove na hora e sem penalidade (foi engano). Por terceiros, a
   barra sobe com cada confirmação no local (`apoios`): precisa de
   `NAO_EXISTE_MIN + apoios` sinalizações. Nesse caso o autor leva um `Strike`.
 * **Quarentena** — com mais de `STRIKES_TOLERADOS` strikes ativos (não
@@ -26,6 +27,9 @@ from datetime import timedelta
 from django.db.models import Count
 from django.utils import timezone
 
+from core import permissoes
+
+from . import fluxo
 from .models import Apoio, Defeito, Sinalizacao, Strike
 
 # "Já foi resolvido": quantas pessoas (fora o autor) fecham o chamado.
@@ -85,33 +89,46 @@ def _registrar_atualizacao(defeito, texto):
     defeito.atualizacoes = json.dumps(lista, ensure_ascii=False)
 
 
+def remover(defeito, usuario, motivo, *, papel=None, texto=''):
+    """
+    Soft delete: o chamado sai de todas as listagens (`removido_em`), mas o
+    registro e o histórico ficam para a prefeitura e a auditoria.
+    """
+    agora = timezone.now()
+    defeito.removido_em = agora
+    defeito.removido_motivo = motivo
+    defeito.atualizado_em = agora
+    defeito.save(update_fields=['removido_em', 'removido_motivo', 'atualizado_em'])
+    fluxo.registrar_evento(
+        defeito, 'removido', usuario, papel=papel, texto=texto, dados={'motivo': motivo},
+    )
+
+
 def aplicar_sinalizacao(defeito, usuario, tipo):
     """
     Chamada logo depois de gravar a sinalização de `usuario` (tipo `tipo`).
     Devolve `RESULTADO_CONCLUIDO`, `RESULTADO_INEXISTENTE` ou None. Quando
-    devolve `RESULTADO_INEXISTENTE` o `defeito` já foi apagado do banco.
+    devolve `RESULTADO_INEXISTENTE` o `defeito` já foi removido (soft delete).
     """
     autor = defeito.usuario_id is not None and defeito.usuario_id == usuario.id
     contagem = contar_sinalizacoes(defeito)
 
     if tipo == Sinalizacao.RESOLVIDO:
         if autor or contagem[Sinalizacao.RESOLVIDO] >= RESOLVIDO_MIN:
-            agora = timezone.now()
-            defeito.status = 'concluido'
-            if not defeito.atendido_em:
-                defeito.atendido_em = agora.isoformat()
-            defeito.atualizado_em = agora
-            _registrar_atualizacao(
-                defeito,
-                'Concluído pelo próprio autor' if autor else 'Concluído por confirmação de cidadãos',
+            texto = 'Concluído pelo próprio autor' if autor else 'Concluído por confirmação de cidadãos'
+            fluxo.transicionar(
+                defeito, 'concluido', usuario, papel='comunidade', texto=texto,
+                dados={'sinalizacoes': contagem[Sinalizacao.RESOLVIDO], 'pelo_autor': autor},
             )
-            defeito.save()
+            # Legado: o app ainda monta parte da linha do tempo por aqui.
+            _registrar_atualizacao(defeito, texto)
+            defeito.save(update_fields=['atualizacoes'])
             return RESULTADO_CONCLUIDO
         return None
 
     # tipo == NAO_EXISTE
     if autor:
-        defeito.delete()
+        remover(defeito, usuario, 'autor', papel='cidadao', texto='Removido pelo próprio autor')
         return RESULTADO_INEXISTENTE
 
     apoios = Apoio.objects.filter(defeito=defeito).count()
@@ -122,7 +139,10 @@ def aplicar_sinalizacao(defeito, usuario, tipo):
                 titulo=defeito.titulo,
                 criado_em=timezone.now(),
             )
-        defeito.delete()
+        remover(
+            defeito, usuario, 'comunidade', papel='comunidade',
+            texto='Removido por sinalizações de "não existe"',
+        )
         return RESULTADO_INEXISTENTE
     return None
 
@@ -155,7 +175,7 @@ def visivel_para(defeito, usuario, lat=None, lng=None):
     if defeito.visibilidade != Defeito.VISIBILIDADE_RESTRITA:
         return True
     if usuario is not None and usuario.is_authenticated:
-        if usuario.admin or defeito.usuario_id == usuario.id:
+        if permissoes.eh_equipe(usuario) or defeito.usuario_id == usuario.id:
             return True
     if lat is None or lng is None or defeito.latitude is None or defeito.longitude is None:
         return False

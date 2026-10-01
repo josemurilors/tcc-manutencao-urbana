@@ -202,21 +202,32 @@ class TestDefeitosRetrieve:
 class TestDefeitosUpdate:
 
     def test_update_own(self, auth_client):
+        """O autor corrige a descrição enquanto o chamado está pendente."""
+        created = _create_defeito(auth_client)
+        resp = auth_client.patch(
+            reverse('defeitos-detail', args=[created['id']]),
+            {'descricao': 'Descrição corrigida'}, format='json',
+        )
+        assert resp.status_code == 200
+        assert resp.data['descricao'] == 'Descrição corrigida'
+
+    def test_autor_nao_muda_titulo(self, auth_client):
         created = _create_defeito(auth_client)
         resp = auth_client.patch(
             reverse('defeitos-detail', args=[created['id']]),
             {'titulo': 'Updated Title'}, format='json',
         )
-        assert resp.status_code == 200
-        assert resp.data['titulo'] == 'Updated Title'
+        assert resp.status_code == 400
 
     def test_update_status(self, auth_client):
+        """Status nunca muda pelo PATCH do chamado — só pela action `status`."""
         created = _create_defeito(auth_client)
         resp = auth_client.patch(
             reverse('defeitos-detail', args=[created['id']]),
             {'status': 'em_andamento'}, format='json',
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 400
+        assert Defeito.objects.get(id=created['id']).status == 'pendente'
 
     def test_update_unauthenticated(self, client, auth_client):
         created = _create_defeito(auth_client)
@@ -357,7 +368,8 @@ def _apoiar(client, defeito_id):
 
 
 def _existe(defeito_id):
-    return Defeito.objects.filter(id=defeito_id).exists()
+    """Existe para a API: não removido (o "não existe" é soft delete)."""
+    return Defeito.objects.ativos().filter(id=defeito_id).exists()
 
 
 def _dar_strikes(client, auth_client, n, dias_atras=0):
@@ -450,7 +462,7 @@ class TestRegraResolvido:
 
 
 class TestRegraNaoExiste:
-    """"Não existe": apaga de vez; autor sem penalidade, terceiros com barra por confirmação."""
+    """"Não existe": remove (soft delete); autor sem penalidade, terceiros com barra por confirmação."""
 
     def test_autor_apaga_na_hora_sem_strike(self, auth_client):
         from defeitos.models import Strike
@@ -636,11 +648,12 @@ class TestStatusAction:
         created = _create_defeito(admin_client)
         resp = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'atendido'}, format='json',
+            {'status': 'concluido'}, format='json',
         )
         assert resp.status_code == 200
-        assert resp.data['status'] == 'atendido'
+        assert resp.data['status'] == 'concluido'
         assert resp.data['atendido_em']
+        assert resp.data['resolvido_em']
         assert resp.data['foto_resolucao_url'] is None
 
     def test_resolvido_com_foto_resolucao(self, admin_client):
@@ -652,11 +665,12 @@ class TestStatusAction:
         buf.seek(0)
         resp = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'atendido', 'foto_resolucao': buf},
+            {'status': 'concluido', 'foto_resolucao': buf},
             format='multipart',
         )
         assert resp.status_code == 200
-        assert resp.data['status'] == 'atendido'
+        assert resp.data['status'] == 'concluido'
+        assert resp.data['foto_resolucao_url']
 
     def test_update_status_unauthenticated(self, client, auth_client):
         created = _create_defeito(auth_client)
@@ -707,9 +721,11 @@ class TestStatusAction:
             reverse('defeitos-atender', args=[created['id']]), format='json',
         )
         assert resp.status_code == 200
+        # Assumir já leva a "em execução"; dali o atendente reprograma.
+        assert Defeito.objects.get(id=created['id']).status == 'em_andamento'
         resp = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'em_andamento'}, format='json',
+            {'status': 'agendado'}, format='json',
         )
         assert resp.status_code == 200
 
@@ -722,32 +738,23 @@ class TestStatusAction:
         )
         assert resp.status_code == 403
 
-    def test_atendido_em_imutavel_apos_resolvido(self, admin_client):
-        """Transição resolvido→resolvido NÃO sobrescreve o timestamp original."""
-        import io
-        from PIL import Image
+    def test_concluir_de_novo_e_invalido(self, admin_client):
+        """concluido -> concluido não é transição: não sobrescreve o fechamento original."""
         created = _create_defeito(admin_client)
-        buf = io.BytesIO()
-        Image.new('RGB', (64, 64), color='red').save(buf, format='JPEG')
-        buf.seek(0)
         first = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'atendido', 'foto_resolucao': buf},
-            format='multipart',
+            {'status': 'concluido'}, format='json',
         )
         assert first.status_code == 200
-        first_ts = first.data['atendido_em']
+        antes = Defeito.objects.get(id=created['id']).resolvido_em
 
-        buf = io.BytesIO()
-        Image.new('RGB', (64, 64), color='red').save(buf, format='JPEG')
-        buf.seek(0)
+        # 'atendido' (legado) é aceito e convertido para 'concluido'.
         second = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'concluido', 'foto_resolucao': buf},
-            format='multipart',
+            {'status': 'atendido'}, format='json',
         )
-        assert second.status_code == 200
-        assert second.data['atendido_em'] == first_ts
+        assert second.status_code == 400
+        assert Defeito.objects.get(id=created['id']).resolvido_em == antes
 
 
 class TestBatchStatus:
@@ -852,13 +859,14 @@ class TestBatchStatus:
         d1 = _create_defeito(admin_client)
         resp = admin_client.patch(
             reverse(self.URL),
-            {'ids': [d1['id']], 'status': 'atendido'},
+            {'ids': [d1['id']], 'status': 'concluido'},
             format='json',
         )
         assert resp.status_code == 200
         obj = Defeito.objects.get(id=d1['id'])
-        assert obj.status == 'atendido'
+        assert obj.status == 'concluido'
         assert obj.atendido_em
+        assert obj.resolvido_em and obj.fechado_em
 
 
 class TestOrdemServico:
@@ -952,6 +960,7 @@ class TestSlaVencido:
         created = _create_defeito(auth_client)
         defeito = Defeito.objects.get(id=created['id'])
         defeito.criado_em = timezone.now() - timedelta(days=30)
+        defeito.prazo_em = defeito.criado_em + timedelta(days=defeito.prazo_sla_dias)
         defeito.save()
         resp = client.get(reverse('defeitos-detail', args=[created['id']]))
         assert resp.status_code == 200
@@ -1106,15 +1115,15 @@ class TestOperacaoPorMunicipio:
             """, [self.CIDADE])
 
     def _operador(self, client, municipio_id=None):
-        """Admin comum (não super) vinculado — ou não — a um município."""
+        """Operador (não super) vinculado — ou não — a um município."""
         from users.models import User
         op = _new_user_client(client)
         # O cliente autentica por JWT; acha o usuário pelo perfil.
         perfil = op.get(reverse('auth-profile'))
         user = User.objects.get(id=perfil.data['id'])
-        user.admin = 1
+        user.papel = 'operador'
         user.municipio_id = municipio_id
-        user.save(update_fields=['admin', 'municipio_id'])
+        user.save(update_fields=['papel', 'municipio_id'])
         return op
 
     @staticmethod
@@ -1269,7 +1278,7 @@ class TestGamificacao:
         )
         assert _progresso(cli)['xp'] == 0
 
-    def test_chamado_apagado_leva_o_xp_junto(self, client):
+    def test_chamado_removido_leva_o_xp_junto(self, client):
         cli = _new_user_client(client)
         created = _create_defeito(cli)
         assert _progresso(cli)['xp'] == 10
@@ -1351,15 +1360,16 @@ class TestRanking:
         )
         self._report(cli, -27.083)
 
-        geral = client.get(reverse('defeitos-ranking'), {'geral': '1'})
+        # O ranking geral corta no top 20 e a sessão de testes acumula
+        # usuários: a linha do próprio usuário vem em `eu` (cliente logado).
+        geral = cli.get(reverse('defeitos-ranking'), {'geral': '1'})
         assert geral.status_code == 200
         assert geral.data['municipio'] is None
-        linha = next(i for i in geral.data['ranking'] if i['usuario_id'] == meu_id)
-        assert linha['chamados'] == 2
+        assert geral.data['eu']['usuario_id'] == meu_id
+        assert geral.data['eu']['chamados'] == 2
 
-        semana = client.get(reverse('defeitos-ranking'), {'geral': '1', 'periodo': 'semana'})
-        linha = next(i for i in semana.data['ranking'] if i['usuario_id'] == meu_id)
-        assert linha['chamados'] == 1
+        semana = cli.get(reverse('defeitos-ranking'), {'geral': '1', 'periodo': 'semana'})
+        assert semana.data['eu']['chamados'] == 1
 
         assert client.get(
             reverse('defeitos-ranking'), {'geral': '1', 'periodo': 'ano'},

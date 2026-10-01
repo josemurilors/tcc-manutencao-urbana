@@ -33,6 +33,8 @@ INSTALLED_APPS = [
     'defeitos',
     'municipios',
     'categorias',
+    'gestao',
+    'notificacoes',
 ]
 
 MIDDLEWARE = [

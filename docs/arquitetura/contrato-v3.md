@@ -170,6 +170,25 @@ def atribuir(defeito, autor, *, equipe_id=None, atendente_id=None) -> Defeito
 
 `transicionar` chama `notificacoes.servico.ao_evento(defeito, evento)` em
 `transaction.on_commit`; o import é tardio e tolera o app ausente.
+(Na prática quem agenda é `registrar_evento`, para todo evento; `ao_evento`
+filtra os públicos de `status`/`resposta_publica`.)
+
+Extras de `fluxo.py`: `TransicaoNaoPermitida(TransicaoInvalida)` — transição
+válida mas sem papel para ela (as views devolvem 403; `TransicaoInvalida`, 400);
+`normalizar_status(s)` e `STATUS_LEGADOS` convertem valores antigos vindos de
+apps desatualizados. `transicionar` também checa quem pode: equipe do município
+(`pode_operar`); rejeitar/reabrir exige gestor+; o autor reabre o próprio
+concluído até `REABERTURA_AUTOR_DIAS`; `papel='comunidade'` só conclui.
+Soft delete: `Defeito.objects.ativos()` e `regras.remover(defeito, usuario, motivo)`.
+`sla.py` traz ainda `normalizar`, `calcular_prazo`, `sla_vencido` e
+`sla_restante_horas`. `notificacoes.servico.enviar_push(usuarios, titulo, corpo, dados)`
+é no-op até existir o transporte de push.
+
+Serializers de chamado nunca expõem `usuario`, `usuario_email` nem ids de
+usuário: `autor_nome` sai mascarado ("Maria S.") e `atendente_id` nulo para quem
+não é da equipe do município; `eh_autor` e `tem_atendente` cobrem o que o app
+precisa saber. Histórico: `GET /api/v1/defeitos/<id>/eventos/` (internos só
+para a equipe do município).
 
 `defeitos/sla.py`: `regra_para(categoria_nome, municipio_id) -> {categoria_id, prazo_sla_dias,
 prioridade, secretaria_id, secretaria_nome}` — `categoria_municipio` sobrepõe a

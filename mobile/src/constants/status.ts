@@ -1,78 +1,120 @@
 /**
- * Cores e rótulos de status, portados de `frontend/src/components/ui/status-utils.js`
- * e `frontend/src/constants.js`.
+ * Única fonte de rótulo/cor de status do app (contrato v3, seção 1 —
+ * `docs/arquitetura/contrato-v3.md`). Os status canônicos espelham
+ * `defeitos/fluxo.py` no backend; os legados só chegam de dados antigos em
+ * cache e são convertidos por `normalizarStatus`.
  */
 
-const STATUS_COLORS: Record<string, string> = {
-  pendente: '#F97316',
-  em_andamento: '#F97316',
-  vinculado_sem_resposta: '#EAB308',
-  vinculado_com_resposta: '#3B82F6',
-  atendido: '#22C55E',
-  concluido: '#22C55E',
-  encerrado: '#6B7280',
-  critico: '#CF4444',
-  aberto: '#F97316',
-  resolvido: '#22C55E',
-  rejeitado: '#6B7280',
+export const STATUS = [
+  'pendente',
+  'em_analise',
+  'agendado',
+  'em_andamento',
+  'concluido',
+  'rejeitado',
+] as const;
+
+export type Status = (typeof STATUS)[number];
+
+/** Valores antigos -> canônicos (o banco já foi convertido pelo bootstrap_schema). */
+const STATUS_LEGADOS: Record<string, Status> = {
+  vinculado_sem_resposta: 'em_andamento',
+  vinculado_com_resposta: 'em_andamento',
+  atendido: 'concluido',
+  encerrado: 'concluido',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  pendente: 'Aguardando Atendimento',
-  em_andamento: 'Aguardando Atendimento',
-  vinculado_sem_resposta: 'Vinculado (Sem Resposta)',
-  vinculado_com_resposta: 'Vinculado (Com Resposta)',
-  atendido: 'Concluído e Finalizado',
-  encerrado: 'Concluído e Finalizado',
-  concluido: 'Concluído e Finalizado',
-  critico: 'Crítico',
-  aberto: 'Aguardando Atendimento',
-  resolvido: 'Concluído e Finalizado',
+export function normalizarStatus(status: string): string {
+  return STATUS_LEGADOS[status] ?? status;
+}
+
+export const STATUS_ABERTOS: string[] = ['pendente', 'em_analise', 'agendado', 'em_andamento'];
+
+export const STATUS_FECHADOS: string[] = ['concluido', 'rejeitado'];
+
+export function statusAberto(status: string) {
+  return STATUS_ABERTOS.includes(normalizarStatus(status));
+}
+
+export function statusFechado(status: string) {
+  return STATUS_FECHADOS.includes(normalizarStatus(status));
+}
+
+/** Como o cidadão lê o status (app público, notificações). */
+const ROTULOS_CIDADAO: Record<Status, string> = {
+  pendente: 'Recebido',
+  em_analise: 'Em análise',
+  agendado: 'Programado',
+  em_andamento: 'Em execução',
+  concluido: 'Resolvido',
+  rejeitado: 'Não procede',
+};
+
+/** Como a equipe da prefeitura lê o status (fila, painel). */
+const ROTULOS_OPERACAO: Record<Status, string> = {
+  pendente: 'Novo',
+  em_analise: 'Em triagem',
+  agendado: 'Programado',
+  em_andamento: 'Em execução',
+  concluido: 'Concluído',
   rejeitado: 'Rejeitado',
 };
 
-/** Cores curtas usadas nos gráficos do painel (equivale a STATUS_CONFIG do web). */
-export const STATUS_CHART_COLORS: Record<string, string> = {
-  pendente: '#4A90D9',
-  em_andamento: '#D4AF37',
-  vinculado_sem_resposta: '#D4AF37',
-  vinculado_com_resposta: '#4A90D9',
-  atendido: '#4CAF7D',
-  encerrado: '#6B5B3E',
-  concluido: '#4CAF7D',
+export function rotuloCidadao(status: string) {
+  const s = normalizarStatus(status) as Status;
+  return ROTULOS_CIDADAO[s] ?? status;
+}
+
+export function rotuloOperacao(status: string) {
+  const s = normalizarStatus(status) as Status;
+  return ROTULOS_OPERACAO[s] ?? status;
+}
+
+const STATUS_COLORS: Record<Status, string> = {
+  pendente: '#F97316',
+  em_analise: '#EAB308',
+  agendado: '#3B82F6',
+  em_andamento: '#3B82F6',
+  concluido: '#22C55E',
+  rejeitado: '#6B7280',
 };
 
-export const STATUS_ABERTOS = [
-  'pendente',
-  'em_andamento',
-  'vinculado_sem_resposta',
-  'vinculado_com_resposta',
-];
-
-export const STATUS_FECHADOS = ['atendido', 'encerrado', 'concluido'];
+/** Cores curtas usadas nos gráficos do painel. */
+export const STATUS_CHART_COLORS: Record<string, string> = {
+  pendente: '#4A90D9',
+  em_analise: '#D4AF37',
+  agendado: '#8E7CC3',
+  em_andamento: '#D4AF37',
+  concluido: '#4CAF7D',
+  rejeitado: '#6B5B3E',
+};
 
 const UMA_SEMANA_MS = 7 * 24 * 60 * 60 * 1000;
 
 function concluidoHaMaisDeUmaSemana(status: string, concluidoEm?: string | null) {
   if (!concluidoEm) return false;
-  if (!STATUS_FECHADOS.includes(status)) return false;
+  if (!statusFechado(status)) return false;
   return Date.now() - new Date(concluidoEm).getTime() >= UMA_SEMANA_MS;
 }
 
 export function getStatusColor(status: string, concluidoEm?: string | null) {
   if (concluidoHaMaisDeUmaSemana(status, concluidoEm)) return '#6B7280';
-  return STATUS_COLORS[status] ?? STATUS_COLORS.pendente;
+  return STATUS_COLORS[normalizarStatus(status) as Status] ?? STATUS_COLORS.pendente;
 }
 
+/** Rótulo do cidadão, com o aviso de "fechado há mais de uma semana" do mapa. */
 export function getStatusLabel(status: string, concluidoEm?: string | null) {
-  if (concluidoHaMaisDeUmaSemana(status, concluidoEm)) return 'Concluído há +1 semana';
-  return STATUS_LABELS[status] ?? status;
+  if (concluidoHaMaisDeUmaSemana(status, concluidoEm)) return 'Resolvido há +1 semana';
+  return rotuloCidadao(status);
 }
 
-/** Opções de alteração de status em lote (admin). */
+/**
+ * Opções de alteração de status em lote (operação). Rejeitar fica de fora:
+ * exige motivo e é decisão de gestor, feita chamado a chamado.
+ */
 export const BATCH_STATUS_OPTIONS: [string, string][] = [
-  ['pendente', 'Pendente'],
-  ['em_andamento', 'Em Andamento'],
-  ['vinculado_sem_resposta', 'Vinculado'],
-  ['rejeitado', 'Rejeitar'],
+  ['em_analise', ROTULOS_OPERACAO.em_analise],
+  ['agendado', ROTULOS_OPERACAO.agendado],
+  ['em_andamento', ROTULOS_OPERACAO.em_andamento],
+  ['concluido', ROTULOS_OPERACAO.concluido],
 ];

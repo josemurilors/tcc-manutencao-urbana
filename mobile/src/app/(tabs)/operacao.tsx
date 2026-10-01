@@ -463,7 +463,7 @@ export default function OperacaoScreen() {
           setDefeitos((prev) =>
             prev.map((d) =>
               ok.has(d.id)
-                ? { ...d, status: 'vinculado_sem_resposta', atendente_id: user?.id ?? null }
+                ? { ...d, status: 'em_andamento', atendente_id: user?.id ?? null, tem_atendente: true }
                 : d,
             ),
           );
