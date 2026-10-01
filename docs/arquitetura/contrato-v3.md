@@ -311,6 +311,41 @@ Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
 | GET `exportar/?formato=csv\|xlsx` | arquivo |
 | GET `relatorio/?mes=YYYY-MM` | PDF |
 
+Definições (implementadas em `bi/consultas.py`; limites do período à meia-noite
+de America/Sao_Paulo, `fim` inclusivo, máximo 731 dias):
+
+- `resolvidos` = hoje em `concluido` com `resolvido_em` no período (resolvido e
+  reaberto deixa de contar); `rejeitados` = hoje em `rejeitado`, fechado no período;
+  `backlog` = abertos no fim do período; `backlog_vencido` = do backlog, `prazo_em`
+  antes do corte (fim do período, ou agora se ele não acabou).
+- `pct_no_prazo` = resolvidos com `resolvido_em <= prazo_em` / resolvidos **com
+  prazo** (sem SLA não há prazo a perder); `lead_time_*` = `resolvido_em - criado_em`
+  (`percentile_cont`); `primeira_resposta_p50_h` = dos recebidos, o menor entre o
+  1º evento público da equipe (≠ `criado`) e `triado_em`; `taxa_resolucao` = dos
+  recebidos no período, % já resolvidos no fim dele; `reabertura_pct` = resolvidos
+  com `reaberturas > 0` / resolvidos; `csat_*` por `avaliado_em`;
+  `cidadaos_ativos` = autores ou apoiadores distintos. Percentuais 0–100 com 1 casa;
+  `null` quando o denominador é zero.
+- `kpis/`: sem `comparar=1`, `anterior` e `kpis_anterior` vêm `null`. A janela
+  anterior tem o mesmo número de dias, imediatamente antes.
+- `series/`: buckets com zero preenchidos; semana começa na segunda; `periodo` é a
+  data de início do bucket já cortada no período (`AAAA-MM` em `mes`); `backlog` é o
+  estoque aberto no fim do bucket.
+- `distribuicao/`: `chave` é o id em texto (categoria/secretaria/equipe) ou
+  `nome:<texto>` para chamados antigos sem id; bairro em minúsculas; status canônico.
+- `aging/` sempre traz as 5 faixas (idade em dias completos no corte).
+- `produtividade/`: servidores do município (e quem atendeu algo no escopo);
+  `em_andamento` = abertos hoje com o servidor como atendente.
+- `hotspots/`: células de 0,002° (~200 m) dos recebidos; `reincidencia` = mesma
+  rua+bairro+categoria com 2+ chamados no período (até 20).
+- `exportar/`: um chamado recebido no período por linha (até 50 mil), sem dado do
+  cidadão; CSV com BOM e `;` (Excel pt-BR); XLSX gerado sem dependência extra.
+  Colunas em `consultas.COLUNAS_EXPORTACAO`. Gera `audit_log` `bi.exportar`.
+- `relatorio/`: `mes` padrão = mês anterior; compara com o mês civil anterior;
+  aceita os filtros comuns; gera `audit_log` `bi.relatorio`.
+- `?municipio=` de gestor apontando para outra cidade → 403 (não cai em silêncio
+  no próprio município).
+
 ### 7.5 Transparência e dados abertos (públicos, sem PII)
 
 - GET `api/v1/transparencia/<codigo>/` → `{municipio:{codigo,nome,uf_sigla}, contratado,
@@ -320,6 +355,20 @@ Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
   categoria, bairro, resolvido_em, tem_foto_depois}]}`
 - GET `api/v1/dados-abertos/<codigo>/chamados.csv` e `.geojson` (coordenadas com 4 casas).
 - Open311 GeoReport v2 (leitura): `api/v1/open311/v2/services.json`, `requests.json`.
+
+Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min):
+
+- Transparência: cache de 10 min; campo extra `atualizado_em`; município
+  inexistente → 404. Agregados contam todos os chamados não removidos; listas
+  (`ultimos_resolvidos`, dados abertos, Open311) só os `visibilidade='publica'`.
+- Dados abertos: colunas `protocolo, categoria, status, situacao (rótulo cidadão),
+  orgao_responsavel, bairro, rua, latitude, longitude, criado_em, prazo_em,
+  resolvido_em, no_prazo, total_apoios`; `?inicio=&fim=` (AAAA-MM-DD) opcionais sobre
+  a abertura; sem título/descrição; até 100 mil linhas; CSV com BOM e `;`.
+- Open311: `jurisdiction_id` (código IBGE) obrigatório; `service_request_id` =
+  protocolo; `service_code` = id da categoria; sem filtro de data/id devolve os
+  últimos 90 dias, até 1000; também `v2/requests/<protocolo>.json`; erros no formato
+  `[{code, description}]`. Só JSON (sem XML).
 
 ### 7.6 Gestão — `api/v1/gestao/`
 
