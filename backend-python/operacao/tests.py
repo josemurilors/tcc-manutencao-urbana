@@ -421,7 +421,7 @@ class TestComunicacao:
         resp = op.post(_url('resposta', d.id), {'texto': 'Equipe agendada para quinta.'}, format='json')
         assert resp.status_code == 201
         assert Defeito.objects.get(id=d.id).resposta_publica == 'Equipe agendada para quinta.'
-        assert Notificacao.objects.filter(usuario=autor, tipo='resposta_publica').exists()
+        assert Notificacao.objects.filter(usuario=autor, tipo='resposta').exists()
 
 
 class TestGestao:
