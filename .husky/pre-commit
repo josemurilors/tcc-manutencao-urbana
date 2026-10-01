@@ -49,7 +49,7 @@ fi
 # -------------------------------------------
 echo "📝 [2/2] Linting Markdown files..."
 if command -v npx &> /dev/null; then
-  npx --no -- markdownlint-cli2 '**/*.md' '!**/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**' 2>/dev/null
+  npx --no -- markdownlint-cli2 '**/*.md' '!**/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**' '!.claude/**' 2>/dev/null
   if [ $? -ne 0 ]; then
     echo ""
     echo "❌ Markdown linting failed!"

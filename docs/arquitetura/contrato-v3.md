@@ -196,3 +196,103 @@ tabela `categorias`; busca por nome sem acento/caixa.
 Rotas: `api/v1/gestao/`, `api/v1/notificacoes/`, `api/v1/bi/`,
 `api/v1/transparencia/` (pública), `api/v1/dados-abertos/` (pública),
 `api/v1/operacao/` (fila e ações da equipe).
+
+## 7. API v3 (contrato entre backend e app)
+
+Convenções: JSON; datas ISO 8601; horas como float; listas grandes paginadas
+no formato DRF (`{count, next, previous, results}`, `?page=`); erros
+`{detail}` com status 400/403/404/409. "Município do usuário" = `users.municipio_id`;
+`super_admin` pode passar `?municipio=<codigo>` nas rotas de gestão/BI.
+
+### 7.1 Operação — `api/v1/operacao/` (equipe: operador+)
+
+| método e rota | corpo / query | resposta |
+|---|---|---|
+| GET `fila/` | `status`, `categoria_id`, `equipe_id`, `atribuicao=meus\|equipe\|sem\|todos`, `vencidos=1`, `bairro`, `q`, `ordenar=score\|prazo\|antigos\|apoios\|distancia`, `lat`, `lng`, `page` | paginado de `ChamadoFila` |
+| GET `resumo/` | — | `{abertos, meus, vencidos, vencem_24h, sem_atribuicao, sinalizados, concluidos_hoje}` |
+| POST `chamados/<id>/transicao/` | `{para, texto?, resposta_publica?, motivo?, duplicado_de?, checklist?}`; multipart com `foto`, `latitude`, `longitude` quando houver evidência | detalhe do chamado |
+| POST `chamados/<id>/atribuir/` | `{equipe_id?, atendente_id?}` (operador só pode `atendente_id`= si mesmo) | detalhe |
+| POST `chamados/<id>/liberar/` | — | detalhe |
+| POST `chamados/<id>/nota/` | `{texto}` | evento |
+| POST `chamados/<id>/resposta/` | `{texto}` | evento |
+| POST `chamados/<id>/evidencia/` | multipart `{foto, tipo: antes\|depois, latitude, longitude}` | anexo |
+| GET `chamados/<id>/anexos/` | — | `[{id, tipo, url, latitude, longitude, autor_nome, criado_em}]` |
+| GET `anexos/<id>/imagem/` | — | `image/jpeg` (equipe, ou público se o chamado é público) |
+| POST `chamados/<id>/sla/` | `{prazo_sla_dias, motivo}` (gestor+) | detalhe |
+| POST `chamados/<id>/prioridade/` | `{prioridade: baixa\|media\|alta\|urgente}` (gestor+) | detalhe |
+| POST `lote/` | `{ids, acao: transicao\|atribuir, ...campos da ação}` | `{ok: [ids], erros: [{id, detail}]}` |
+| GET/POST `respostas-padrao/`, PATCH/DELETE `respostas-padrao/<id>/` | `{titulo, texto, categoria_id?}` (escrita gestor+) | `RespostaPadrao` |
+| GET `equipes/` | — | `[{id, nome, secretaria_nome, membros: [{id, nome, papel}]}]` |
+
+`ChamadoFila` = campos da listagem de defeitos + `protocolo, score, prazo_em,
+sla_restante_horas, sla_vencido, distancia_m, atendente_id, atendente_nome,
+equipe_id, equipe_nome, total_apoios, total_resolvido, total_nao_existe,
+checklist: string[]`. `score` (0–100) pondera prioridade, SLA restante,
+apoios, idade e sinalizações; a fórmula fica documentada em `operacao/fila.py`.
+
+### 7.2 Cidadão — `api/v1/defeitos/`
+
+| método e rota | corpo / query | resposta |
+|---|---|---|
+| GET `<id>/eventos/` | — | `[{id, tipo, de_status, para_status, papel, texto, publico, criado_em}]` (internos só equipe) |
+| POST `<id>/avaliar/` | `{nota: 1..5, comentario?}` (autor; só `concluido`; editável por 7 dias) | detalhe |
+| POST `<id>/reabrir/` | `{motivo}` (autor até 30 dias após `resolvido_em`, ou gestor+) | detalhe |
+| GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios}]` (abertos no raio + fechados há ≤30 dias) |
+| GET `protocolo/<protocolo>/` (público) | — | detalhe público |
+| GET `area/` | + `situacao=abertos\|resolvidos\|todos` (padrão abertos), `categorias=<ids>` | como hoje, com `celulas` para todos os usuários |
+
+### 7.3 Notificações — `api/v1/notificacoes/` (autenticado)
+
+GET `/` (paginado `[{id, tipo, titulo, corpo, defeito_id, lida_em, criado_em}]`),
+GET `nao-lidas/` → `{total}`, POST `<id>/lida/`, POST `todas-lidas/`,
+POST `push-tokens/` `{token, plataforma}`, DELETE `push-tokens/` `{token}`.
+Tipos: `status`, `resposta`, `avaliar`, `apoio_marco`, `sla_alerta`, `atribuido`, `moderacao`.
+
+### 7.4 BI — `api/v1/bi/` (gestor+)
+
+Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
+`categoria_id`, `secretaria_id`, `equipe_id`, `bairro`.
+
+| rota | resposta |
+|---|---|
+| GET `kpis/?comparar=1` | `{periodo:{inicio,fim}, anterior:{inicio,fim}, kpis, kpis_anterior}`; `kpis = {recebidos, resolvidos, rejeitados, backlog, backlog_vencido, pct_no_prazo, lead_time_p50_h, lead_time_p90_h, primeira_resposta_p50_h, taxa_resolucao, reabertura_pct, csat_media, csat_respostas, cidadaos_ativos}` |
+| GET `series/?granularidade=dia\|semana\|mes` | `[{periodo, recebidos, resolvidos, backlog}]` |
+| GET `distribuicao/?dimensao=categoria\|bairro\|secretaria\|equipe\|status` | `[{chave, rotulo, recebidos, abertos, resolvidos, vencidos, pct_no_prazo, lead_time_p50_h}]` |
+| GET `aging/` | `[{faixa: "0-2d"\|"3-7d"\|"8-15d"\|"16-30d"\|">30d", total, vencidos}]` |
+| GET `produtividade/` | `[{usuario_id, nome, equipe_nome, concluidos, lead_time_p50_h, em_andamento}]` |
+| GET `hotspots/` | `{celulas: [{lat, lng, total, categoria_top}], reincidencia: [{bairro, rua, categoria, ocorrencias}]}` |
+| GET `satisfacao/` | `{media, respostas, distribuicao: {1..5}, comentarios: [{nota, comentario, protocolo, criado_em}]}` |
+| GET `exportar/?formato=csv\|xlsx` | arquivo |
+| GET `relatorio/?mes=YYYY-MM` | PDF |
+
+### 7.5 Transparência e dados abertos (públicos, sem PII)
+
+- GET `api/v1/transparencia/<codigo>/` → `{municipio:{codigo,nome,uf_sigla}, contratado,
+  kpis_90d:{recebidos, resolvidos, pct_no_prazo, tempo_mediano_dias, csat_media},
+  por_categoria:[{categoria, icone, recebidos, resolvidos, tempo_mediano_dias, pct_no_prazo}],
+  serie_mensal:[{mes, recebidos, resolvidos}], ultimos_resolvidos:[{id, protocolo, titulo,
+  categoria, bairro, resolvido_em, tem_foto_depois}]}`
+- GET `api/v1/dados-abertos/<codigo>/chamados.csv` e `.geojson` (coordenadas com 4 casas).
+- Open311 GeoReport v2 (leitura): `api/v1/open311/v2/services.json`, `requests.json`.
+
+### 7.6 Gestão — `api/v1/gestao/`
+
+| rota | quem | nota |
+|---|---|---|
+| GET/PATCH `municipio/` | GET equipe, PATCH admin_municipal | `MunicipioConfig` + nome/uf |
+| CRUD `secretarias/`, `equipes/` | admin_municipal (GET gestor+) | |
+| GET/POST `membros/`, PATCH/DELETE `membros/<id>/` | GET gestor+, escrita admin_municipal | POST `{email, papel, secretaria_id?, equipe_id?}` vincula conta existente; DELETE volta a cidadão |
+| GET `categorias/`, PATCH `categorias/<categoria_id>/` | GET equipe, PATCH admin_municipal | `{categoria_id, nome, icone, prazo_sla_dias, prioridade, secretaria_id, ativo, checklist}` |
+| GET `moderacao/` | gestor+ | `{sinalizados, removidos, usuarios}` |
+| POST `moderacao/defeitos/<id>/remover/` `{motivo}`, `.../restaurar/` | gestor+ | |
+| POST `moderacao/usuarios/<id>/suspender/` `{dias, motivo}`, `.../reativar/` | gestor+ | |
+| GET `auditoria/?acao=&usuario_id=` | admin_municipal | paginado |
+
+Todas as escritas chamam `core.auditoria.registrar`.
+
+### 7.7 Conta e LGPD — `api/v1/auth/`
+
+POST `senha/esqueci/` `{email}` (resposta sempre 200), POST `senha/redefinir/`
+`{email, codigo, nova_senha}`, POST `aceite-termos/`, GET `meus-dados/`
+(exportação JSON). O objeto `user` passa a trazer `papel, municipio_id,
+secretaria_id, equipe_id, aceite_termos_em, suspenso_ate`.
