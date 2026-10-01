@@ -1,25 +1,30 @@
 /**
  * Abas principais. Substituem o header + dropdown de usuário do web:
- * mapa, lista de chamados, painel e operação (admin). A conta saiu da barra —
- * vive atrás do botão de menu no topo do mapa. Com uma aba só (visitante sem
- * login: apenas o mapa) a barra inteira some.
+ * mapa, lista de chamados, painel e operação. A conta saiu da barra — vive
+ * atrás do botão de menu no topo do mapa. Com uma aba só (visitante ou
+ * cidadão: apenas o mapa) a barra inteira some.
+ *
+ * As abas seguem o papel (contrato v3, seção 3): operador+ vê Operação,
+ * gestor+ vê também o Painel (BI). `usePapel` revalida o papel com o perfil
+ * ao montar, então quem foi promovido ou perdeu o acesso vê a barra mudar
+ * sem precisar sair e entrar de novo.
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router/js-tabs';
 
+import { usePapel } from '@/components/gestao/papeis';
 import { FontSize } from '@/constants/theme';
-import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 
 export default function TabsLayout() {
   const colors = useColors();
-  const { isAuthenticated, user } = useAuth();
+  const { ehEquipe, ehGestor } = usePapel();
 
-  const admin = isAuthenticated && !!user?.admin;
-  // mapa (sempre) + operação e painel (admin). Para o cidadão comum sobra só
-  // o mapa, então a barra some — chamados dele vivem em Conta > Meus chamados.
-  const abasVisiveis = 1 + (admin ? 2 : 0);
+  // mapa (sempre) + operação (operador+) + painel (gestor+). Para o cidadão
+  // sobra só o mapa, então a barra some — os chamados dele vivem em Conta >
+  // Meus chamados.
+  const abasVisiveis = 1 + (ehEquipe ? 1 : 0) + (ehGestor ? 1 : 0);
 
   return (
     <Tabs
@@ -48,7 +53,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="construct" size={size} color={color} />,
           // Mapa de trabalho do operador: fila, meus atendimentos, finalizar.
           // Separado do mapa do cidadão para nenhum dos dois virar uma mistura.
-          href: admin ? undefined : null,
+          href: ehEquipe ? undefined : null,
         }}
       />
       <Tabs.Screen
@@ -67,7 +72,8 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="stats-chart" size={size} color={color} />
           ),
-          href: admin ? undefined : null,
+          // BI é do gestor para cima (contrato v3, seção 7.4).
+          href: ehGestor ? undefined : null,
         }}
       />
       <Tabs.Screen

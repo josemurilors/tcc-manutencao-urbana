@@ -1,14 +1,17 @@
 /**
  * Aba Conta — hub de configurações: cartão de perfil no topo e submenus
- * (Conta, Preferências e, para admins, administração). Os formulários vivem
+ * (Meus chamados, Notificações, Conta, Preferências e, para gestor ou mais,
+ * a Administração do município). Os formulários vivem
  * nas telas de `app/ajustes/`; deslogado, a aba vira o convite para entrar.
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AuthWelcome } from '@/components/auth-welcome';
+import { ROTULO_PAPEL, TOM_PAPEL, usePapel } from '@/components/gestao/papeis';
+import { Badge } from '@/components/ui/badge';
 import { MenuRow } from '@/components/ui/menu-row';
 import { Card } from '@/components/ui/screen';
 import { SubScreen } from '@/components/ui/sub-screen';
@@ -21,6 +24,7 @@ export default function ContaScreen() {
   const colors = useColors();
   const { user, isAuthenticated } = useAuth();
   const progresso = useProgresso(isAuthenticated);
+  const { papel, ehEquipe, ehGestor } = usePapel();
 
   // Deslogado, a aba inteira é o convite para entrar — as preferências
   // (tema, idioma) só aparecem depois do login.
@@ -47,6 +51,16 @@ export default function ContaScreen() {
                 <Text style={[styles.meta, { color: colors.gold500 }]}>
                   {user.municipio.nome} - {user.municipio.uf_sigla}
                 </Text>
+              ) : null}
+              {ehEquipe ? (
+                // Quem é da prefeitura precisa saber com que papel está
+                // logado — o mesmo app serve cidadão e servidor.
+                <Badge
+                  label={`Equipe da prefeitura · ${ROTULO_PAPEL[papel]}`}
+                  tone={TOM_PAPEL[papel]}
+                  icon="shield-checkmark"
+                  style={styles.papel}
+                />
               ) : null}
             </View>
             <Ionicons
@@ -104,6 +118,12 @@ export default function ContaScreen() {
             onPress={() => router.push('/meus-chamados')}
           />
           <MenuRow
+            icon="notifications"
+            label="Notificações"
+            detail="Avisos sobre os seus chamados"
+            onPress={() => router.push('/notificacoes' as Href)}
+          />
+          <MenuRow
             icon="person"
             label="Conta"
             detail="Nome, senha, verificação e sair"
@@ -115,16 +135,25 @@ export default function ContaScreen() {
             detail="Tema e idioma"
             onPress={() => router.push('/ajustes/preferencias')}
           />
-          {user?.admin ? (
-            <MenuRow
-              icon="people"
-              label="Gerenciar usuários"
-              detail="Administração do sistema"
-              onPress={() => router.push('/admin/usuarios')}
-            />
-          ) : null}
         </Card>
       </View>
+
+      {ehGestor ? (
+        <View style={styles.secao}>
+          <Card>
+            <MenuRow
+              icon="business"
+              label={
+                user?.municipio?.nome
+                  ? `Administração — ${user.municipio.nome}`
+                  : 'Administração do município'
+              }
+              detail="Equipe, secretarias, categorias e prazos, moderação e auditoria"
+              onPress={() => router.push('/admin' as Href)}
+            />
+          </Card>
+        </View>
+      ) : null}
 
       {!user?.email_verificado ? (
         <View style={styles.secao}>
@@ -173,6 +202,9 @@ const styles = StyleSheet.create({
   },
   meta: {
     fontSize: FontSize.xs,
+  },
+  papel: {
+    marginTop: Spacing[1],
   },
   nivel: {
     marginTop: Spacing[3],
