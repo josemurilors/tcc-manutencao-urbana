@@ -267,6 +267,12 @@ GET `nao-lidas/` → `{total}`, POST `<id>/lida/`, POST `todas-lidas/`,
 POST `push-tokens/` `{token, plataforma}`, DELETE `push-tokens/` `{token}`.
 Tipos: `status`, `resposta`, `avaliar`, `apoio_marco`, `sla_alerta`, `atribuido`, `moderacao`.
 
+Detalhes que o app assume: `lida/`, `todas-lidas/` e `push-tokens/` podem
+responder 204 ou JSON; o token é o `ExponentPushToken[...]` e `plataforma` ∈
+{`android`, `ios`}. O payload `data` do push leva `{defeito_id, tipo,
+notificacao_id?}` — o toque abre `/chamado/<defeito_id>`; sem `defeito_id`,
+abre a central (`/notificacoes`).
+
 ### 7.4 BI — `api/v1/bi/` (gestor+)
 
 Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
@@ -315,3 +321,10 @@ POST `senha/esqueci/` `{email}` (resposta sempre 200), POST `senha/redefinir/`
 `{email, codigo, nova_senha}`, POST `aceite-termos/`, GET `meus-dados/`
 (exportação JSON). O objeto `user` passa a trazer `papel, municipio_id,
 secretaria_id, equipe_id, aceite_termos_em, suspenso_ate`.
+
+No app: `aceite-termos/` recebe `{versao}` (hoje `2026-10`; campo opcional para
+o backend) e pode responder o `user` ou `{aceite_termos_em}`. `aceite_termos_em:
+null` no `user` faz o app pedir o aceite antes de abrir a sessão (ausente = não
+pede). O app chama `aceite-termos/` logo após `register/`, com o token recém-
+emitido. `senha/redefinir/` não precisa devolver tokens: o app faz login com a
+senha nova. O app relê `GET auth/profile/` a cada boot (papel, suspensão).

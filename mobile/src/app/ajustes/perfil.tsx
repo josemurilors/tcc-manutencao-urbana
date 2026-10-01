@@ -1,25 +1,52 @@
 /**
- * Submenu "Conta": nome, verificação de e-mail, troca de senha, sair e
- * excluir a conta (exigência da Play Store / App Store).
+ * Submenu "Conta": nome, verificação de e-mail, troca de senha, notificações
+ * no celular, os direitos da LGPD (baixar meus dados, termos, privacidade),
+ * sair e excluir a conta (exigência da Play Store / App Store).
  * Aberto a partir do hub da aba Conta.
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform, View } from 'react-native';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ListItem } from '@/components/ui/list-item';
 import { Card, SectionHeading } from '@/components/ui/screen';
 import { SubScreen } from '@/components/ui/sub-screen';
+import { AppText } from '@/components/ui/text';
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
-import { useAuth } from '@/context/auth-context';
+import { papelDe, useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
+import { usePush, type EstadoPush } from '@/hooks/use-push';
 import { api } from '@/services/api';
+import { baixarMeusDados } from '@/services/api-conta';
 import { limparProgresso } from '@/services/progresso';
-import { formatarCpf } from '@/utils/format';
+import { mensagemDeErro } from '@/utils/erro';
+import { formatarCpf, formatarData } from '@/utils/format';
+
+/** Nome do papel para a própria pessoa ler (servidor da prefeitura). */
+const ROTULO_PAPEL: Record<string, string> = {
+  operador: 'Operador(a) da prefeitura',
+  gestor: 'Gestor(a) da prefeitura',
+  admin_municipal: 'Administrador(a) da prefeitura',
+  super_admin: 'Administrador(a) da plataforma',
+};
+
+const TEXTO_PUSH: Record<EstadoPush, string> = {
+  carregando: 'Verificando…',
+  indisponivel:
+    'Neste aparelho os avisos aparecem só na central de notificações do app.',
+  'nao-perguntado':
+    'Receba um aviso no celular quando a prefeitura atualizar um chamado seu ou que você apoiou.',
+  desligado: 'Os avisos no celular estão desligados neste aparelho.',
+  negado:
+    'As notificações do app estão bloqueadas nos ajustes do celular. Libere por lá para voltar a receber.',
+  ativo: 'Você recebe um aviso no celular quando um chamado seu ou que você apoiou muda.',
+};
 
 export default function PerfilScreen() {
   const colors = useColors();
@@ -36,6 +63,8 @@ export default function PerfilScreen() {
   const [salvando, setSalvando] = useState(false);
   const [verificando, setVerificando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [baixando, setBaixando] = useState(false);
+  const push = usePush();
 
   if (!isAuthenticated) {
     return <Redirect href="/(tabs)/conta" />;
@@ -93,6 +122,35 @@ export default function PerfilScreen() {
     }
   }
 
+  async function alternarPush() {
+    try {
+      if (push.estado === 'ativo') {
+        await push.desativar();
+        addToast.info('Avisos no celular desligados.');
+        return;
+      }
+      const final = await push.ativar();
+      if (final === 'ativo') addToast.success('Pronto! Você vai receber os avisos no celular.');
+      else if (final === 'negado')
+        addToast.warning('As notificações foram bloqueadas. Dá para liberar nos ajustes do celular.');
+    } catch (err) {
+      addToast.error('Não foi possível mudar os avisos. ' + mensagemDeErro(err, 'Tente de novo.'));
+    }
+  }
+
+  async function baixarDados() {
+    setBaixando(true);
+    try {
+      await baixarMeusDados();
+    } catch (err) {
+      addToast.error(
+        'Não foi possível baixar seus dados. ' + mensagemDeErro(err, 'Tente de novo em instantes.'),
+      );
+    } finally {
+      setBaixando(false);
+    }
+  }
+
   async function excluirConta() {
     setExcluindo(true);
     try {
@@ -132,6 +190,14 @@ ${mensagem}`)) excluirConta();
       <Card>
         <SectionHeading title="Dados" subtitle={user?.email} />
         <TextField label="Nome completo" value={nome} onChangeText={setNomeEditado} />
+        {papelDe(user) !== 'cidadao' ? (
+          <Badge
+            label={ROTULO_PAPEL[papelDe(user)] ?? 'Equipe da prefeitura'}
+            tone="primary"
+            icon="shield-checkmark"
+            size="md"
+          />
+        ) : null}
         {/* O backend manda o CPF já mascarado ('***.456.789-**'). */}
         {user?.cpf ? (
           <TextField
@@ -141,6 +207,19 @@ ${mensagem}`)) excluirConta();
           />
         ) : null}
       </Card>
+
+      {user?.suspenso_ate && new Date(user.suspenso_ate) > new Date() ? (
+        <Card style={{ borderColor: colors.danger }}>
+          <View accessible accessibilityRole="alert" style={{ gap: Spacing[1] }}>
+            <Badge label="Conta suspensa" tone="danger" />
+            <AppText variant="bodySm" tone="secondary">
+              Até {formatarData(user.suspenso_ate)} você não pode abrir chamados, apoiar ou
+              sinalizar. Isso acontece quando a moderação da prefeitura encontra reportes que
+              descumprem os Termos de Uso.
+            </AppText>
+          </View>
+        </Card>
+      ) : null}
 
       {!user?.email_verificado ? (
         <Card style={{ borderColor: colors.gold500 }}>
@@ -188,6 +267,67 @@ ${mensagem}`)) excluirConta();
       <Button block onPress={salvar} loading={salvando}>
         Salvar Alterações
       </Button>
+
+      <Card>
+        <SectionHeading title="Notificações no celular" subtitle={TEXTO_PUSH[push.estado]} />
+        {push.estado === 'ativo' ? (
+          <Badge label="Ativas neste aparelho" tone="success" />
+        ) : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] }}>
+          {push.estado === 'nao-perguntado' || push.estado === 'desligado' ? (
+            <Button
+              size="sm"
+              onPress={alternarPush}
+              loading={push.ocupado}
+              icon={<Ionicons name="notifications" size={16} color={colors.onPrimary} />}>
+              Ativar avisos
+            </Button>
+          ) : null}
+          {push.estado === 'ativo' ? (
+            <Button size="sm" variant="secondary" onPress={alternarPush} loading={push.ocupado}>
+              Desligar avisos
+            </Button>
+          ) : null}
+          {push.estado === 'negado' ? (
+            <Button size="sm" variant="secondary" onPress={push.abrirAjustesDoAparelho}>
+              Abrir ajustes do celular
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => router.push('/notificacoes' as Href)}
+            icon={<Ionicons name="list" size={16} color={colors.textSecondary} />}>
+            Ver notificações
+          </Button>
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeading
+          title="Seus dados"
+          subtitle="Pela LGPD, você pode ver tudo o que guardamos sobre você e levar com você."
+        />
+        <ListItem
+          leading="download-outline"
+          title="Baixar meus dados"
+          subtitle="Arquivo com seu cadastro, chamados, apoios e avisos"
+          onPress={baixarDados}
+          disabled={baixando}
+          trailing={baixando ? <AppText variant="caption" tone="muted">Preparando…</AppText> : undefined}
+          accessibilityHint="Gera um arquivo JSON e abre as opções para salvar ou compartilhar"
+        />
+        <ListItem
+          leading="document-text-outline"
+          title="Termos de Uso"
+          onPress={() => router.push('/termos' as Href)}
+        />
+        <ListItem
+          leading="lock-closed-outline"
+          title="Política de Privacidade"
+          onPress={() => router.push('/privacidade' as Href)}
+        />
+      </Card>
 
       <Button
         block
