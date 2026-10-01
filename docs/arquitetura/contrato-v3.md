@@ -385,6 +385,56 @@ Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min):
 
 Todas as escritas chamam `core.auditoria.registrar`.
 
+Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
+
+- Município da rota: o do usuário; `?municipio=` só vale para o `super_admin`
+  (outro papel com código diferente do seu → 403; código inexistente → 404).
+  Servidor sem município → 400. Ids de outra cidade → 404.
+- Erros 400 trazem `{detail, campos?}` (`campos` = erros por campo do DRF).
+- `municipio/`: `{municipio_id, nome, uf_sigla, contratado, nome_exibicao, cor_primaria (#RRGGBB),
+  email_contato, telefone, site, raio_duplicado_m (5..500), parametros, atualizado_em}`;
+  `contratado` só o `super_admin` altera (403 para os demais).
+- `secretarias/` e `equipes/` devolvem **lista** (não paginada).
+  Secretaria: `{id, nome, sigla, email, ativo, criado_em, total_equipes}`.
+  Equipe: `{id, nome, secretaria_id, secretaria_nome, ativo, criado_em, total_membros}`.
+  Filtros: `?ativo=1`; equipes também `?secretaria_id=`. Nome repetido (sem caixa) → 409.
+  DELETE → 204: apaga se nada aponta para ela, senão só desativa (`ativo=false`).
+- `membros/` devolve **lista** `{id, nome, email, papel, nivel, secretaria_id, secretaria_nome,
+  equipe_id, equipe_nome, suspenso_ate, chamados_abertos, criado_em}`; filtros `q`, `papel`,
+  `equipe_id`, `secretaria_id`. POST: e-mail sem conta → 404; servidor de outra cidade ou já da
+  equipe → 409; `papel=super_admin` só pelo super admin (403). Equipe informada puxa a
+  secretaria dela. Ninguém muda o próprio papel nem se revoga (400); ninguém mexe em papel
+  acima do seu (403); rebaixar/revogar o último `admin_municipal` → 409. DELETE → 200
+  `{id, papel: "cidadao", chamados_liberados}`: os chamados abertos dele perdem o atendente
+  (evento interno `atribuido` com `dados.motivo = "membro_revogado"`).
+- `categorias/` devolve **lista** com, além dos campos acima, `personalizado` e
+  `base: {prazo_sla_dias, prioridade}`. PATCH aceita `prazo_sla_dias` (1..365), `prioridade`,
+  `secretaria_id` (`null` nesses três = volta ao padrão), `ativo`, `checklist` (≤20 itens) e
+  responde a regra efetiva + `chamados_recalculados`. Mudou o prazo efetivo → os chamados
+  abertos da categoria no município que ainda tinham o prazo antigo ganham o novo
+  `prazo_sla_dias`/`prazo_em` e um evento interno `sla` (`dados.origem = "categoria"`);
+  prazo ajustado à mão num chamado prevalece.
+- `moderacao/`: `sinalizados` (abertos com sinalização, até 100: dados do chamado +
+  `autor_id, autor_nome, total_resolvido, total_nao_existe, total_apoios`), `removidos`
+  (até 50, + `removido_em, removido_motivo`), `usuarios` (cidadãos ligados ao município
+  suspensos ou com strike ativo: `{id, nome, suspenso_ate, suspenso, strikes_ativos,
+  em_quarentena, chamados_removidos}`) e `contagens: {sinalizados, removidos, suspensos,
+  em_quarentena}`. Remover usa `regras.remover` (evento `removido`); restaurar grava evento
+  `moderacao` e, se a remoção foi comunitária, retira o strike do autor
+  (`strike_retirado`). Já removido/não removido → 409. Suspender (`dias` 1..365) e reativar
+  avisam o cidadão (notificação `moderacao`); servidor ou a si mesmo → 400; reativar quem não
+  está suspenso → 409. `gestao.servicos.usuario_suspenso(user)` é o teste que as rotas de
+  chamado devem usar para barrar suspensos.
+- `auditoria/`: paginado (30 por página, `page_size` ≤ 100) `{id, acao, usuario_id, usuario_nome,
+  municipio_id, alvo_tipo, alvo_id, dados, ip, criado_em}`; filtros `acao` (exata ou prefixo:
+  `acao=membro` traz `membro.*`), `usuario_id`, `alvo_tipo`, `alvo_id`, `inicio`, `fim`.
+  Ações: `municipio.config`, `secretaria.{criar,alterar,desativar,excluir}`,
+  `equipe.{criar,alterar,desativar,excluir}`, `membro.{vincular,alterar,revogar}`,
+  `categoria.alterar`, `moderacao.{remover,restaurar}`, `usuario.{suspender,reativar}`.
+- `python manage.py seed_gestao_demo <codigo>` cria (idempotente) as secretarias de Obras e
+  Infraestrutura, Serviços Urbanos, Trânsito e Mobilidade e Meio Ambiente, seis equipes e o
+  roteamento das categorias base para elas.
+
 ### 7.7 Conta e LGPD — `api/v1/auth/`
 
 POST `senha/esqueci/` `{email}` (resposta sempre 200), POST `senha/redefinir/`
