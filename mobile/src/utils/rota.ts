@@ -3,9 +3,9 @@
  *
  * Com até algumas dezenas de pontos, *vizinho mais próximo* seguido de *2-opt*
  * sobre distância haversine roda em milissegundos no aparelho e chega perto
- * do ótimo. Chamados prioritários (SLA vencido) formam um bloco que vem
- * antes dos demais — cada bloco é otimizado separadamente, e o segundo parte
- * de onde o primeiro terminou.
+ * do ótimo. Chamados prioritários (SLA vencido ou vencendo em 24 h, decidido
+ * por quem chama) formam um bloco que vem antes dos demais — cada bloco é
+ * otimizado separadamente, e o segundo parte de onde o primeiro terminou.
  *
  * É distância em linha reta, não por ruas; quando o OSRM responde
  * (`services/osrm.ts`), a geometria e a ordem por malha viária substituem

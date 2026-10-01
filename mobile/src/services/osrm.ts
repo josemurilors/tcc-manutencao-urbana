@@ -1,19 +1,28 @@
 /**
- * Rota por ruas via OSRM (servidor público de demonstração do projeto).
+ * Rota por ruas via OSRM.
  *
  * - `trip`: resolve a ordem das paradas pela malha viária e devolve a
  *   geometria — a "rota inteligente" de verdade.
  * - `route`: só a geometria/distância para uma ordem já decidida (usada
  *   quando há paradas prioritárias, que precisam vir primeiro).
  *
- * O servidor de demonstração não tem garantia de disponibilidade nem serve
- * para produção; por isso toda chamada tem timeout curto e quem consome cai
- * no traçado em linha reta (`utils/rota.ts`) quando ela falha.
+ * O servidor vem de `EXPO_PUBLIC_OSRM_URL` (instância própria da prefeitura
+ * ou provedor contratado). O servidor público de demonstração do projeto
+ * proíbe uso em produção e não tem SLA, então só é usado em desenvolvimento;
+ * num build de produção sem a variável, o roteiro cai direto no traçado em
+ * linha reta (`utils/rota.ts`). Toda chamada tem timeout curto pelo mesmo
+ * motivo: no campo, esperar a rota não pode travar o operador.
  */
 
 import type { LatLng } from '@/utils/geo';
 
-const OSRM_URL = 'https://router.project-osrm.org';
+const OSRM_DEMO = 'https://router.project-osrm.org';
+const OSRM_URL = (process.env.EXPO_PUBLIC_OSRM_URL || (__DEV__ ? OSRM_DEMO : '')).replace(/\/+$/, '');
+/** Perfil do OSRM (`driving`, ou o que a instância própria expuser, ex.: `truck`). */
+const PERFIL = process.env.EXPO_PUBLIC_OSRM_PERFIL || 'driving';
+
+/** Há servidor de rotas configurado? Sem ele o app nem tenta (linha reta direto). */
+export const osrmDisponivel = OSRM_URL !== '';
 const TIMEOUT_MS = 8000;
 
 export type RotaOsrm = {
@@ -30,6 +39,7 @@ function coords(pontos: LatLng[]) {
 }
 
 async function chamar(url: string) {
+  if (!osrmDisponivel) throw new Error('Servidor de rotas não configurado');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -54,7 +64,7 @@ function geometriaPara(geo: { coordinates: [number, number][] }): LatLng[] {
  */
 export async function tripOsrm(origem: LatLng, pontos: LatLng[]): Promise<RotaOsrm> {
   const url =
-    `${OSRM_URL}/trip/v1/driving/${coords([origem, ...pontos])}` +
+    `${OSRM_URL}/trip/v1/${PERFIL}/${coords([origem, ...pontos])}` +
     `?source=first&roundtrip=false&geometries=geojson&overview=full`;
   const json = await chamar(url);
   const trip = json.trips?.[0];
@@ -74,7 +84,7 @@ export async function tripOsrm(origem: LatLng, pontos: LatLng[]): Promise<RotaOs
 
 /** Geometria/distância por ruas para uma ordem já definida. */
 export async function routeOsrm(pontos: LatLng[]): Promise<RotaOsrm> {
-  const url = `${OSRM_URL}/route/v1/driving/${coords(pontos)}?geometries=geojson&overview=full`;
+  const url = `${OSRM_URL}/route/v1/${PERFIL}/${coords(pontos)}?geometries=geojson&overview=full`;
   const json = await chamar(url);
   const rota = json.routes?.[0];
   if (!rota) throw new Error('OSRM sem rota');

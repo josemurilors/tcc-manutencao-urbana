@@ -2,8 +2,10 @@
  * Lista de chamados — porte de `frontend/src/pages/DefectList.jsx`.
  *
  * A tabela com colunas ordenáveis do web virou uma lista de cartões com um
- * seletor de ordenação; a seleção em lote do admin continua, agora ativada por
- * toque longo no cartão.
+ * seletor de ordenação; a seleção em lote da equipe continua, ativada por
+ * toque longo no cartão, e passa pela rota de lote da operação
+ * (`operacao/lote/`, contrato v3 §7.1) — o backend aplica as regras do fluxo
+ * chamado a chamado e devolve o motivo de cada recusa.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DefectSheet } from '@/components/defect-sheet';
 import { Button } from '@/components/ui/button';
 import { FilterChips } from '@/components/ui/chips';
-import { EmptyState, LoadingState, PageHeading } from '@/components/ui/screen';
+import { ehGestor, nivelDe, NIVEIS } from '@/components/operacao/regras';
+import { EmptyState, PageHeading } from '@/components/ui/screen';
+import { StateView } from '@/components/ui/state-view';
 import { Select } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { BATCH_STATUS_OPTIONS, STATUS_ABERTOS, STATUS_FECHADOS } from '@/constants/status';
@@ -25,6 +29,8 @@ import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { api } from '@/services/api';
+import { executarOuEnfileirar } from '@/services/operacao-offline';
+import type { ResultadoLote } from '@/types/operacao';
 import type { Defeito, TipoSinalizacao } from '@/types';
 import { concluidoEm, formatarData, maskName, totalApoios } from '@/utils/format';
 
@@ -44,7 +50,9 @@ export default function ChamadosScreen() {
   const insets = useSafeAreaInsets();
   const addToast = useToast();
   const { user, isAuthenticated } = useAuth();
-  const isAdmin = !!user?.admin;
+  // Equipe da prefeitura (operador+): vê o filtro de vinculados e age em lote.
+  const isAdmin = nivelDe(user) >= NIVEIS.operador;
+  const gestor = ehGestor(user);
 
   const [defeitos, setDefeitos] = useState<Defeito[]>([]);
   const [meusIds, setMeusIds] = useState<Set<number>>(new Set());
@@ -53,13 +61,13 @@ export default function ChamadosScreen() {
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const [ordem, setOrdem] = useState<Ordem>('recentes');
   const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
   const [selecionado, setSelecionado] = useState<Defeito | null>(null);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [statusLote, setStatusLote] = useState('');
   const [enviandoLote, setEnviandoLote] = useState(false);
 
   const carregar = useCallback(async () => {
-    setCarregando(true);
     try {
       const [todos, meus] = await Promise.all([
         api.listDefeitos(),
@@ -67,8 +75,10 @@ export default function ChamadosScreen() {
       ]);
       setDefeitos(todos);
       setMeusIds(new Set(meus.map((d) => d.id)));
-    } catch {
-      // Mantém o que já estava em tela.
+      setErro(null);
+    } catch (err) {
+      // A lista anterior continua em tela; o erro aparece se não houver nada.
+      setErro(err instanceof Error ? err.message : 'Não foi possível carregar os chamados.');
     } finally {
       setCarregando(false);
     }
@@ -88,7 +98,10 @@ export default function ChamadosScreen() {
       .then((r) => {
         if (!cancelado) setApoiei(new Set(r.ids));
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Só marca o botão "apoiei"; a lista funciona sem isso.
+        if (__DEV__) console.warn('[chamados] apoiei', err);
+      });
     api
       .sinalizei()
       .then((r) => {
@@ -97,7 +110,9 @@ export default function ChamadosScreen() {
           setSinalizei(new Map(Object.entries(r.sinalizacoes) as unknown as [number, TipoSinalizacao][]));
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (__DEV__) console.warn('[chamados] sinalizei', err);
+      });
     return () => {
       cancelado = true;
     };
@@ -190,8 +205,11 @@ export default function ChamadosScreen() {
     setSelecionado(defeito);
     try {
       setSelecionado(await api.detalharDefeito(defeito.id));
-    } catch {
-      // Mantém o resumo da listagem.
+    } catch (err) {
+      // A folha abre com o resumo da listagem; avisa que o resto não veio.
+      addToast.warning(
+        `Detalhes incompletos: ${err instanceof Error ? err.message : 'não foi possível carregar.'}`,
+      );
     }
   }
 
@@ -200,15 +218,30 @@ export default function ChamadosScreen() {
     setEnviandoLote(true);
     try {
       const ids = [...selecionados];
-      const res = await api.batchStatusDefeitos(ids, statusLote);
-      addToast(`Status atualizado em ${res.updated} chamado(s)!`);
-      setDefeitos((prev) =>
-        prev.map((d) => (selecionados.has(d.id) ? { ...d, status: statusLote } : d)),
+      const r = await executarOuEnfileirar<ResultadoLote>(
+        { tipo: 'lote', ids, acao: 'transicao', campos: { para: statusLote } },
+        `Mudar ${ids.length} chamados de status`,
       );
-      setSelecionados(new Set());
-      setStatusLote('');
+      if (r.offline) {
+        addToast.warning('Sem conexão: a mudança será enviada quando a rede voltar.');
+        setDefeitos((prev) => prev.map((d) => (selecionados.has(d.id) ? { ...d, status: statusLote } : d)));
+        setSelecionados(new Set());
+        setStatusLote('');
+        return;
+      }
+      const ok = new Set((r.resposta.ok ?? []).map(String));
+      const erros = r.resposta.erros ?? [];
+      setDefeitos((prev) => prev.map((d) => (ok.has(String(d.id)) ? { ...d, status: statusLote } : d)));
+      // Ficam marcados só os recusados, para a pessoa ver quais foram.
+      setSelecionados((prev) => new Set([...prev].filter((id) => !ok.has(String(id)))));
+      if (erros.length === 0) {
+        addToast.success(`Status atualizado em ${ok.size} chamado(s).`);
+        setStatusLote('');
+      } else {
+        addToast.warning(`${ok.size} atualizado(s); ${erros.length} recusado(s): ${erros[0].detail}`);
+      }
     } catch (err) {
-      addToast('Erro: ' + (err instanceof Error ? err.message : 'Erro no lote'), 'error');
+      addToast.error('Erro: ' + (err instanceof Error ? err.message : 'Erro no lote'));
     } finally {
       setEnviandoLote(false);
     }
@@ -239,7 +272,16 @@ export default function ChamadosScreen() {
       </View>
 
       {carregando ? (
-        <LoadingState />
+        <StateView kind="loading" title="Carregando chamados" />
+      ) : erro && defeitos.length === 0 ? (
+        <StateView
+          kind="error"
+          description={erro}
+          onRetry={() => {
+            setCarregando(true);
+            carregar();
+          }}
+        />
       ) : (
         <FlatList
           data={lista}
@@ -275,7 +317,9 @@ export default function ChamadosScreen() {
           <View style={styles.loteControles}>
             <View style={styles.loteSelect}>
               <Select
-                options={BATCH_STATUS_OPTIONS.map(([value, label]) => ({ value, label }))}
+                options={BATCH_STATUS_OPTIONS.filter(([value]) => gestor || value !== 'concluido').map(
+                  ([value, label]) => ({ value, label }),
+                )}
                 value={statusLote}
                 onChange={setStatusLote}
                 title="Novo status"
