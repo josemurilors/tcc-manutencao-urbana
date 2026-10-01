@@ -1,8 +1,13 @@
-/** Filtros em pílula, equivalentes aos botões de filtro da lista do web. */
+/**
+ * Filtros em pílula, equivalentes aos botões de filtro da lista do web.
+ *
+ * Semântica de `radiogroup`/`radio` (e não `tablist`/`tab`): os chips filtram a
+ * mesma lista, não trocam de painel. Altura mínima de 40 + folga de toque.
+ */
 
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
-import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { FontSize, FontWeight, MaxFontScale, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 
 export type ChipOption<T extends string> = { value: T; label: string };
@@ -27,7 +32,7 @@ export function FilterChips<T extends string>({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      accessibilityRole="tablist"
+      accessibilityRole="radiogroup"
       accessibilityLabel={accessibilityLabel}
       contentContainerStyle={styles.container}>
       {options.map((option) => {
@@ -36,19 +41,21 @@ export function FilterChips<T extends string>({
           <Pressable
             key={option.value}
             onPress={() => onChange(option.value)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: ativo }}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: ativo, checked: ativo }}
+            hitSlop={{ top: 2, bottom: 2 }}
             style={[
               styles.chip,
               {
-                backgroundColor: ativo ? colors.gold500 : 'transparent',
-                borderColor: ativo ? colors.gold500 : colors.borderDefault,
+                backgroundColor: ativo ? colors.primary : 'transparent',
+                borderColor: ativo ? colors.primary : colors.borderStrong,
               },
             ]}>
             <Text
+              maxFontSizeMultiplier={MaxFontScale.control}
               style={[
                 styles.label,
-                { color: ativo ? colors.textInverse : colors.textPrimary },
+                { color: ativo ? colors.onPrimary : colors.textPrimary },
               ]}>
               {option.label}
             </Text>
@@ -65,10 +72,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing[4],
   },
   chip: {
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: Spacing[3],
-    paddingVertical: Spacing[2],
+    paddingVertical: Spacing[1],
     borderWidth: 1,
-    borderRadius: Radius.md,
+    borderRadius: Radius.full,
   },
   label: {
     fontSize: FontSize.xs,

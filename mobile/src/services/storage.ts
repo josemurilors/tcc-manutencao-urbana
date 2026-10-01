@@ -102,12 +102,15 @@ export async function clearSession() {
   ]);
 }
 
-export async function getStoredTheme(): Promise<'light' | 'dark' | null> {
+/** Preferência de tema; `system` (ou nada salvo) segue o aparelho. */
+export type StoredTheme = 'light' | 'dark' | 'system';
+
+export async function getStoredTheme(): Promise<StoredTheme | null> {
   const value = await AsyncStorage.getItem(THEME_KEY);
-  return value === 'light' || value === 'dark' ? value : null;
+  return value === 'light' || value === 'dark' || value === 'system' ? value : null;
 }
 
-export async function setStoredTheme(theme: 'light' | 'dark') {
+export async function setStoredTheme(theme: StoredTheme) {
   await AsyncStorage.setItem(THEME_KEY, theme);
 }
 

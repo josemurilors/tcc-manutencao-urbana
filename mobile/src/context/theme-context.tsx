@@ -1,49 +1,86 @@
 /**
  * Tema claro/escuro — porte de `frontend/src/context/ThemeContext.jsx`.
- * Segue a preferência do sistema até o usuário escolher manualmente; a escolha
- * fica no AsyncStorage.
+ *
+ * A preferência tem três valores: `sistema` (padrão), `claro` e `escuro`. Na
+ * primeira versão o primeiro toque no toggle fixava o tema para sempre, sem
+ * caminho de volta para "seguir o aparelho"; agora isso é uma opção explícita
+ * em Preferências. A escolha fica no AsyncStorage.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { Colors, type Palette, type ThemeName } from '@/constants/theme';
-import { getStoredTheme, setStoredTheme } from '@/services/storage';
+import { getStoredTheme, setStoredTheme, type StoredTheme } from '@/services/storage';
+
+export type PreferenciaTema = 'sistema' | 'claro' | 'escuro';
 
 type ThemeContextValue = {
+  /** Tema efetivo, já resolvido contra o sistema. */
   theme: ThemeName;
   colors: Palette;
+  preferencia: PreferenciaTema;
+  setPreferencia: (preferencia: PreferenciaTema) => void;
+  /** Alterna claro/escuro (fixa a escolha). Mantido por compatibilidade. */
   toggle: () => void;
+  /** Fixa um tema. Mantido por compatibilidade; prefira `setPreferencia`. */
   setTheme: (theme: ThemeName) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+const PARA_STORAGE: Record<PreferenciaTema, StoredTheme> = {
+  sistema: 'system',
+  claro: 'light',
+  escuro: 'dark',
+};
+
+function daStorage(valor: StoredTheme | null): PreferenciaTema {
+  if (valor === 'light') return 'claro';
+  if (valor === 'dark') return 'escuro';
+  return 'sistema';
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [override, setOverride] = useState<ThemeName | null>(null);
+  const [preferencia, setPreferenciaState] = useState<PreferenciaTema>('sistema');
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     getStoredTheme()
-      .then((stored) => setOverride(stored))
+      .then((stored) => setPreferenciaState(daStorage(stored)))
+      // Storage ilegível: fica no padrão (sistema), que é o comportamento esperado.
+      .catch(() => {})
       .finally(() => setHydrated(true));
   }, []);
 
-  const theme: ThemeName = override ?? (systemScheme === 'light' ? 'light' : 'dark');
+  const theme: ThemeName =
+    preferencia === 'claro'
+      ? 'light'
+      : preferencia === 'escuro'
+        ? 'dark'
+        : systemScheme === 'light'
+          ? 'light'
+          : 'dark';
 
-  const setTheme = useCallback((next: ThemeName) => {
-    setOverride(next);
-    setStoredTheme(next).catch(() => {});
+  const setPreferencia = useCallback((next: PreferenciaTema) => {
+    setPreferenciaState(next);
+    // Falha ao gravar só faz a escolha não sobreviver ao próximo boot.
+    setStoredTheme(PARA_STORAGE[next]).catch(() => {});
   }, []);
+
+  const setTheme = useCallback(
+    (next: ThemeName) => setPreferencia(next === 'light' ? 'claro' : 'escuro'),
+    [setPreferencia],
+  );
 
   const toggle = useCallback(() => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   }, [theme, setTheme]);
 
   const value = useMemo(
-    () => ({ theme, colors: Colors[theme], toggle, setTheme }),
-    [theme, toggle, setTheme],
+    () => ({ theme, colors: Colors[theme], preferencia, setPreferencia, toggle, setTheme }),
+    [theme, preferencia, setPreferencia, toggle, setTheme],
   );
 
   // Evita o flash de tema errado enquanto a preferência salva é lida.
