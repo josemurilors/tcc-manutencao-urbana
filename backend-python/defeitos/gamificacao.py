@@ -14,6 +14,9 @@ Fontes de XP:
   real, comprovado;
 * `XP_CONFIRMACAO` por apoio/confirmação em chamado **de outra pessoa**
   (apoiar o próprio chamado não pontua, como em `regras.aplicar_confirmacao`);
+* `XP_AVALIACAO` por chamado seu resolvido que você avaliou — a nota é o
+  que alimenta o índice de satisfação da prefeitura, então vale incentivar.
+  Uma vez por chamado (editar a nota não soma de novo);
 * `XP_STRIKE` (negativo) por strike ativo. O total nunca fica abaixo de zero.
 
 Curva de nível: subir ao nível `n` custa `XP_BASE_NIVEL * n * (n-1)` de XP
@@ -33,6 +36,7 @@ from .models import Apoio, Defeito
 XP_CHAMADO = 10
 XP_CONFIRMACAO = 6
 XP_BONUS_RESOLVIDO = 15
+XP_AVALIACAO = 5
 XP_STRIKE = -20
 
 # XP acumulado para estar no nível n: XP_BASE_NIVEL * n * (n-1).
@@ -78,11 +82,12 @@ def progresso(xp):
     }
 
 
-def _xp_total(chamados, resolvidos, confirmacoes, strikes=0):
+def _xp_total(chamados, resolvidos, confirmacoes, strikes=0, avaliacoes=0):
     xp = (
         chamados * XP_CHAMADO
         + resolvidos * XP_BONUS_RESOLVIDO
         + confirmacoes * XP_CONFIRMACAO
+        + avaliacoes * XP_AVALIACAO
         + strikes * XP_STRIKE
     )
     return max(xp, 0)
@@ -93,17 +98,19 @@ def resumo_do_usuario(usuario):
     chamados = Defeito.objects.ativos().filter(usuario=usuario)
     total = chamados.count()
     resolvidos = chamados.filter(status__in=STATUS_RESOLVIDOS).count()
+    avaliacoes = chamados.filter(avaliacao_nota__isnull=False).count()
     confirmacoes = (
         Apoio.objects.filter(usuario=usuario, defeito__removido_em__isnull=True)
         .exclude(defeito__usuario=usuario)
         .count()
     )
     strikes = regras.strikes_ativos(usuario).count()
-    dados = progresso(_xp_total(total, resolvidos, confirmacoes, strikes))
+    dados = progresso(_xp_total(total, resolvidos, confirmacoes, strikes, avaliacoes))
     dados.update({
         'chamados': total,
         'resolvidos': resolvidos,
         'confirmacoes': confirmacoes,
+        'avaliacoes': avaliacoes,
     })
     return dados
 
@@ -122,7 +129,7 @@ def ranking_de(municipio_id=None, desde=None):
         if chave not in linhas:
             linhas[chave] = {
                 'usuario_id': chave, 'nome': nome,
-                'chamados': 0, 'resolvidos': 0, 'confirmacoes': 0,
+                'chamados': 0, 'resolvidos': 0, 'confirmacoes': 0, 'avaliacoes': 0,
             }
         return linhas[chave]
 
@@ -135,6 +142,14 @@ def ranking_de(municipio_id=None, desde=None):
         reports = reports.filter(criado_em__gte=desde)
         apoios = apoios.filter(criado_em__gte=desde)
 
+    # Avaliações contam pela data em que foram feitas, não pela do chamado:
+    # avaliar esta semana um chamado do mês passado pontua na semana.
+    avaliados = Defeito.objects.ativos().exclude(usuario=None).filter(avaliacao_nota__isnull=False)
+    if municipio_id is not None:
+        avaliados = avaliados.filter(municipio_id=municipio_id)
+    if desde is not None:
+        avaliados = avaliados.filter(avaliado_em__gte=desde)
+
     reports = reports.values('usuario_id', 'usuario__nome').annotate(
         total=Count('id'),
         resolvidos=Count('id', filter=Q(status__in=STATUS_RESOLVIDOS)),
@@ -144,13 +159,17 @@ def ranking_de(municipio_id=None, desde=None):
         item['chamados'] = r['total']
         item['resolvidos'] = r['resolvidos']
 
+    for a in avaliados.values('usuario_id', 'usuario__nome').annotate(total=Count('id')):
+        linha(a['usuario_id'], a['usuario__nome'])['avaliacoes'] = a['total']
+
     confirmacoes = apoios.values('usuario_id', 'usuario__nome').annotate(total=Count('id'))
     for c in confirmacoes:
         linha(c['usuario_id'], c['usuario__nome'])['confirmacoes'] = c['total']
 
     itens = []
     for item in linhas.values():
-        xp = _xp_total(item['chamados'], item['resolvidos'], item['confirmacoes'])
+        xp = _xp_total(item['chamados'], item['resolvidos'], item['confirmacoes'],
+                       avaliacoes=item['avaliacoes'])
         dados = progresso(xp)
         itens.append({
             **item,
