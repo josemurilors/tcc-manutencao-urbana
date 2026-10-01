@@ -38,6 +38,20 @@ export type MarcadorMapa = {
   selecionado?: boolean;
   /** Etiqueta curta sobre o balão (número da parada no roteiro). */
   rotulo?: string;
+  /** Chamado já resolvido: balão esmaecido com um selo de check (não só a cor verde). */
+  resolvido?: boolean;
+  /** O que o leitor de tela anuncia (ex.: "Buraco, Recebido, a 12 metros"). */
+  rotuloAcessivel?: string;
+};
+
+/**
+ * Bolha de agrupamento: vários chamados numa célula da grade, com a contagem
+ * real. Tocar aproxima o mapa até os pinos se separarem.
+ */
+export type ClusterMapa = {
+  key: string;
+  coordenada: LatLng;
+  total: number;
 };
 
 /** Linha desenhada no mapa (traçado do roteiro). */
@@ -62,6 +76,11 @@ export type MapSurfaceProps = {
   /** Toque longo no mapa (posicionar um chamado fora de onde se está). */
   onLongPressMapa: (coordenada: LatLng) => void;
   onPressMarcador: (key: string) => void;
+  /** Bolhas com contagem (ver `utils/rarear.ts::agruparEmClusters`). */
+  clusters?: ClusterMapa[];
+  onPressCluster?: (key: string) => void;
+  /** Ponto escolhido na busca de endereço: alfinete temporário até a pessoa sair dele. */
+  destino?: LatLng | null;
   /** O usuário arrastou o mapa — a tela sai do modo "seguir". */
   onArrastar: () => void;
   /** A câmera parou (arrasto, zoom ou animação): região visível agora. */

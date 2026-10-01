@@ -12,18 +12,51 @@ import 'leaflet/dist/leaflet.css';
 import './map-surface.web.css';
 
 import L, { type Map as LeafletMap } from 'leaflet';
-import { forwardRef, useImperativeHandle, useRef } from 'react';
-import { Circle, MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import {
+  Circle,
+  MapContainer,
+  Marker,
+  Polyline,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet';
 
 import type { LatLng } from '@/utils/geo';
+import { ladoDoCluster, textoDoCluster } from '@/utils/rarear';
 
 import type { MapSurfaceHandle, MapSurfaceProps, Regiao } from './map-surface.types';
 
 // OpenStreetMap não exige chave (o Carto passou a exigir e estampa
 // "API KEY REQUIRED" nos tiles). No tema escuro, `.tiles-escuro` inverte as
-// cores via CSS — ver global.css.
-const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const ATRIBUICAO = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+// cores via CSS — ver global.css. Em produção (venda a prefeituras) o
+// servidor público do OSM não serve: a política dele proíbe uso intenso e
+// exige atribuição. `EXPO_PUBLIC_TILES_URL`/`_ATTRIB` apontam para o provedor
+// contratado (MapTiler, Stadia, tileserver próprio) sem mexer no código.
+const TILES = process.env.EXPO_PUBLIC_TILES_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const ATRIBUICAO =
+  process.env.EXPO_PUBLIC_TILES_ATTRIB ||
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+/**
+ * O divIcon do Leaflet é HTML cru: qualquer texto que venha do backend (ícone
+ * da categoria, rótulo) precisa ser escapado, senão um nome de categoria com
+ * `<img onerror>` executaria script na página.
+ */
+function escapeHtml(texto: string) {
+  return texto
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** A cor entra num `style=""`: só aceita hex ou rgb(a), o resto vira cinza. */
+function corSegura(cor: string) {
+  return /^#[0-9a-f]{3,8}$/i.test(cor) || /^rgba?\([\d.,\s%]+\)$/i.test(cor) ? cor : '#6B7280';
+}
 
 /** Zoom de rua ao seguir o usuário (18 ≈ quarteirão inteiro na tela). */
 const ZOOM_NAVEGACAO = 18;
@@ -46,26 +79,55 @@ function iconePino(
   emAlcance: boolean,
   selecionado: boolean,
   rotulo?: string,
+  resolvido?: boolean,
+  rotuloAcessivel?: string,
 ) {
   const balao = selecionado ? 40 : 32;
   const largura = 48;
   const altura = balao + 26;
-  const classes = ['beacon', emAlcance && 'beacon-alcance', selecionado && 'beacon-selecionado']
+  const classes = [
+    'beacon',
+    emAlcance && 'beacon-alcance',
+    selecionado && 'beacon-selecionado',
+    resolvido && 'beacon-resolvido',
+  ]
     .filter(Boolean)
     .join(' ');
+  const titulo = rotuloAcessivel ? ` role="img" aria-label="${escapeHtml(rotuloAcessivel)}" title="${escapeHtml(rotuloAcessivel)}"` : '';
   return L.divIcon({
     className: '',
     iconSize: [largura, altura],
     iconAnchor: [largura / 2, altura],
-    html: `<div class="${classes}" style="--cor:${cor};--balao:${balao}px;width:${largura}px;height:${altura}px">
+    html: `<div class="${classes}"${titulo} style="--cor:${corSegura(cor)};--balao:${balao}px;width:${largura}px;height:${altura}px">
       <div class="beacon-halo"></div>
       <div class="beacon-ponto"></div>
       <div class="beacon-haste"></div>
-      <div class="beacon-balao">${icone ?? ''}</div>
-      ${rotulo ? `<div class="beacon-rotulo">${rotulo}</div>` : ''}
+      <div class="beacon-balao">${escapeHtml(icone ?? '')}</div>
+      ${resolvido ? '<div class="beacon-check" aria-hidden="true">&#10003;</div>' : ''}
+      ${rotulo ? `<div class="beacon-rotulo">${escapeHtml(rotulo)}</div>` : ''}
     </div>`,
   });
 }
+
+/** Bolha com a contagem real da célula (ver `agruparEmClusters`). */
+function iconeCluster(total: number) {
+  const lado = ladoDoCluster(total);
+  const rotulo = `${total} chamados nesta região. Toque para aproximar.`;
+  return L.divIcon({
+    className: '',
+    iconSize: [lado, lado],
+    iconAnchor: [lado / 2, lado / 2],
+    html: `<div class="cluster" role="button" aria-label="${rotulo}" title="${rotulo}" style="width:${lado}px;height:${lado}px">${textoDoCluster(total)}</div>`,
+  });
+}
+
+/** Alfinete do endereço buscado. */
+const ICONE_DESTINO = L.divIcon({
+  className: '',
+  iconSize: [36, 44],
+  iconAnchor: [18, 44],
+  html: '<div class="destino" role="img" aria-label="Endereço buscado"><div class="destino-cabeca"></div><div class="destino-ponta"></div></div>',
+});
 
 /** Ponto azul com o cone da bússola (Google Maps); o cone some sem direção. */
 function iconeUsuario(direcao: number | null) {
@@ -79,6 +141,15 @@ function iconeUsuario(direcao: number | null) {
     iconAnchor: [36, 36],
     html: `<div style="position:relative;width:72px;height:72px;transform:rotate(${direcao ?? 0}deg)">${cone}<div style="position:absolute;top:27px;left:27px;width:18px;height:18px;border-radius:50%;background:#3B82F6;border:3px solid #fff;box-sizing:border-box;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div></div>`,
   });
+}
+
+/** Tira o "Leaflet" da atribuição: sobra só a dos dados, que é a obrigatória. */
+function PrefixoAtribuicao() {
+  const mapa = useMap();
+  useEffect(() => {
+    mapa.attributionControl?.setPrefix(false);
+  }, [mapa]);
+  return null;
 }
 
 function EventosDoMapa({
@@ -118,9 +189,12 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
     circulos,
     marcadores,
     linhas = [],
+    clusters = [],
+    destino = null,
     usuario,
     onLongPressMapa,
     onPressMarcador,
+    onPressCluster,
     onArrastar,
     onRegiaoMudou,
     onPronto,
@@ -150,7 +224,9 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
       zoom={zoomDaRegiao(regiaoInicial)}
       minZoom={3}
       zoomControl={false}
-      attributionControl={false}
+      // Atribuição é exigência da licença dos dados (ODbL); fica compacta no
+      // canto, sem o prefixo do Leaflet.
+      attributionControl
       whenReady={onPronto}
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
       <TileLayer
@@ -159,6 +235,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
         className={escuro ? 'tiles-escuro' : undefined}
         noWrap
       />
+      <PrefixoAtribuicao />
       <EventosDoMapa
         onLongPress={onLongPressMapa}
         onArrastar={onArrastar}
@@ -198,6 +275,25 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
         />
       ))}
 
+      {clusters.map((cluster) => (
+        <Marker
+          key={cluster.key}
+          position={[cluster.coordenada.latitude, cluster.coordenada.longitude]}
+          icon={iconeCluster(cluster.total)}
+          zIndexOffset={-100}
+          eventHandlers={{ click: () => onPressCluster?.(cluster.key) }}
+        />
+      ))}
+
+      {destino ? (
+        <Marker
+          position={[destino.latitude, destino.longitude]}
+          icon={ICONE_DESTINO}
+          zIndexOffset={400}
+          interactive={false}
+        />
+      ) : null}
+
       {marcadores.map((marcador) => (
         <Marker
           key={marcador.key}
@@ -208,6 +304,8 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
             !!marcador.emAlcance,
             !!marcador.selecionado,
             marcador.rotulo,
+            marcador.resolvido,
+            marcador.rotuloAcessivel,
           )}
           zIndexOffset={marcador.selecionado ? 200 : marcador.emAlcance ? 100 : 0}
           eventHandlers={{ click: () => onPressMarcador(marcador.key) }}
