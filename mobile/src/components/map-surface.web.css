@@ -87,6 +87,80 @@
 .beacon-selecionado .beacon-balao {
   border-width: 3px;
 }
+
+/* Chamado resolvido: balão esmaecido + selo de check (a cor sozinha não basta). */
+.beacon-resolvido:not(.beacon-selecionado) .beacon-balao {
+  opacity: 0.75;
+}
+.beacon-check {
+  position: absolute;
+  left: 2px;
+  bottom: calc(var(--balao) + 6px);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #15803d;
+  color: #fff;
+  border: 2px solid #fff;
+  font: 700 10px/14px system-ui, sans-serif;
+  text-align: center;
+  box-sizing: border-box;
+  z-index: 2;
+}
+
+/* Bolha de agrupamento com a contagem real da célula. */
+.cluster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #1f2937;
+  color: #fff;
+  border: 3px solid #fff;
+  font: 700 15px/1 system-ui, sans-serif;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform 120ms ease-out;
+}
+.cluster:hover {
+  transform: scale(1.08);
+}
+
+/* Alfinete do endereço buscado. */
+.destino {
+  position: relative;
+  width: 36px;
+  height: 44px;
+}
+.destino-cabeca {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: #111827;
+  border: 3px solid #fff;
+  box-sizing: border-box;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.destino-ponta {
+  position: absolute;
+  bottom: 0;
+  left: 15px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #111827;
+}
+
+/* Atribuição dos dados do mapa: obrigatória (ODbL), mas discreta. */
+.leaflet-control-attribution {
+  font-size: 10px;
+  line-height: 14px;
+}
 @keyframes beacon-pulso {
   0% {
     transform: scale(0.5);

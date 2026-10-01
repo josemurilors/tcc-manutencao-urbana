@@ -7,20 +7,23 @@
  * - a câmera segue o usuário com zoom de rua; arrastar o mapa sai do modo
  *   "seguir" e o FAB vira "Recentralizar" até a câmera voltar ao usuário;
  * - o FAB redondo "Reportar" (centro inferior, só enquanto seguindo) abre o
- *   chamado na posição atual —
- *   sem tocar no mapa;
- *   toque longo ainda permite posicionar em outro ponto;
- * - o mapa busca as pendências da área visível (`/defeitos/area/`): afastar
- *   o zoom amplia a busca, mas cada quadrante da tela mostra só alguns pinos
- *   (os mais apoiados/urgentes) — ver `utils/rarear.ts`;
+ *   chamado na posição atual — sem tocar no mapa; o toque longo ainda
+ *   permite posicionar em outro ponto, e a busca de endereço leva o mapa
+ *   até um lugar com "Reportar aqui";
+ * - o mapa busca os chamados da área visível (`/defeitos/area/`) com os
+ *   filtros da folha "Camadas" (situação e tipos). Cada célula da grade
+ *   mostra poucos pinos; a que tem mais vira uma bolha com a contagem real
+ *   (toque aproxima) — ver `utils/rarear.ts`;
  * - dentro de `RAIO_CONFIRMACAO_M` o pino ganha anel dourado e o detalhe
  *   libera "Confirmar no local";
- * - o botão do canto superior direito abre a **visão do município**: enquadra a
- *   cidade onde a pessoa está, mostra todos os chamados abertos dela e um
- *   painel com rankings (tipos, mais antigos, mais confirmados).
+ * - visitantes veem os mesmos pinos e bolhas (sem o nome de quem reportou) e
+ *   são convidados a entrar quando tentam reportar;
+ * - o botão do canto superior direito abre a **visão do município**: enquadra
+ *   a cidade onde a pessoa está, mostra os chamados abertos dela e o painel
+ *   "Transparência da cidade" (desempenho da prefeitura + rankings).
  *
  * Trocas em relação ao web: Leaflet -> react-native-maps; `leaflet.heat` ->
- * células de densidade (`utils/heatmap.ts`); máscara do município via `holes`.
+ * células de densidade (`utils/heatmap.ts`), ligadas pela folha "Camadas".
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -30,16 +33,33 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DefectSheet } from '@/components/defect-sheet';
-import { MunicipioPanel } from '@/components/municipio-panel';
 import { MapSurface } from '@/components/map-surface';
 import type {
   CirculoMapa,
+  ClusterMapa,
   MapSurfaceHandle,
   MarcadorMapa,
   Regiao,
 } from '@/components/map-surface.types';
+import { BuscaEndereco } from '@/components/mapa/busca-endereco';
+import { CamadasSheet } from '@/components/mapa/camadas-sheet';
+import { DestinoCard } from '@/components/mapa/destino-card';
+import { DicasMapa } from '@/components/mapa/dicas-mapa';
+import { LegendaMapa } from '@/components/mapa/legenda-mapa';
+import {
+  filtrosAtivos,
+  useDicasVistas,
+  useFiltrosMapa,
+  useLegendaAberta,
+} from '@/components/mapa/preferencias-mapa';
+import { MunicipioPanel } from '@/components/municipio-panel';
 import { RAIO_CONFIRMACAO_M } from '@/constants/proximidade';
-import { getStatusColor, STATUS_ABERTOS } from '@/constants/status';
+import {
+  getStatusColor,
+  normalizarStatus,
+  rotuloCidadao,
+  statusAberto,
+} from '@/constants/status';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors, useTheme } from '@/context/theme-context';
@@ -47,9 +67,11 @@ import { useToast } from '@/context/toast-context';
 import { GpsJoystick } from '@/dev/gps-joystick';
 import { useLocalizacao } from '@/hooks/use-localizacao';
 import { api } from '@/services/api';
+import { areaDoMapa, categoriasDoMapa } from '@/services/api-mapa';
 import { useProgresso } from '@/services/progresso';
 import { lerUltimaPosicao, ultimaPosicaoEmCache, type Ponto } from '@/services/ultima-posicao';
-import type { AreaDoMapa, Categoria, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
+import type { AreaDoMapa, Defeito, TipoSinalizacao, VisaoMunicipio } from '@/types';
+import type { CategoriaMapa, ResultadoEndereco } from '@/types/mapa';
 import { concluidoEm } from '@/utils/format';
 import {
   caixaDosPontos,
@@ -59,10 +81,18 @@ import {
   regiaoEmTorno,
   REGIAO_PADRAO,
 } from '@/utils/geo';
-import { agruparParaHeatmap, corDoPeso, raioDoPeso, type HeatCell } from '@/utils/heatmap';
 import {
+  agruparParaHeatmap,
+  corDoPeso,
+  raioDoPeso,
+  raioNaCelula,
+  type HeatCell,
+} from '@/utils/heatmap';
+import {
+  agruparEmClusters,
   caixaComFolga,
   celulaDaCaixa,
+  celulasDe,
   rarear,
   regiaoDentroDaCaixa,
   type Caixa,
@@ -81,6 +111,21 @@ const MOSTRAR_JOYSTICK = __DEV__ && Platform.OS === 'web';
 const ESPERA_GPS_MS = 3000;
 /** Espera a câmera assentar antes de buscar a área (zoom com pinça dispara vários eventos). */
 const ESPERA_BUSCA_MS = 300;
+/** Menor enquadramento ao aproximar uma bolha ou ir a um endereço (~zoom 17). */
+const DELTA_MINIMO = 0.004;
+
+function nomeDaCategoria(d: Defeito) {
+  return d.categoria ?? d.categoria_nome ?? '';
+}
+
+/** Enquadramento de um resultado da busca: a caixa do geocoder, sem passar de rua nem de cidade. */
+function regiaoDoEndereco(r: ResultadoEndereco): Regiao {
+  const vao = r.caixa
+    ? Math.max(r.caixa.max_lat - r.caixa.min_lat, r.caixa.max_lng - r.caixa.min_lng) * 1.2
+    : 0;
+  const delta = Math.min(Math.max(vao, DELTA_MINIMO), 0.2);
+  return { latitude: r.latitude, longitude: r.longitude, latitudeDelta: delta, longitudeDelta: delta };
+}
 
 export default function MapaScreen() {
   const colors = useColors();
@@ -95,11 +140,15 @@ export default function MapaScreen() {
 
   const mapRef = useRef<MapSurfaceHandle>(null);
   const [defeitos, setDefeitos] = useState<Defeito[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-  // Contagem real por quadrante (o mapa de calor dos visitantes usa isto,
-  // não os pinos já cortados) e o lado do quadrante em graus.
+  const [categorias, setCategorias] = useState<CategoriaMapa[]>([]);
+  const [estadoCategorias, setEstadoCategorias] = useState<'carregando' | 'erro' | 'pronto'>(
+    'carregando',
+  );
+  // Contagem real por quadrante (bolhas e calor usam isto, não os pinos já
+  // cortados) e o lado do quadrante em graus.
   const [celulas, setCelulas] = useState<AreaDoMapa['celulas']>([]);
   const [celulaGraus, setCelulaGraus] = useState(0);
+  const [erroArea, setErroArea] = useState<string | null>(null);
   // Região visível atual; `null` até a câmera se mexer pela primeira vez.
   const [regiao, setRegiao] = useState<Regiao | null>(null);
   const [seguindo, setSeguindo] = useState(true);
@@ -112,6 +161,12 @@ export default function MapaScreen() {
   const [carregandoVisao, setCarregandoVisao] = useState(false);
   const [apoiei, setApoiei] = useState<Set<number>>(new Set());
   const [sinalizei, setSinalizei] = useState<Map<number, TipoSinalizacao>>(new Map());
+  // Endereço escolhido na busca: alfinete + cartão "Reportar aqui".
+  const [destino, setDestino] = useState<ResultadoEndereco | null>(null);
+  const [camadasAbertas, setCamadasAbertas] = useState(false);
+  const { filtros, setFiltros, carregado: filtrosCarregados } = useFiltrosMapa();
+  const [legendaAberta, setLegendaAberta] = useLegendaAberta();
+  const [dicasVistas, setDicasVistas] = useDicasVistas();
   // Nível/EXP no cartão da conta; as ações que dão XP recarregam o store.
   const progresso = useProgresso(isAuthenticated);
 
@@ -160,11 +215,18 @@ export default function MapaScreen() {
     for (const c of categorias) if (c.icone) mapa.set(c.nome, c.icone);
     return mapa;
   }, [categorias]);
+  const idPorCategoria = useMemo(
+    () => new Map(categorias.map((c) => [c.nome.toLocaleLowerCase('pt-BR'), c.id])),
+    [categorias],
+  );
 
   // A posição só entra na busca para liberar restritos por perto; ler por ref
-  // evita uma busca nova a cada atualização do GPS.
+  // evita uma busca nova a cada atualização do GPS. Os filtros, idem: a troca
+  // de filtro força a busca pelo efeito próprio, mais abaixo.
   const posicaoRef = useRef(posicao);
   posicaoRef.current = posicao;
+  const filtrosRef = useRef(filtros);
+  filtrosRef.current = filtros;
   const buscadaRef = useRef<{ caixa: Caixa; celula: number } | null>(null);
   const buscaSeqRef = useRef(0);
 
@@ -186,14 +248,18 @@ export default function MapaScreen() {
     }
     const seq = ++buscaSeqRef.current;
     try {
-      const area = await api.defeitosNaArea(caixa, posicaoRef.current);
+      const area = await areaDoMapa(caixa, posicaoRef.current, filtrosRef.current);
       if (seq !== buscaSeqRef.current) return;
       buscadaRef.current = { caixa, celula };
       setDefeitos(area.defeitos);
-      setCelulas(area.celulas);
+      setCelulas(area.celulas ?? []);
       setCelulaGraus(area.celula_graus);
-    } catch {
-      // Sem rede o mapa apenas fica sem marcadores.
+      setErroArea(null);
+    } catch (err) {
+      if (seq !== buscaSeqRef.current) return;
+      // Os pinos antigos ficam (melhor que um mapa vazio); o aviso no rodapé
+      // diz que estão desatualizados e oferece tentar de novo.
+      setErroArea(err instanceof Error ? err.message : 'Sem conexão.');
     }
   }, []);
 
@@ -202,34 +268,72 @@ export default function MapaScreen() {
   regiaoAtualRef.current = regiaoAtual;
 
   useEffect(() => {
-    if (!regiaoAtual) return;
+    if (!regiaoAtual || !filtrosCarregados) return;
     const id = setTimeout(() => carregarArea(regiaoAtual), ESPERA_BUSCA_MS);
     return () => clearTimeout(id);
-  }, [regiaoAtual, carregarArea]);
+  }, [regiaoAtual, carregarArea, filtrosCarregados]);
+
+  // Filtro novo invalida a caixa já buscada. A primeira leitura (filtros
+  // vindos do disco) não conta: a busca inicial já sai com eles.
+  const chaveFiltro = `${filtros.situacao}|${filtros.categorias.join(',')}`;
+  const chaveFiltroRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!filtrosCarregados) return;
+    const anterior = chaveFiltroRef.current;
+    chaveFiltroRef.current = chaveFiltro;
+    if (anterior === null || anterior === chaveFiltro) return;
+    if (regiaoAtualRef.current) carregarArea(regiaoAtualRef.current, true);
+  }, [chaveFiltro, filtrosCarregados, carregarArea]);
 
   // Recarrega ao voltar do formulário de novo chamado.
+  const filtrosCarregadosRef = useRef(filtrosCarregados);
+  filtrosCarregadosRef.current = filtrosCarregados;
   useFocusEffect(
     useCallback(() => {
-      if (regiaoAtualRef.current) carregarArea(regiaoAtualRef.current, true);
+      if (regiaoAtualRef.current && filtrosCarregadosRef.current) {
+        carregarArea(regiaoAtualRef.current, true);
+      }
     }, [carregarArea]),
   );
 
+  // `tentativaCategorias` sobe no "Tentar de novo" da folha e refaz a busca.
+  const [tentativaCategorias, setTentativaCategorias] = useState(0);
   useEffect(() => {
-    api
-      .listCategorias()
-      .then(setCategorias)
-      .catch(() => {});
-  }, []);
+    let cancelado = false;
+    categoriasDoMapa()
+      .then((lista) => {
+        if (cancelado) return;
+        setCategorias(lista);
+        setEstadoCategorias('pronto');
+      })
+      .catch((err: unknown) => {
+        if (cancelado) return;
+        // Sem categorias o mapa só perde os emojis e o filtro por tipo; a
+        // folha "Camadas" mostra o erro com "Tentar de novo".
+        console.warn('[mapa] categorias indisponíveis', err);
+        setEstadoCategorias('erro');
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [tentativaCategorias]);
+
+  function recarregarCategorias() {
+    setEstadoCategorias('carregando');
+    setTentativaCategorias((n) => n + 1);
+  }
 
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelado = false;
+    // Apoios e sinalizações só marcam os botões do detalhe como "já feito";
+    // sem eles o detalhe ainda funciona (o backend recusa a repetição).
     api
       .apoiei()
       .then((r) => {
         if (!cancelado) setApoiei(new Set(r.ids));
       })
-      .catch(() => {});
+      .catch((err) => console.warn('[mapa] apoios do usuário indisponíveis', err));
     api
       .sinalizei()
       .then((r) => {
@@ -238,40 +342,56 @@ export default function MapaScreen() {
           setSinalizei(new Map(Object.entries(r.sinalizacoes) as unknown as [number, TipoSinalizacao][]));
         }
       })
-      .catch(() => {});
+      .catch((err) => console.warn('[mapa] sinalizações do usuário indisponíveis', err));
     return () => {
       cancelado = true;
     };
   }, [isAuthenticated]);
 
+  /** Seleciona um chamado carregado à parte e centraliza nele, saindo do "seguir". */
+  const focarDefeito = useCallback((d: Defeito) => {
+    setSelecionado(d);
+    if (d.latitude == null || d.longitude == null) return;
+    setSeguindo(false);
+    const foco = {
+      latitude: d.latitude,
+      longitude: d.longitude,
+      latitudeDelta: 0.005,
+      longitudeDelta: 0.005,
+    };
+    if (mapRef.current) mapRef.current.animarPara(foco);
+    else focoPendenteRef.current = foco;
+  }, []);
+
+  /** Abre um chamado pelo id (últimos resolvidos do painel da cidade). */
+  async function abrirPorId(id: string) {
+    try {
+      focarDefeito(await api.detalharDefeito(id as unknown as number));
+    } catch (err) {
+      addToast.error(err instanceof Error ? err.message : 'Não foi possível abrir o chamado.');
+    }
+  }
+
   useEffect(() => {
     if (!abrir) return;
     let cancelado = false;
+    // Vindo de fora (ex.: "Ver no mapa" em Meus chamados), centraliza no
+    // ponto em vez de continuar seguindo o GPS.
     api
       .detalharDefeito(abrir as unknown as number)
       .then((d) => {
-        if (cancelado) return;
-        setSelecionado(d);
-        // Vindo de fora (ex.: "Ver no mapa" em Meus chamados), centraliza no
-        // ponto em vez de continuar seguindo o GPS.
-        if (d.latitude != null && d.longitude != null) {
-          setSeguindo(false);
-          const foco = {
-            latitude: d.latitude,
-            longitude: d.longitude,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
-          };
-          if (mapRef.current) mapRef.current.animarPara(foco);
-          else focoPendenteRef.current = foco;
-        }
+        if (!cancelado) focarDefeito(d);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (!cancelado) {
+          addToast.error(err instanceof Error ? err.message : 'Não foi possível abrir o chamado.');
+        }
+      });
     router.setParams({ abrir: undefined });
     return () => {
       cancelado = true;
     };
-  }, [abrir]);
+  }, [abrir, focarDefeito, addToast]);
 
   // Câmera de navegação: acompanha cada atualização do GPS enquanto "seguindo".
   // A posição do usuário manda; o município é só o enquadramento de fallback.
@@ -280,10 +400,37 @@ export default function MapaScreen() {
     mapRef.current?.seguir(posicao);
   }, [mapaPronto, seguindo, posicao]);
 
-  const filtrados = useMemo(
-    () => defeitos.filter((d) => STATUS_ABERTOS.includes(d.status)),
-    [defeitos],
+  /**
+   * Filtro no cliente, além do enviado ao backend: cobre o backend que
+   * ainda não conhece `situacao`/`categorias` e a visão do município (que
+   * vem inteira). Rejeitados ("não procede") nunca viram pino.
+   */
+  const passaNoFiltro = useCallback(
+    (d: Defeito, considerarSituacao: boolean) => {
+      const status = normalizarStatus(d.status);
+      if (status === 'rejeitado') return false;
+      if (considerarSituacao) {
+        if (filtros.situacao === 'abertos' && !statusAberto(status)) return false;
+        if (filtros.situacao === 'resolvidos' && status !== 'concluido') return false;
+      }
+      if (filtros.categorias.length > 0) {
+        const id =
+          d.categoria_id ?? idPorCategoria.get(nomeDaCategoria(d).toLocaleLowerCase('pt-BR'));
+        if (id == null || !filtros.categorias.includes(id)) return false;
+      }
+      return true;
+    },
+    [filtros.situacao, filtros.categorias, idPorCategoria],
   );
+
+  const filtrados = useMemo(
+    () => defeitos.filter((d) => passaNoFiltro(d, true)),
+    [defeitos, passaNoFiltro],
+  );
+  // Se o filtro do cliente cortou algo, o backend não aplicou o filtro e as
+  // contagens de `celulas` incluem o que não deveria aparecer: bolhas e calor
+  // passam a contar só os pinos recebidos.
+  const contagemDoBackendValida = filtrados.length === defeitos.length;
 
   /** Chamados da área visível, mais perto primeiro (sem GPS, na ordem do backend). */
   const proximos = useMemo<ItemProximo[]>(() => {
@@ -291,7 +438,7 @@ export default function MapaScreen() {
       return filtrados.map((defeito) => ({
         defeito,
         distancia: Number.POSITIVE_INFINITY,
-        icone: iconePorCategoria.get(defeito.categoria ?? defeito.categoria_nome ?? ''),
+        icone: iconePorCategoria.get(nomeDaCategoria(defeito)),
         emAlcance: false,
       }));
     }
@@ -301,54 +448,94 @@ export default function MapaScreen() {
         return {
           defeito,
           distancia,
-          icone: iconePorCategoria.get(defeito.categoria ?? defeito.categoria_nome ?? ''),
-          emAlcance: distancia <= RAIO_CONFIRMACAO_M && STATUS_ABERTOS.includes(defeito.status),
+          icone: iconePorCategoria.get(nomeDaCategoria(defeito)),
+          emAlcance: distancia <= RAIO_CONFIRMACAO_M && statusAberto(defeito.status),
         };
       })
       .sort((a, b) => a.distancia - b.distancia);
   }, [filtrados, posicao, iconePorCategoria]);
 
+  // Na visão do município a lista vem inteira (só abertos): filtra por tipo
+  // e calcula as células aqui, no zoom atual.
+  const visaoFiltrada = useMemo(
+    () => (visao ? visao.defeitos.filter((d) => passaNoFiltro(d, false)) : []),
+    [visao, passaNoFiltro],
+  );
+  const celulaVisao = regiaoAtual ? celulaDaCaixa(caixaComFolga(regiaoAtual)) : 0;
+
   /**
-   * O que está no mapa: a área visível ou, na visão do município, a cidade
-   * inteira — que vem sem corte do backend e é rareada aqui pelo zoom atual.
+   * O que está no mapa: pinos (a área visível ou, na visão do município, a
+   * cidade rareada pelo zoom atual) e as bolhas das células que não couberam.
+   * O selecionado e os que estão no alcance nunca somem dentro de uma bolha.
    */
-  const visiveis = useMemo<ItemProximo[]>(() => {
-    if (!visao) return proximos;
-    const lista = regiaoAtual ? rarear(visao.defeitos, regiaoAtual) : visao.defeitos;
-    return lista.map((defeito) => ({
-      defeito,
-      distancia: posicao
-        ? distanciaAte(defeito, posicao.latitude, posicao.longitude)
-        : Number.POSITIVE_INFINITY,
-      icone: iconePorCategoria.get(defeito.categoria ?? defeito.categoria_nome ?? ''),
-      emAlcance: false,
-    }));
-  }, [visao, proximos, posicao, iconePorCategoria, regiaoAtual]);
+  const { visiveis, clusters } = useMemo(() => {
+    const idSelecionado = selecionado?.id;
+    let itens: ItemProximo[];
+    let contagens: AreaDoMapa['celulas'];
+    let celula: number;
+    if (visao) {
+      const lista = regiaoAtual ? rarear(visaoFiltrada, regiaoAtual) : visaoFiltrada;
+      itens = lista.map((defeito) => ({
+        defeito,
+        distancia: posicao
+          ? distanciaAte(defeito, posicao.latitude, posicao.longitude)
+          : Number.POSITIVE_INFINITY,
+        icone: iconePorCategoria.get(nomeDaCategoria(defeito)),
+        emAlcance: false,
+      }));
+      contagens = celulasDe(visaoFiltrada, celulaVisao);
+      celula = celulaVisao;
+    } else {
+      itens = proximos;
+      contagens = contagemDoBackendValida ? celulas : [];
+      celula = celulaGraus;
+    }
+    const agrupado = agruparEmClusters(
+      itens.map((i) => ({ ...i, latitude: i.defeito.latitude, longitude: i.defeito.longitude })),
+      contagens,
+      celula,
+      (i) => i.emAlcance || i.defeito.id === idSelecionado,
+    );
+    return {
+      visiveis: agrupado.pinos,
+      clusters: agrupado.clusters.map<ClusterMapa>((c) => ({
+        key: c.key,
+        coordenada: { latitude: c.latitude, longitude: c.longitude },
+        total: c.total,
+      })),
+    };
+  }, [
+    visao,
+    visaoFiltrada,
+    regiaoAtual,
+    celulaVisao,
+    posicao,
+    iconePorCategoria,
+    proximos,
+    contagemDoBackendValida,
+    celulas,
+    celulaGraus,
+    selecionado?.id,
+  ]);
 
   // Calor com a contagem real: na visão do município a lista já é completa;
   // na navegação, os quadrantes do backend (os pinos vêm cortados).
-  const celulasCalor = useMemo<HeatCell[]>(
-    () =>
-      visao
-        ? agruparParaHeatmap(visao.defeitos)
-        : celulas.map((c) => ({
-            key: `area-${c.latitude.toFixed(5)}:${c.longitude.toFixed(5)}`,
-            latitude: c.latitude,
-            longitude: c.longitude,
-            peso: c.total,
-          })),
-    [visao, celulas],
-  );
-  // Com o zoom afastado o quadrante cobre quilômetros; o círculo cresce junto
-  // para continuar visível (o raio base é pensado para zoom de bairro).
-  const escalaCalor = visao ? 1 : Math.max(1, (celulaGraus * 111000) / 500);
+  const usarCelulasNoCalor = !visao && contagemDoBackendValida;
+  const celulasCalor = useMemo<HeatCell[]>(() => {
+    if (!filtros.calor) return [];
+    if (visao) return agruparParaHeatmap(visaoFiltrada);
+    if (!usarCelulasNoCalor) return agruparParaHeatmap(filtrados);
+    return celulas.map((c) => ({
+      key: `area-${c.latitude.toFixed(5)}:${c.longitude.toFixed(5)}`,
+      latitude: c.latitude,
+      longitude: c.longitude,
+      peso: c.total,
+    }));
+  }, [filtros.calor, visao, visaoFiltrada, usarCelulasNoCalor, filtrados, celulas]);
   const pesoMaximo = useMemo(
     () => celulasCalor.reduce((max, c) => Math.max(max, c.peso), 1),
     [celulasCalor],
   );
-
-  // Visitantes só veem o agregado; marcadores individuais exigem login.
-  const mostrarCalor = !isAuthenticated;
 
   const circulos = useMemo<CirculoMapa[]>(() => {
     const lista: CirculoMapa[] = [];
@@ -363,32 +550,36 @@ export default function MapaScreen() {
         larguraBorda: 2,
       });
     }
-    if (mostrarCalor) {
-      for (const celula of celulasCalor) {
-        lista.push({
-          key: celula.key,
-          centro: { latitude: celula.latitude, longitude: celula.longitude },
-          raio: raioDoPeso(celula.peso, pesoMaximo) * escalaCalor,
-          corPreenchimento: corDoPeso(celula.peso, pesoMaximo),
-        });
-      }
+    for (const celula of celulasCalor) {
+      lista.push({
+        key: `calor-${celula.key}`,
+        centro: { latitude: celula.latitude, longitude: celula.longitude },
+        raio: usarCelulasNoCalor
+          ? raioNaCelula(celula.peso, pesoMaximo, celulaGraus)
+          : raioDoPeso(celula.peso, pesoMaximo),
+        corPreenchimento: corDoPeso(celula.peso, pesoMaximo),
+      });
     }
     return lista;
-  }, [posicao, isAuthenticated, mostrarCalor, celulasCalor, pesoMaximo, escalaCalor, visao]);
+  }, [posicao, isAuthenticated, celulasCalor, pesoMaximo, usarCelulasNoCalor, celulaGraus, visao]);
 
   const marcadores = useMemo<MarcadorMapa[]>(
     () =>
-      mostrarCalor
-        ? []
-        : visiveis.map(({ defeito, icone, emAlcance }) => ({
-            key: String(defeito.id),
-            coordenada: { latitude: defeito.latitude, longitude: defeito.longitude },
-            cor: getStatusColor(defeito.status, concluidoEm(defeito)),
-            icone,
-            emAlcance,
-            selecionado: selecionado?.id === defeito.id,
-          })),
-    [mostrarCalor, visiveis, selecionado?.id],
+      visiveis.map(({ defeito, icone, emAlcance, distancia }) => {
+        const resolvido = normalizarStatus(defeito.status) === 'concluido';
+        const perto = Number.isFinite(distancia) ? `, a ${Math.round(distancia)} metros` : '';
+        return {
+          key: String(defeito.id),
+          coordenada: { latitude: defeito.latitude, longitude: defeito.longitude },
+          cor: getStatusColor(defeito.status, concluidoEm(defeito)),
+          icone,
+          emAlcance,
+          resolvido,
+          selecionado: selecionado?.id === defeito.id,
+          rotuloAcessivel: `${nomeDaCategoria(defeito) || defeito.titulo}, ${rotuloCidadao(defeito.status)}${perto}${emAlcance ? ', perto o bastante para confirmar' : ''}`,
+        };
+      }),
+    [visiveis, selecionado?.id],
   );
 
   /** Liga a visão do município: enquadra a cidade e carrega abertos + ranking. */
@@ -403,6 +594,7 @@ export default function MapaScreen() {
       setVisao(dados);
       setSeguindo(false);
       setSelecionado(null);
+      setDestino(null);
       // Enquadra só onde há chamados (mais a pessoa, para dar contexto);
       // o município inteiro só quando não há nenhum aberto — em cidades
       // gigantes o zoom-out total deixaria os pinos invisíveis.
@@ -421,6 +613,12 @@ export default function MapaScreen() {
     setVisao(null);
     setSelecionado(null);
     recentrar();
+  }
+
+  function pedirLogin(mensagem: string) {
+    addToast.info(mensagem, {
+      action: { label: 'Entrar', onPress: () => router.push('/login') },
+    });
   }
 
   function abrirNovoChamado(coordinate: { latitude: number; longitude: number }) {
@@ -446,14 +644,43 @@ export default function MapaScreen() {
     abrirNovoChamado({ latitude: posicao.latitude, longitude: posicao.longitude });
   }
 
+  function reportarNoDestino() {
+    if (!destino) return;
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    abrirNovoChamado({ latitude: destino.latitude, longitude: destino.longitude });
+  }
+
+  function irParaEndereco(r: ResultadoEndereco) {
+    setDestino(r);
+    setSeguindo(false);
+    setSelecionado(null);
+    mapRef.current?.animarPara(regiaoDoEndereco(r));
+  }
+
   function recentrar() {
     if (!posicao) {
       if (permitido === false) tentarNovamente();
       addToast(erroGps ?? 'Aguardando sinal do GPS...', 'info');
       return;
     }
+    setDestino(null);
     setSeguindo(true);
     mapRef.current?.seguir(posicao);
+  }
+
+  /** Bolha: aproxima duas potências de zoom em torno dela, o que abre os pinos. */
+  function aproximarCluster(key: string) {
+    const cluster = clusters.find((c) => c.key === key);
+    if (!cluster || !regiaoAtual) return;
+    setSeguindo(false);
+    mapRef.current?.animarPara({
+      ...cluster.coordenada,
+      latitudeDelta: Math.max(regiaoAtual.latitudeDelta / 4, DELTA_MINIMO / 2),
+      longitudeDelta: Math.max(regiaoAtual.longitudeDelta / 4, DELTA_MINIMO / 2),
+    });
   }
 
   function aplicarPatch(id: number, patch: Partial<Defeito>) {
@@ -493,15 +720,31 @@ export default function MapaScreen() {
     setSelecionado(defeito);
     try {
       setSelecionado(await api.detalharDefeito(defeito.id));
-    } catch {
-      // Mantém os dados resumidos da listagem.
+    } catch (err) {
+      // Mantém os dados resumidos da listagem: dá para ver e agir, só sem
+      // a foto e o histórico completos.
+      console.warn('[mapa] detalhe do chamado indisponível', err);
     }
   }
+
+  // Visitante não vê quem reportou (nem mascarado): o mapa é público, a
+  // autoria é dado pessoal. O backend já mascara; aqui some de vez.
+  const selecionadoExibido = useMemo(
+    () =>
+      selecionado && !isAuthenticated
+        ? { ...selecionado, autor_nome: undefined, usuario: null }
+        : selecionado,
+    [selecionado, isAuthenticated],
+  );
 
   const distanciaSelecionado =
     selecionado && posicao ? distanciaAte(selecionado, posicao.latitude, posicao.longitude) : null;
 
   const rodape = insets.bottom + Spacing[4];
+  const nFiltros = filtrosAtivos(filtros);
+  // Dicas só depois do mapa na tela (senão apontam para nada) e fora da
+  // visão da cidade, que tem o próprio painel no rodapé.
+  const mostrarDicas = dicasVistas === false && mapaPronto && !visao;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bgPrimary, paddingTop: insets.top }]}>
@@ -512,10 +755,13 @@ export default function MapaScreen() {
             regiaoInicial={regiaoInicial}
             circulos={circulos}
             marcadores={marcadores}
+            clusters={clusters}
+            destino={destino}
             usuario={posicao}
             direcao={bussola ?? posicao?.heading ?? null}
             onLongPressMapa={(c) => {
               if (isAuthenticated) abrirNovoChamado(c);
+              else pedirLogin('Entre na sua conta para reportar um problema neste ponto.');
             }}
             onPressMarcador={(key) => {
               const item = visiveis.find((p) => String(p.defeito.id) === key);
@@ -524,6 +770,7 @@ export default function MapaScreen() {
                 abrirDetalhe(item.defeito);
               }
             }}
+            onPressCluster={aproximarCluster}
             onArrastar={() => setSeguindo(false)}
             onRegiaoMudou={setRegiao}
             onPronto={() => setMapaPronto(true)}
@@ -538,27 +785,15 @@ export default function MapaScreen() {
           </View>
         )}
 
-        {/* Só o erro de GPS aparece no topo: é a única forma de tentar de novo. */}
-        {permitido === false || erroGps ? (
-          <View style={styles.topo} pointerEvents="box-none">
-            <Pressable
-              onPress={tentarNovamente}
-              accessibilityRole="button"
-              style={[
-                styles.pill,
-                { backgroundColor: colors.bgElevated, borderColor: colors.error },
-              ]}>
-              <Ionicons name="warning" size={13} color={colors.error} />
-              <Text style={[styles.pillTexto, { color: colors.error }]}>
-                {erroGps ?? 'Localização indisponível'} · tocar para tentar de novo
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
+        {/* Topo, no meio: busca de endereço. Fica acima da legenda (z-index)
+            porque a lista de resultados desce sobre ela. */}
+        <View style={styles.topoBusca} pointerEvents="box-none">
+          <BuscaEndereco perto={posicao} onEscolher={irParaEndereco} />
+        </View>
 
         {/* Canto superior esquerdo: cartão da conta — avatar e, logado, o
-            nível/EXP no mesmo cartão. */}
-        <View style={styles.topoEsquerda}>
+            nível/EXP no mesmo cartão — e a legenda logo abaixo. */}
+        <View style={styles.topoEsquerda} pointerEvents="box-none">
           <Pressable
             onPress={() => router.push('/conta')}
             accessibilityRole="button"
@@ -611,15 +846,29 @@ export default function MapaScreen() {
               </>
             ) : null}
           </Pressable>
+          {legendaAberta !== null ? (
+            <View style={styles.legenda}>
+              <LegendaMapa
+                aberta={legendaAberta}
+                onAlternar={() => setLegendaAberta(!legendaAberta)}
+                situacao={visao ? 'abertos' : filtros.situacao}
+                calor={filtros.calor}
+                mostrarAlcance={isAuthenticated && !visao}
+              />
+            </View>
+          ) : null}
         </View>
 
-        {/* Canto superior direito: visão do município e ranking de cidadãos. */}
+        {/* Canto superior direito: visão do município, ranking e camadas. */}
         <View style={styles.topoDireita}>
           <Pressable
             onPress={visao ? fecharVisaoMunicipio : abrirVisaoMunicipio}
             disabled={carregandoVisao}
             accessibilityRole="button"
-            accessibilityLabel={visao ? 'Voltar para a navegação' : 'Ver a cidade inteira'}
+            accessibilityLabel={
+              visao ? 'Voltar para a navegação' : 'Ver a cidade inteira e a transparência da prefeitura'
+            }
+            accessibilityState={{ busy: carregandoVisao, selected: !!visao }}
             style={[
               styles.botaoRedondo,
               {
@@ -628,11 +877,15 @@ export default function MapaScreen() {
                 opacity: carregandoVisao ? 0.6 : 1,
               },
             ]}>
-            <Ionicons
-              name={visao ? 'contract' : 'expand'}
-              size={18}
-              color={visao ? colors.textInverse : colors.textSecondary}
-            />
+            {carregandoVisao ? (
+              <ActivityIndicator size="small" color={colors.textSecondary} />
+            ) : (
+              <Ionicons
+                name={visao ? 'contract' : 'expand'}
+                size={18}
+                color={visao ? colors.textInverse : colors.textSecondary}
+              />
+            )}
           </Pressable>
           <Pressable
             onPress={() =>
@@ -658,11 +911,65 @@ export default function MapaScreen() {
             ]}>
             <Ionicons name="trophy" size={17} color={colors.gold500} />
           </Pressable>
+          <Pressable
+            onPress={() => setCamadasAbertas(true)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              nFiltros > 0
+                ? `Camadas e filtros do mapa, ${nFiltros} ${nFiltros === 1 ? 'ativo' : 'ativos'}`
+                : 'Camadas e filtros do mapa'
+            }
+            style={[
+              styles.botaoRedondo,
+              {
+                backgroundColor: colors.bgSurface,
+                borderColor: nFiltros > 0 ? colors.primary : colors.borderDefault,
+              },
+            ]}>
+            <Ionicons name="layers" size={18} color={colors.textSecondary} />
+            {nFiltros > 0 ? (
+              <View
+                style={[styles.selo, { backgroundColor: colors.primary, borderColor: colors.bgSurface }]}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants">
+                <Text style={[styles.seloTexto, { color: colors.onPrimary }]}>{nFiltros}</Text>
+              </View>
+            ) : null}
+          </Pressable>
         </View>
 
         {MOSTRAR_JOYSTICK ? <GpsJoystick posicaoReal={posicao} /> : null}
 
         <View style={[styles.rodape, { bottom: rodape }]} pointerEvents="box-none">
+          {/* Avisos que pedem ação ficam aqui, perto do polegar. */}
+          {permitido === false || erroGps ? (
+            <View style={styles.fabLinha} pointerEvents="box-none">
+              <Pressable
+                onPress={tentarNovamente}
+                accessibilityRole="button"
+                style={[styles.pill, { backgroundColor: colors.bgElevated, borderColor: colors.error }]}>
+                <Ionicons name="warning" size={14} color={colors.error} />
+                <Text style={[styles.pillTexto, { color: colors.error }]}>
+                  {erroGps ?? 'Localização indisponível'} · tocar para tentar de novo
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {erroArea && !visao ? (
+            <View style={styles.fabLinha} pointerEvents="box-none">
+              <Pressable
+                onPress={() => regiaoAtual && carregarArea(regiaoAtual, true)}
+                accessibilityRole="button"
+                accessibilityLabel="Não foi possível atualizar os chamados do mapa. Tocar para tentar de novo"
+                style={[styles.pill, { backgroundColor: colors.bgElevated, borderColor: colors.warning }]}>
+                <Ionicons name="cloud-offline" size={14} color={colors.warning} />
+                <Text style={[styles.pillTexto, { color: colors.textPrimary }]}>
+                  Chamados desatualizados · tocar para tentar de novo
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           {visao ? (
             <View style={styles.fabLinha} pointerEvents="box-none">
               <MunicipioPanel
@@ -677,63 +984,94 @@ export default function MapaScreen() {
                     longitudeDelta: 0.01,
                   });
                 }}
+                onAbrirChamado={abrirPorId}
                 onFechar={fecharVisaoMunicipio}
               />
             </View>
           ) : (
-            <View style={styles.fabLinha} pointerEvents="box-none">
-              {seguindo ? (
-                <Pressable
-                  onPress={reportarAqui}
-                  accessibilityRole="button"
-                  accessibilityLabel="Reportar chamado na minha posição"
-                  style={[
-                    styles.fab,
-                    {
-                      backgroundColor:
-                        posicao || !isAuthenticated ? colors.gold500 : colors.bgElevated,
-                      borderColor:
-                        posicao || !isAuthenticated ? colors.gold500 : colors.borderDefault,
-                    },
-                  ]}>
-                  <Ionicons
-                    name="megaphone"
-                    size={20}
-                    color={posicao || !isAuthenticated ? colors.textInverse : colors.textMuted}
+            <>
+              {mostrarDicas ? (
+                <View style={styles.fabLinha} pointerEvents="box-none">
+                  <DicasMapa logado={isAuthenticated} onConcluir={() => setDicasVistas(true)} />
+                </View>
+              ) : destino ? (
+                <View style={styles.fabLinha} pointerEvents="box-none">
+                  <DestinoCard
+                    destino={destino}
+                    logado={isAuthenticated}
+                    onReportar={reportarNoDestino}
+                    onFechar={() => setDestino(null)}
                   />
-                  <Text
+                </View>
+              ) : null}
+              <View style={styles.fabLinha} pointerEvents="box-none">
+                {seguindo ? (
+                  <Pressable
+                    onPress={reportarAqui}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isAuthenticated ? 'Reportar chamado na minha posição' : 'Entrar para reportar'
+                    }
                     style={[
-                      styles.fabTexto,
+                      styles.fab,
                       {
-                        color: posicao || !isAuthenticated ? colors.textInverse : colors.textMuted,
+                        backgroundColor:
+                          posicao || !isAuthenticated ? colors.gold500 : colors.bgElevated,
+                        borderColor:
+                          posicao || !isAuthenticated ? colors.gold500 : colors.borderDefault,
                       },
                     ]}>
-                    Reportar
-                  </Text>
-                </Pressable>
-              ) : (
-                <Pressable
-                  onPress={recentrar}
-                  accessibilityRole="button"
-                  accessibilityLabel="Recentralizar na minha posição"
-                  style={[
-                    styles.fab,
-                    { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
-                  ]}>
-                  <Ionicons name="locate" size={20} color={colors.gold500} />
-                  <Text style={[styles.fabTexto, { color: colors.textPrimary }]}>
-                    Recentralizar
-                  </Text>
-                </Pressable>
-              )}
-            </View>
+                    <Ionicons
+                      name="megaphone"
+                      size={20}
+                      color={posicao || !isAuthenticated ? colors.textInverse : colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.fabTexto,
+                        {
+                          color:
+                            posicao || !isAuthenticated ? colors.textInverse : colors.textMuted,
+                        },
+                      ]}>
+                      Reportar
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={recentrar}
+                    accessibilityRole="button"
+                    accessibilityLabel="Recentralizar na minha posição"
+                    style={[
+                      styles.fab,
+                      { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
+                    ]}>
+                    <Ionicons name="locate" size={20} color={colors.gold500} />
+                    <Text style={[styles.fabTexto, { color: colors.textPrimary }]}>
+                      Recentralizar
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            </>
           )}
         </View>
       </View>
 
+      <CamadasSheet
+        visible={camadasAbertas}
+        onClose={() => setCamadasAbertas(false)}
+        filtros={filtros}
+        onChange={setFiltros}
+        categorias={categorias}
+        estadoCategorias={estadoCategorias}
+        onRecarregarCategorias={recarregarCategorias}
+        visaoCidade={!!visao}
+      />
+
       <DefectSheet
         key={selecionado?.id}
-        defeito={selecionado}
+        defeito={selecionadoExibido}
         apoiado={selecionado ? apoiei.has(selecionado.id) : false}
         distanciaM={distanciaSelecionado}
         onClose={() => setSelecionado(null)}
@@ -747,6 +1085,9 @@ export default function MapaScreen() {
     </View>
   );
 }
+
+/** Coluna lateral (44) + margens: a busca ocupa o meio entre as duas. */
+const LATERAL = Spacing[4] + 44 + Spacing[2];
 
 const styles = StyleSheet.create({
   container: {
@@ -765,13 +1106,12 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
   },
   // Os panes do Leaflet (web) usam z-index 400; sem isso os overlays somem.
-  topo: {
+  topoBusca: {
     position: 'absolute',
-    zIndex: 1000,
+    zIndex: 1003,
     top: Spacing[3],
-    left: Spacing[4],
-    right: Spacing[4],
-    alignItems: 'center',
+    left: LATERAL,
+    right: LATERAL,
   },
   topoDireita: {
     position: 'absolute',
@@ -783,10 +1123,13 @@ const styles = StyleSheet.create({
   },
   topoEsquerda: {
     position: 'absolute',
-    zIndex: 1001,
+    zIndex: 1002,
     top: Spacing[3],
     left: Spacing[4],
     alignItems: 'flex-start',
+  },
+  legenda: {
+    marginTop: Spacing[3],
   },
   // Como no rascunho: o círculo do avatar "apoiado" na barra de EXP, com o
   // nível logo abaixo — tudo um único toque.
@@ -818,9 +1161,9 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semibold,
   },
   xpNivel: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.semibold,
-    lineHeight: 12,
+    lineHeight: 14,
     marginTop: 2,
     textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowRadius: 3,
@@ -840,7 +1183,9 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
     gap: Spacing[1] + 2,
+    minHeight: 44,
     paddingHorizontal: Spacing[3],
     paddingVertical: Spacing[2],
     borderWidth: 1,
@@ -864,6 +1209,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+  },
+  // Quantos filtros fogem do padrão, no canto do botão de camadas.
+  selo: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 4,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seloTexto: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: FontWeight.bold,
   },
   rodape: {
     position: 'absolute',
