@@ -17,7 +17,7 @@ DATABASES = {
             'options': '-c timezone=UTC',
         },
         'TEST': {
-            'NAME': 'test_manutencao_urbana',
+            'NAME': os.environ.get('DB_TEST_NAME', 'test_manutencao_urbana'),
         },
     },
 }
