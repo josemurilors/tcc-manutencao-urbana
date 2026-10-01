@@ -241,6 +241,16 @@ SCHEMA_V3 = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_defeitos_equipe ON defeitos(equipe_id)",
     "CREATE INDEX IF NOT EXISTS idx_defeitos_protocolo ON defeitos(protocolo)",
+    # Contagens por chamado (fila, mapa, dados abertos, proximos): o UNIQUE
+    # (usuario_id, defeito_id) começa por usuario_id e não serve a elas.
+    "CREATE INDEX IF NOT EXISTS idx_apoios_defeito ON apoios(defeito_id)",
+    "CREATE INDEX IF NOT EXISTS idx_apoios_criado ON apoios(criado_em)",
+    "CREATE INDEX IF NOT EXISTS idx_sinalizacoes_defeito ON sinalizacoes(defeito_id, tipo)",
+    # Recorte do mapa (`defeitos/area/`): faixa de latitude e longitude.
+    """
+    CREATE INDEX IF NOT EXISTS idx_defeitos_lat_lng ON defeitos(latitude, longitude)
+        WHERE removido_em IS NULL
+    """,
     # --- Histórico, anexos e respostas --------------------------------------
     """
     CREATE TABLE IF NOT EXISTS defeito_eventos (

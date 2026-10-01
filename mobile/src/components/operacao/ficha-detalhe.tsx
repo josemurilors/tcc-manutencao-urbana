@@ -32,9 +32,14 @@ type Props = {
   onClose: () => void;
   /** Registro, gestão e as folhas de ação. */
   children?: React.ReactNode;
+  /**
+   * Desenha a ficha dentro da tela (painel direito da visão dividida, no
+   * computador) em vez do bottom sheet sobre um `Modal`.
+   */
+  embutida?: boolean;
 };
 
-export function FichaDetalhe({ defeito, destaque, fotos, onClose, children }: Props) {
+export function FichaDetalhe({ defeito, destaque, fotos, onClose, children, embutida }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const apoios = totalApoios(defeito);
@@ -47,6 +52,101 @@ export function FichaDetalhe({ defeito, destaque, fotos, onClose, children }: Pr
   ]
     .filter(Boolean)
     .join(' · ');
+
+  const rolagem = (
+    <ScrollView contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}>
+      <View style={styles.corpo}>
+        <View style={styles.cabecalho}>
+          <View style={styles.cabecalhoTexto}>
+            <AppText variant="title" numberOfLines={2} accessibilityRole="header">
+              {defeito.titulo || categoria}
+            </AppText>
+            <View style={styles.linhaMeta}>
+              <StatusChamado status={defeito.status} visao="operacao" />
+              {defeito.autor_nome ? (
+                <AppText variant="caption" tone="muted">
+                  Aberto por {defeito.autor_nome}
+                </AppText>
+              ) : null}
+            </View>
+          </View>
+          <IconButton icon="close" accessibilityLabel="Fechar ficha" onPress={onClose} />
+        </View>
+
+        {destaque}
+
+        <AndamentoChamado defeito={defeito} />
+
+        <RespostaPublica
+          texto={defeito.resposta_publica}
+          orgao={defeito.secretaria_nome || defeito.secretaria_responsavel}
+        />
+
+        {local || categoria ? (
+          <View
+            style={styles.linha}
+            accessible
+            accessibilityLabel={`Local: ${[categoria, local].filter(Boolean).join(', ')}`}>
+            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+            <AppText variant="bodySm" tone="secondary" style={styles.flex}>
+              {[categoria, local].filter(Boolean).join(' · ')}
+            </AppText>
+          </View>
+        ) : null}
+
+        {defeito.descricao ? (
+          <AppText variant="body" tone="secondary">
+            {defeito.descricao}
+          </AppText>
+        ) : null}
+
+        <AppText variant="label" tone="muted" style={styles.secao} accessibilityRole="header">
+          Fotos
+        </AppText>
+        {fotos}
+
+        {children}
+
+        <AppText variant="label" tone="muted" style={styles.secao} accessibilityRole="header">
+          Histórico
+        </AppText>
+        <HistoricoChamado defeito={defeito} visao="operacao" />
+
+        <View style={styles.rodapeMeta}>
+          <AppText variant="caption" tone="muted">
+            Aberto em {formatarData(defeito.criado_em)}
+          </AppText>
+          {apoios > 0 ? (
+            <View style={styles.linha}>
+              <Ionicons name="people" size={14} color={colors.textMuted} />
+              <AppText variant="caption" tone="muted">
+                {apoios} {apoios === 1 ? 'apoio' : 'apoios'}
+              </AppText>
+            </View>
+          ) : null}
+        </View>
+
+        {sinalizacoes ? (
+          <View style={styles.linha}>
+            <Ionicons name="flag" size={14} color={colors.warning} />
+            <AppText variant="caption" tone="muted">
+              {sinalizacoes}
+            </AppText>
+          </View>
+        ) : null}
+      </View>
+    </ScrollView>
+  );
+
+  if (embutida) {
+    return (
+      <View
+        style={[styles.embutida, { backgroundColor: colors.surface, paddingBottom: insets.bottom }]}
+        accessibilityLabel="Ficha do chamado">
+        {rolagem}
+      </View>
+    );
+  }
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -64,89 +164,7 @@ export function FichaDetalhe({ defeito, destaque, fotos, onClose, children }: Pr
         <View style={styles.puxador}>
           <View style={[styles.puxadorBarra, { backgroundColor: colors.borderHover }]} />
         </View>
-
-        <ScrollView contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}>
-          <View style={styles.corpo}>
-            <View style={styles.cabecalho}>
-              <View style={styles.cabecalhoTexto}>
-                <AppText variant="title" numberOfLines={2} accessibilityRole="header">
-                  {defeito.titulo || categoria}
-                </AppText>
-                <View style={styles.linhaMeta}>
-                  <StatusChamado status={defeito.status} visao="operacao" />
-                  {defeito.autor_nome ? (
-                    <AppText variant="caption" tone="muted">
-                      Aberto por {defeito.autor_nome}
-                    </AppText>
-                  ) : null}
-                </View>
-              </View>
-              <IconButton icon="close" accessibilityLabel="Fechar ficha" onPress={onClose} />
-            </View>
-
-            {destaque}
-
-            <AndamentoChamado defeito={defeito} />
-
-            <RespostaPublica
-              texto={defeito.resposta_publica}
-              orgao={defeito.secretaria_nome || defeito.secretaria_responsavel}
-            />
-
-            {local || categoria ? (
-              <View
-                style={styles.linha}
-                accessible
-                accessibilityLabel={`Local: ${[categoria, local].filter(Boolean).join(', ')}`}>
-                <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
-                <AppText variant="bodySm" tone="secondary" style={styles.flex}>
-                  {[categoria, local].filter(Boolean).join(' · ')}
-                </AppText>
-              </View>
-            ) : null}
-
-            {defeito.descricao ? (
-              <AppText variant="body" tone="secondary">
-                {defeito.descricao}
-              </AppText>
-            ) : null}
-
-            <AppText variant="label" tone="muted" style={styles.secao} accessibilityRole="header">
-              Fotos
-            </AppText>
-            {fotos}
-
-            {children}
-
-            <AppText variant="label" tone="muted" style={styles.secao} accessibilityRole="header">
-              Histórico
-            </AppText>
-            <HistoricoChamado defeito={defeito} visao="operacao" />
-
-            <View style={styles.rodapeMeta}>
-              <AppText variant="caption" tone="muted">
-                Aberto em {formatarData(defeito.criado_em)}
-              </AppText>
-              {apoios > 0 ? (
-                <View style={styles.linha}>
-                  <Ionicons name="people" size={14} color={colors.textMuted} />
-                  <AppText variant="caption" tone="muted">
-                    {apoios} {apoios === 1 ? 'apoio' : 'apoios'}
-                  </AppText>
-                </View>
-              ) : null}
-            </View>
-
-            {sinalizacoes ? (
-              <View style={styles.linha}>
-                <Ionicons name="flag" size={14} color={colors.warning} />
-                <AppText variant="caption" tone="muted">
-                  {sinalizacoes}
-                </AppText>
-              </View>
-            ) : null}
-          </View>
-        </ScrollView>
+        {rolagem}
       </View>
     </Modal>
   );
@@ -171,6 +189,9 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
+  },
+  embutida: {
+    flex: 1,
   },
   puxador: {
     alignItems: 'center',

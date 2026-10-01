@@ -6,14 +6,15 @@ set -e
 # `alertas_sla`; às segundas, a partir das 8h, também `resumo_semanal`. Os dois
 # comandos não repetem aviso (deduplicam no banco), então rodar de novo depois
 # de um restart ou numa hora seguinte da segunda é inofensivo — o resumo sai
-# uma vez por semana para cada gestor. Falha de um comando não derruba o loop.
+# uma vez por semana para cada gestor. Às 3h roda `aplicar_retencao` (prazos
+# de retenção da LGPD; idempotente). Falha de um comando não derruba o loop.
 if [ "$1" = "agendador" ]; then
     export TZ="${TZ:-America/Sao_Paulo}"
     echo "Agendador: aguardando PostgreSQL..."
     while ! pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1; do
         sleep 2
     done
-    echo "Agendador iniciado ($TZ): alertas_sla de hora em hora, resumo_semanal às segundas 8h"
+    echo "Agendador iniciado ($TZ): alertas_sla de hora em hora, resumo_semanal às segundas 8h, aplicar_retencao às 3h"
     while true; do
         # Segundos até a próxima hora cheia (+5 s de folga).
         agora_min=$(date +%M | sed 's/^0//')
@@ -25,6 +26,10 @@ if [ "$1" = "agendador" ]; then
         if [ "$(date +%u)" = "1" ] && [ "${hora:-0}" -ge 8 ]; then
             echo "[$(date '+%Y-%m-%d %H:%M')] resumo_semanal"
             python manage.py resumo_semanal 2>&1 || echo "resumo_semanal falhou (código $?)"
+        fi
+        if [ "${hora:-0}" = "3" ]; then
+            echo "[$(date '+%Y-%m-%d %H:%M')] aplicar_retencao"
+            python manage.py aplicar_retencao 2>&1 || echo "aplicar_retencao falhou (código $?)"
         fi
     done
 fi

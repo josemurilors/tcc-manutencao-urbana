@@ -148,16 +148,16 @@ export default function RankingScreen() {
       : [];
 
   const meuId = isAuthenticated && user ? String(user.id) : null;
-  const euNoTop = !!meuId && !!dados?.ranking.some((r) => r.usuario_id === meuId);
+  const euNoTop = !!meuId && !!dados?.ranking.some((r) => r.eh_voce || r.usuario_id === meuId);
   const cidadeAtual = cidadeEscolhida ?? (modo === 'cidade' ? dados?.municipio : null);
   const nomeCidade = cidadeAtual ? `${cidadeAtual.nome} - ${cidadeAtual.uf_sigla}` : '';
 
   function linha(item: RankingEntry) {
-    const sou = item.usuario_id === meuId;
+    const sou = !!item.eh_voce || (!!meuId && item.usuario_id === meuId);
     const corPodio = CORES_PODIO[item.posicao - 1];
     return (
       <View
-        key={item.usuario_id}
+        key={`${item.posicao}-${sou ? 'eu' : 'outro'}`}
         style={[styles.linha, sou && { backgroundColor: colors.goldMuted }]}>
         <View
           style={[styles.posicao, { backgroundColor: corPodio ?? colors.bgElevated }]}>

@@ -11,6 +11,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -143,9 +144,11 @@ export function FilaOfflineSheet() {
 
 function ItemDaFila({ item }: { item: PendingDefeito }) {
   const colors = useColors();
-  const { tentarDeNovo, descartar } = useOfflineSync();
+  const { tentarDeNovo, descartar, fecharPainel } = useOfflineSync();
   const [confirmando, setConfirmando] = useState(false);
   const falhou = item.status === 'falhou';
+  // Recusado como duplicado: reenviar daria o mesmo 409; o útil é ver o que já existe.
+  const existente = falhou ? item.defeito_existente_id : null;
   const titulo = item.titulo || item.categoria || 'Chamado';
 
   return (
@@ -205,7 +208,18 @@ function ItemDaFila({ item }: { item: PendingDefeito }) {
               accessibilityLabel={`Descartar ${titulo}`}>
               Descartar
             </Button>
-            {falhou ? (
+            {existente ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onPress={() => {
+                  fecharPainel();
+                  router.push({ pathname: '/chamado/[id]', params: { id: existente } });
+                }}
+                accessibilityLabel={`Ver o chamado que já existe no lugar de ${titulo}`}>
+                Ver chamado
+              </Button>
+            ) : falhou ? (
               <Button
                 size="sm"
                 variant="secondary"

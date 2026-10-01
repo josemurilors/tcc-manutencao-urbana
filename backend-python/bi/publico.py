@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from django.core.cache import cache
 from django.db.models import BooleanField, Exists, ExpressionWrapper, OuterRef, Q
-from django.http import HttpResponse, StreamingHttpResponse
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.permissions import AllowAny
@@ -22,6 +22,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from defeitos.models import Defeito, DefeitoAnexo
+from users.throttles import IpRealMixin
 
 from . import consultas, planilha
 
@@ -34,10 +35,34 @@ OPEN311_LIMITE = 1000
 OPEN311_JANELA_DIAS = 90  # padrão da especificação GeoReport v2
 
 
-class LimitePublico(AnonRateThrottle):
+class LimitePublico(IpRealMixin, AnonRateThrottle):
     """Endpoints anônimos e pesados: freio por IP sem depender do settings."""
     scope = 'bi_publico'
     rate = '60/min'
+
+
+class LimiteDadosAbertos(LimitePublico):
+    """Exportação completa (até `LIMITE_DADOS_ABERTOS` linhas): freio mais curto."""
+    scope = 'bi_dados_abertos'
+    rate = '10/min'
+
+
+def _geojson(linhas):
+    """FeatureCollection em pedaços, uma feature por vez (StreamingHttpResponse)."""
+    yield '{"type": "FeatureCollection", "features": ['
+    primeira = True
+    for l in linhas:
+        feature = {
+            'type': 'Feature',
+            'geometry': (
+                {'type': 'Point', 'coordinates': [l['longitude'], l['latitude']]}
+                if l['latitude'] is not None and l['longitude'] is not None else None
+            ),
+            'properties': {k: v for k, v in l.items() if k not in ('latitude', 'longitude')},
+        }
+        yield ('' if primeira else ',') + json.dumps(feature, ensure_ascii=False)
+        primeira = False
+    yield ']}'
 
 
 class PublicoView(APIView):
@@ -203,6 +228,8 @@ def _linha_aberta(linha):
 
 
 class DadosAbertosView(PublicoView):
+    throttle_classes = [LimiteDadosAbertos]
+
     def get(self, request, codigo, formato):
         if consultas.municipio_publico(codigo) is None:
             return _nao_encontrado()
@@ -219,20 +246,8 @@ class DadosAbertosView(PublicoView):
                 content_type='text/csv; charset=utf-8',
             )
         else:
-            features = [
-                {
-                    'type': 'Feature',
-                    'geometry': (
-                        {'type': 'Point', 'coordinates': [l['longitude'], l['latitude']]}
-                        if l['latitude'] is not None and l['longitude'] is not None else None
-                    ),
-                    'properties': {k: v for k, v in l.items() if k not in ('latitude', 'longitude')},
-                }
-                for l in linhas
-            ]
-            resposta = HttpResponse(
-                json.dumps({'type': 'FeatureCollection', 'features': features}, ensure_ascii=False),
-                content_type='application/geo+json; charset=utf-8',
+            resposta = StreamingHttpResponse(
+                _geojson(linhas), content_type='application/geo+json; charset=utf-8',
             )
         resposta['Content-Disposition'] = f'attachment; filename="chamados-{codigo}.{formato}"'
         # Dado aberto é para ser consumido de qualquer origem (painéis de terceiros).

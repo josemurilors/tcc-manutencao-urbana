@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router/js-tabs';
 
 import { usePapel } from '@/components/gestao/papeis';
+import { useBreakpoint } from '@/components/ui/responsive';
 import { FontSize } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 
@@ -25,6 +26,9 @@ export default function TabsLayout() {
   // sobra só o mapa, então a barra some — os chamados dele vivem em Conta >
   // Meus chamados.
   const abasVisiveis = 1 + (ehEquipe ? 1 : 0) + (ehGestor ? 1 : 0);
+  // No computador (gestão na mesa) a barra vira lateral, com rótulo ao lado
+  // do ícone; no celular segue embaixo, como sempre.
+  const { desktop } = useBreakpoint();
 
   return (
     <Tabs
@@ -32,12 +36,15 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.gold500,
         tabBarInactiveTintColor: colors.textMuted,
+        tabBarPosition: desktop ? 'left' : 'bottom',
+        tabBarVariant: desktop ? 'material' : 'uikit',
         tabBarStyle: {
           backgroundColor: colors.bgElevated,
           borderTopColor: colors.borderDefault,
+          ...(desktop ? { borderRightColor: colors.borderDefault } : null),
           display: abasVisiveis <= 1 ? 'none' : 'flex',
         },
-        tabBarLabelStyle: { fontSize: FontSize.xs - 2 },
+        tabBarLabelStyle: { fontSize: desktop ? FontSize.sm : FontSize.xs - 2 },
       }}>
       <Tabs.Screen
         name="mapa"

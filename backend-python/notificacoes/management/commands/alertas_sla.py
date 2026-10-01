@@ -86,7 +86,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         agora = timezone.now()
         qs = (
-            Defeito.objects.ativos()
+            Defeito.objects.ativos().leves()
             .filter(status__in=STATUS_ABERTOS, prazo_em__isnull=False,
                     prazo_em__lte=agora + JANELA_AVISO,
                     prazo_em__gte=agora - timedelta(days=opts['vencidos_desde_dias']))
@@ -99,18 +99,23 @@ class Command(BaseCommand):
         responsaveis = Responsaveis()
         por_usuario = defaultdict(list)  # usuário -> [(defeito, vencido, titulo, corpo)]
         total = 0
-        for defeito in qs:
+        defeitos = list(qs)
+        # Avisos já dados, numa consulta só (antes era uma por chamado). A
+        # janela mais antiga possível é `prazo_em - 24 h` do primeiro chamado.
+        avisos = defaultdict(list)  # defeito_id -> [(usuario_id, criado_em)]
+        if defeitos:
+            for defeito_id, usuario_id, criado_em in Notificacao.objects.filter(
+                tipo='sla_alerta', defeito_id__in=[d.pk for d in defeitos],
+                criado_em__gte=min(d.prazo_em for d in defeitos) - JANELA_AVISO,
+            ).values_list('defeito_id', 'usuario_id', 'criado_em'):
+                avisos[defeito_id].append((usuario_id, criado_em))
+        for defeito in defeitos:
             vencido = defeito.prazo_em <= agora
             inicio_janela = defeito.prazo_em if vencido else defeito.prazo_em - JANELA_AVISO
             destinatarios = responsaveis.de(defeito)
             if not destinatarios:
                 continue
-            ja_avisados = set(
-                Notificacao.objects.filter(
-                    tipo='sla_alerta', defeito_id=defeito.pk, criado_em__gte=inicio_janela,
-                    usuario_id__in=destinatarios,
-                ).values_list('usuario_id', flat=True)
-            )
+            ja_avisados = {u for u, quando in avisos[defeito.pk] if quando >= inicio_janela}
             novos = [u for u in destinatarios if u not in ja_avisados]
             if not novos:
                 continue

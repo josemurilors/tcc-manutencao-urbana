@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { normalizarStatus, STATUS_ABERTOS, STATUS_FECHADOS } from '@/constants/status';
 import { useAuth } from '@/context/auth-context';
 import { apiOperacao, ehErroDeRede, type ResumoOperacao } from '@/services/api-operacao';
-import { lerCacheFila, salvarCacheFila } from '@/services/operacao-offline';
+import { lerCacheFila, salvarCacheFila, type CacheFila } from '@/services/operacao-offline';
 import type { ChamadoFila, Coordenada, FiltrosFila } from '@/types/operacao';
 
 import { sinalizado, venceEm24h } from './regras';
@@ -27,6 +28,88 @@ function recortar(itens: ChamadoFila[], filtros: FiltrosFila) {
   return itens.filter(
     (c) => (!filtros.vencem_24h || venceEm24h(c)) && (!filtros.sinalizados || sinalizado(c)),
   );
+}
+
+/** Status pedidos pelo filtro, como o backend expande (`abertos` quando vazio). */
+function statusDoFiltro(status: string | undefined): Set<string> {
+  const grupos: Record<string, string[]> = {
+    abertos: STATUS_ABERTOS,
+    fechados: STATUS_FECHADOS,
+    todos: [...STATUS_ABERTOS, ...STATUS_FECHADOS],
+  };
+  const estados = new Set<string>();
+  for (const s of (status || 'abertos').split(',').map((p) => p.trim()).filter(Boolean)) {
+    (grupos[s] ?? [normalizarStatus(s)]).forEach((e) => estados.add(e));
+  }
+  return estados;
+}
+
+const texto = (v: unknown) => (v == null ? '' : String(v).trim().toLowerCase());
+
+/**
+ * O cache salvo contém tudo o que os filtros atuais pedem? Vale quando cada
+ * recorte do cache é igual ao atual ou mais largo ("Todos" cobre "Vencidos",
+ * o contrário não). "Da minha equipe" não dá para conferir no aparelho.
+ */
+function cacheCobre(salvo: FiltrosFila, atual: FiltrosFila) {
+  const statusSalvo = statusDoFiltro(salvo.status);
+  const mesmo = (a: unknown, b: unknown) => a == null || a === '' || texto(a) === texto(b);
+  return (
+    [...statusDoFiltro(atual.status)].every((s) => statusSalvo.has(s)) &&
+    mesmo(salvo.categoria_id, atual.categoria_id) &&
+    mesmo(salvo.equipe_id, atual.equipe_id) &&
+    mesmo(salvo.bairro, atual.bairro) &&
+    mesmo(salvo.q, atual.q) &&
+    (!salvo.atribuicao || salvo.atribuicao === 'todos' || salvo.atribuicao === atual.atribuicao) &&
+    (atual.atribuicao !== 'equipe' || salvo.atribuicao === 'equipe') &&
+    (!salvo.vencidos || !!atual.vencidos) &&
+    (!salvo.vencem_24h || !!atual.vencem_24h) &&
+    (!salvo.sinalizados || !!atual.sinalizados)
+  );
+}
+
+/** Mesmos recortes (a ordenação não muda quais chamados entram). */
+function mesmosFiltros(a: FiltrosFila, b: FiltrosFila) {
+  return cacheCobre(a, b) && cacheCobre(b, a);
+}
+
+/**
+ * Sem rede, os filtros atuais são aplicados sobre o cache, o que dá para
+ * conferir no aparelho (mesmas regras do `_filtrar_fila` do backend). Sem
+ * isso, tocar em "Vencidos" offline mostrava a fila de "Todos" com o chip
+ * novo aceso. Quando o recorte é outro, `aviso` diz isso na faixa offline.
+ */
+function filtrarCache(cache: CacheFila, filtros: FiltrosFila, usuarioId: string | null) {
+  const estados = statusDoFiltro(filtros.status);
+  const agora = Date.now();
+  const termo = texto(filtros.q);
+  const itens = recortar(cache.resultados, filtros).filter((c) => {
+    if (!estados.has(normalizarStatus(c.status))) return false;
+    if (filtros.categoria_id != null && c.categoria_id !== filtros.categoria_id) return false;
+    if (filtros.equipe_id != null && c.equipe_id !== filtros.equipe_id) return false;
+    if (filtros.atribuicao === 'meus' && (c.atendente_id == null || String(c.atendente_id) !== usuarioId)) {
+      return false;
+    }
+    if (filtros.atribuicao === 'sem' && (c.atendente_id != null || c.equipe_id != null)) return false;
+    if (filtros.vencidos) {
+      const aberto = STATUS_ABERTOS.includes(normalizarStatus(c.status));
+      if (!aberto || !c.prazo_em || Date.parse(c.prazo_em) >= agora) return false;
+    }
+    if (filtros.bairro && texto(c.bairro) !== texto(filtros.bairro)) return false;
+    if (
+      termo &&
+      ![c.protocolo, c.titulo, c.descricao, c.rua, c.bairro].some((v) => texto(v).includes(termo))
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const salvo = cache.filtros ?? FILTROS_PADRAO;
+  const igual = mesmosFiltros(salvo, filtros);
+  let aviso: string | null = null;
+  if (!cacheCobre(salvo, filtros)) aviso = 'a fila salva usava outro filtro: pode faltar chamado';
+  else if (!igual) aviso = 'filtro aplicado sobre a última fila salva';
+  return { itens, count: igual ? cache.count : itens.length, aviso };
 }
 
 /** Une páginas sem repetir chamado (a ordem por score pode mudar entre páginas). */
@@ -48,6 +131,8 @@ export function useFila(posicao: Coordenada | null) {
   const [erro, setErro] = useState<string | null>(null);
   /** Quando a tela mostra o cache: a hora em que ele foi salvo. */
   const [cacheDe, setCacheDe] = useState<string | null>(null);
+  /** Com cache: o recorte exibido difere do salvo (ver `filtrarCache`). */
+  const [cacheAviso, setCacheAviso] = useState<string | null>(null);
   const [atualizando, setAtualizando] = useState(false);
   const [carregandoMais, setCarregandoMais] = useState(false);
   /** Filtro trocado e a nova página ainda não chegou (a lista antiga fica esmaecida). */
@@ -87,6 +172,7 @@ export function useFila(posicao: Coordenada | null) {
         setNext(pagina.next ?? null);
         setResumo(novoResumo);
         setCacheDe(null);
+        setCacheAviso(null);
         setErro(null);
         setEstado('pronto');
         salvarCacheFila({
@@ -105,11 +191,13 @@ export function useFila(posicao: Coordenada | null) {
           const cache = await lerCacheFila(usuarioId).catch(() => null);
           if (minha !== geracao.current) return;
           if (cache) {
-            setItens(cache.resultados);
-            setCount(cache.count);
+            const recorte = filtrarCache(cache, filtros, usuarioId);
+            setItens(recorte.itens);
+            setCount(recorte.count);
             setNext(null);
             setResumo(cache.resumo);
             setCacheDe(cache.salvo_em);
+            setCacheAviso(recorte.aviso);
             setEstado('pronto');
           } else {
             setEstado('offline');
@@ -193,6 +281,7 @@ export function useFila(posicao: Coordenada | null) {
     estado,
     erro,
     cacheDe,
+    cacheAviso,
     atualizando,
     buscando,
     carregandoMais,

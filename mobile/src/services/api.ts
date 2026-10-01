@@ -30,6 +30,7 @@ import type {
 } from '@/types';
 
 import { enqueueDefeito } from './offline-queue';
+import { ultimaPosicaoEmCache } from './ultima-posicao';
 import { getRefreshSync, getTokenSync, setRefresh, setToken } from './storage';
 
 const API_URL_PRODUCAO = 'https://tcc.josemurilors.com.br';
@@ -188,7 +189,15 @@ export async function paginated<T>(endpoint: string, options?: RequestOptions): 
  */
 export async function appendImage(fd: FormData, field: string, image: PickedImage) {
   if (Platform.OS === 'web') {
-    const blob = await fetch(image.uri).then((r) => r.blob());
+    let blob: Blob;
+    try {
+      blob = await fetch(image.uri).then((r) => r.blob());
+    } catch {
+      // A URI blob: só vive enquanto a aba está aberta: depois de recarregar,
+      // o fetch falha com "Failed to fetch", que as filas offline leriam como
+      // falta de rede e tentariam para sempre. Erro próprio vira falha visível.
+      throw new FotoPerdidaError();
+    }
     fd.append(field, blob, image.name);
     return;
   }
@@ -235,6 +244,14 @@ export class DefeitoDuplicadoError extends Error {
   ) {
     super(message);
     this.name = 'DefeitoDuplicadoError';
+  }
+}
+
+/** A foto anexada já não existe no aparelho (no web: blob: de uma aba recarregada). */
+export class FotoPerdidaError extends Error {
+  constructor() {
+    super('A foto se perdeu no aparelho. Descarte e registre de novo com outra foto.');
+    this.name = 'FotoPerdidaError';
   }
 }
 
@@ -440,7 +457,15 @@ export const api = {
     return request<Ranking>(`/api/v1/defeitos/ranking/?${q.toString()}`);
   },
 
-  detalharDefeito: (id: number) => request<Defeito>(`/api/v1/defeitos/${id}/`),
+  /**
+   * Manda a última posição conhecida: chamados em quarentena (`restrita`) só
+   * são liberados a quem está perto do ponto (mesma regra do mapa).
+   */
+  detalharDefeito: (id: number) => {
+    const p = ultimaPosicaoEmCache();
+    const qs = p ? `?lat=${p.latitude}&lng=${p.longitude}` : '';
+    return request<Defeito>(`/api/v1/defeitos/${id}/${qs}`);
+  },
 
   anexarImagem: async (id: number, image: PickedImage) => {
     const fd = new FormData();

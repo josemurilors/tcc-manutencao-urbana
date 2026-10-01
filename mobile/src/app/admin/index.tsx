@@ -19,6 +19,7 @@ import { useMunicipioGestao } from '@/components/gestao/municipio-gestao';
 import { NIVEL, ROTULO_PAPEL, usePapel } from '@/components/gestao/papeis';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { ContentWidth, ResponsiveGrid, useBreakpoint } from '@/components/ui/responsive';
 import { AppText } from '@/components/ui/text';
 import { Layout, Spacing, type Tom } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -182,6 +183,7 @@ export default function AdminHubScreen() {
   const { papel, nivel } = usePapel();
   const escolhido = useMunicipioGestao();
   const insets = useSafeAreaInsets();
+  const { desktop } = useBreakpoint();
   const [contadores, setContadores] = useState<Record<string, Contador>>({});
   const [atualizando, setAtualizando] = useState(false);
   const [versao, setVersao] = useState(0);
@@ -211,28 +213,42 @@ export default function AdminHubScreen() {
       ? `${user.municipio.nome} - ${user.municipio.uf_sigla}`
       : 'Seu município';
 
+  const cartoes = AREAS.filter((a) => nivel >= NIVEL[a.minimo]).map((a) => (
+    <CartaoArea
+      key={a.chave}
+      area={a}
+      contador={contadores[a.chave] ?? 'carregando'}
+      naGrade={desktop}
+    />
+  ));
+
   return (
     <GestaoShell title="Administração" subtitle={municipio} minimo="gestor">
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing[16] }]}
         refreshControl={<RefreshControl refreshing={atualizando} onRefresh={atualizar} />}>
-        <AppText variant="bodySm" tone="secondary">
-          Você está como {ROTULO_PAPEL[papel]}.{' '}
-          {nivel >= NIVEL.admin_municipal
-            ? 'Pode ver e alterar todas as áreas.'
-            : 'Pode consultar estas áreas e moderar; alterações de cadastro ficam com o administrador.'}
-        </AppText>
-        <View style={styles.grade}>
-          {AREAS.filter((a) => nivel >= NIVEL[a.minimo]).map((a) => (
-            <CartaoArea key={a.chave} area={a} contador={contadores[a.chave] ?? 'carregando'} />
-          ))}
-        </View>
+        <ContentWidth style={styles.conteudo}>
+          <AppText variant="bodySm" tone="secondary">
+            Você está como {ROTULO_PAPEL[papel]}.{' '}
+            {nivel >= NIVEL.admin_municipal
+              ? 'Pode ver e alterar todas as áreas.'
+              : 'Pode consultar estas áreas e moderar; alterações de cadastro ficam com o administrador.'}
+          </AppText>
+          {desktop ? (
+            // No computador, grade fixa de 3 colunas com cartões de altura igual por linha.
+            <ResponsiveGrid columns={3} gap={Spacing[3]}>
+              {cartoes}
+            </ResponsiveGrid>
+          ) : (
+            <View style={styles.grade}>{cartoes}</View>
+          )}
+        </ContentWidth>
       </ScrollView>
     </GestaoShell>
   );
 }
 
-function CartaoArea({ area, contador }: { area: Area; contador: Contador }) {
+function CartaoArea({ area, contador, naGrade }: { area: Area; contador: Contador; naGrade?: boolean }) {
   const colors = useColors();
   const resumo =
     contador === 'carregando'
@@ -246,7 +262,7 @@ function CartaoArea({ area, contador }: { area: Area; contador: Contador }) {
       onPress={() => router.push(area.rota as Href)}
       accessibilityLabel={`${area.titulo}: ${resumo}. ${area.descricao}`}
       accessibilityHint="Abre a área"
-      style={styles.cartao}>
+      style={naGrade ? styles.cartaoGrade : styles.cartao}>
       <View style={styles.topo}>
         <View style={[styles.icone, { backgroundColor: colors.primarySubtle }]}>
           <Ionicons name={area.icone} size={22} color={colors.primaryText} />
@@ -282,6 +298,8 @@ function CartaoArea({ area, contador }: { area: Area; contador: Contador }) {
 const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: Layout.gutter,
+  },
+  conteudo: {
     gap: Spacing[4],
   },
   grade: {
@@ -294,6 +312,11 @@ const styles = StyleSheet.create({
     // Duas colunas no celular; com fonte grande os textos quebram em vez
     // de estourar, porque a altura é mínima e não fixa.
     flexBasis: '45%',
+    minHeight: 160,
+  },
+  // Na grade do computador a célula já define a largura; o cartão só preenche a altura.
+  cartaoGrade: {
+    flex: 1,
     minHeight: 160,
   },
   topo: {

@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from django.db.models import Count, Q
 from core import auditoria, permissoes
 from .models import Defeito, Apoio, Sinalizacao, DefeitoAnexo, DefeitoEvento
@@ -144,7 +144,9 @@ MAX_ANEXOS = 10
 CAMPOS_EDITAVEIS_AUTOR = {'descricao'}
 CAMPOS_EDITAVEIS_EQUIPE = {'titulo', 'descricao', 'rua', 'bairro', 'prioridade', 'previsao_conclusao'}
 
-# Ações de listagem: não carregam as colunas BYTEA (foto e foto de resolução).
+# Ações de listagem: não carregam as colunas pesadas (`models.COLUNAS_PESADAS`:
+# fotos, fotos extras em base64 e o log de atualizações); nenhuma delas entra
+# em `CAMPOS_LISTA`.
 ACOES_LISTAGEM = ('list', 'meus', 'apoiados', 'municipio', 'area')
 
 
@@ -180,7 +182,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         # aqui. A visão do mapa (`municipio`) libera os que estão perto.
         qs = self.queryset
         if self.action in ACOES_LISTAGEM:
-            qs = qs.defer('imagem_thumbnail', 'foto_resolucao')
+            qs = qs.leves()
         if self.action in ('list', 'apoiados'):
             user = self.request.user
             if not user.is_authenticated:
@@ -200,6 +202,26 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             return DefeitoUpdateSerializer
         return DefeitoDetailSerializer
 
+    def _objeto_visivel(self):
+        """
+        `get_object` com a regra de visibilidade dos restritos (autor em
+        quarentena): fora do autor e da equipe, só quem informa ?lat=&lng= a
+        até `RAIO_VISIBILIDADE_RESTRITA_M` do chamado (o mesmo critério do
+        mapa). Os demais recebem 404, como em `por_protocolo`.
+        """
+        defeito = self.get_object()
+        try:
+            lat = float(self.request.query_params.get('lat', ''))
+            lng = float(self.request.query_params.get('lng', ''))
+        except ValueError:
+            lat = lng = None
+        if not regras.visivel_para(defeito, self.request.user, lat, lng):
+            raise NotFound('Chamado não encontrado.')
+        return defeito
+
+    def retrieve(self, request, *args, **kwargs):
+        return Response(self.get_serializer(self._objeto_visivel()).data)
+
     def _lista(self, defeitos):
         return DefeitoListSerializer(defeitos, many=True, context=self.get_serializer_context()).data
 
@@ -216,12 +238,14 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         return (permissions.AllowAny(),)
 
     def get_throttles(self):
-        # Só as ações que geram custo (processar foto, abrir chamado) têm teto
+        # Só as ações que geram custo (processar foto, abrir chamado, anexar) têm teto
         # por usuário; leitura e mapa ficam livres.
         if self.action == 'create':
             return (throttles.CriarChamado(),)
         if self.action == 'imagem':
             return (throttles.Imagem(),)
+        if self.action == 'anexar':
+            return (throttles.Anexar(),)
         return super().get_throttles()
 
     def create(self, request, *args, **kwargs):
@@ -337,32 +361,45 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         tipo = request.data.get('tipo')
         if tipo not in dict(Sinalizacao.TIPO_CHOICES):
             return Response({'error': 'Tipo invalido'}, status=status.HTTP_400_BAD_REQUEST)
-        if defeito.status in STATUS_FECHADOS:
-            return Response({'error': 'Chamado ja finalizado'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            # Trava a linha: duas sinalizações simultâneas não podem concluir
+            # (ou remover, com strike) o mesmo chamado duas vezes.
+            with transaction.atomic():
+                travado = (
+                    Defeito.objects.select_for_update().filter(pk=defeito.pk)
+                    .values('status', 'removido_em').first()
+                )
+                if travado is None or travado['removido_em'] is not None:
+                    raise NotFound('Chamado não encontrado.')
+                defeito.status = travado['status']
+                if defeito.status in STATUS_FECHADOS:
+                    return Response({'error': 'Chamado ja finalizado'}, status=status.HTTP_400_BAD_REQUEST)
 
-        atual = Sinalizacao.objects.filter(usuario=request.user, defeito=defeito).first()
-        if atual is None:
-            Sinalizacao.objects.create(
-                usuario=request.user, defeito=defeito, tipo=tipo,
-                criado_em=timezone.now(),
-            )
-            meu_tipo = tipo
-        elif atual.tipo == tipo:
-            atual.delete()
-            meu_tipo = None
-        else:
-            atual.tipo = tipo
-            atual.criado_em = timezone.now()
-            atual.save()
-            meu_tipo = tipo
+                atual = Sinalizacao.objects.filter(usuario=request.user, defeito=defeito).first()
+                if atual is None:
+                    Sinalizacao.objects.create(
+                        usuario=request.user, defeito=defeito, tipo=tipo,
+                        criado_em=timezone.now(),
+                    )
+                    meu_tipo = tipo
+                elif atual.tipo == tipo:
+                    atual.delete()
+                    meu_tipo = None
+                else:
+                    atual.tipo = tipo
+                    atual.criado_em = timezone.now()
+                    atual.save()
+                    meu_tipo = tipo
 
-        resultado = None
-        if meu_tipo is not None:
-            # Interno: insumo de moderação, não aparece na linha do tempo pública.
-            fluxo.registrar_evento(
-                defeito, 'sinalizacao', request.user, publico=False, dados={'tipo': meu_tipo},
-            )
-            resultado = regras.aplicar_sinalizacao(defeito, request.user, meu_tipo)
+                resultado = None
+                if meu_tipo is not None:
+                    # Interno: insumo de moderação, não aparece na linha do tempo pública.
+                    fluxo.registrar_evento(
+                        defeito, 'sinalizacao', request.user, publico=False, dados={'tipo': meu_tipo},
+                    )
+                    resultado = regras.aplicar_sinalizacao(defeito, request.user, meu_tipo)
+        except TransicaoInvalida as e:
+            return Response({'error': str(e)}, status=status.HTTP_409_CONFLICT)
 
         if resultado == regras.RESULTADO_INEXISTENTE:
             return Response({
@@ -403,8 +440,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 {'error': 'Invalid status'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # Foto de resolução é opcional: se vier, fica guardada como registro
-        # do serviço feito; sem ela o chamado é finalizado do mesmo jeito.
+        # Foto de resolução: registro do serviço feito. Obrigatória para
+        # concluir quando a prefeitura liga `exigir_foto_conclusao` (o mesmo
+        # critério de `operacao/<id>/transicao/`); senão é opcional.
         foto = None
         arquivo = request.FILES.get('foto_resolucao')
         if arquivo is not None:
@@ -412,6 +450,11 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             if erro is not None:
                 return erro
             foto = processada['webp_bytes']
+        if novo_status == 'concluido' and foto is None:
+            from operacao.views import FOTO_OBRIGATORIA, foto_exigida_para_concluir
+            if (defeito.status in fluxo.TRANSICOES and novo_status in fluxo.TRANSICOES[defeito.status]
+                    and foto_exigida_para_concluir(defeito)):
+                return Response({'error': FOTO_OBRIGATORIA}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
                 fluxo.transicionar(
@@ -438,7 +481,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         Histórico do chamado. Público para todos; os internos (notas,
         atribuições, sinalizações) só para a equipe do município.
         """
-        defeito = self.get_object()
+        defeito = self._objeto_visivel()
         equipe = permissoes.pode_operar(request.user, defeito)
         qs = DefeitoEvento.objects.filter(defeito=defeito).select_related('autor')
         if not equipe:
@@ -467,6 +510,14 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         else:
             return _negado(user)
         proibidos = sorted(set(request.data.keys()) - permitidos)
+        # Prioridade mexe na fila (30% do score): gestor+ e auditada, como em
+        # `operacao/<id>/prioridade/`. Operador comum não muda pelo PATCH.
+        if ('prioridade' in request.data and 'prioridade' not in proibidos
+                and permissoes.nivel(user) < permissoes.NIVEIS['gestor']):
+            return Response(
+                {'error': 'Só gestores alteram a prioridade do chamado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         if proibidos:
             return Response(
                 {'error': f'Campos não editáveis: {", ".join(proibidos)}'},
@@ -490,6 +541,11 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                     fluxo.registrar_evento(
                         defeito, 'prioridade', user, publico=False,
                         dados={'de': prioridade[0], 'para': prioridade[1]},
+                    )
+                    auditoria.registrar(
+                        request, 'defeito.prioridade', 'defeito', defeito.id,
+                        dados={'de': prioridade[0], 'para': prioridade[1], 'protocolo': defeito.protocolo},
+                        municipio_id=defeito.municipio_id,
                     )
                 if mudancas:
                     fluxo.registrar_evento(
@@ -729,8 +785,12 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'todos': f'({abertos} OR {resolvidos})',
         }[situacao]
         filtro_categoria = 'AND d.categoria_id = ANY(%(categorias)s)' if categorias else ''
+        # Uma consulta só: o recorte (`b`, pelo índice de latitude/longitude)
+        # é lido uma vez e alimenta os pinos e as células; os apoios são
+        # contados só para os chamados do recorte (índice em apoios.defeito_id).
         base = f"""
             SELECT d.id, d.latitude, d.longitude, d.prioridade,
+                   (SELECT count(*) FROM apoios a WHERE a.defeito_id = d.id) AS apoios,
                    (d.status = 'concluido') AS resolvido,
                    CASE WHEN d.status = 'concluido' THEN d.resolvido_em ELSE d.criado_em END AS data_ref,
                    floor(d.latitude / %(celula)s) AS cy, floor(d.longitude / %(celula)s) AS cx
@@ -747,28 +807,31 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         """
         with connection.cursor() as cur:
             cur.execute(f"""
-                SELECT id FROM (
-                    SELECT b.id, row_number() OVER (
-                        PARTITION BY b.cy, b.cx
-                        ORDER BY b.resolvido, coalesce(a.total, 0) DESC,
-                                 CASE b.prioridade WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1
-                                                   WHEN 'media' THEN 2 ELSE 3 END,
-                                 b.data_ref DESC, b.id
-                    ) AS rn
-                    FROM ({base}) b
-                    LEFT JOIN (SELECT defeito_id, count(*) AS total FROM apoios GROUP BY 1) a
-                           ON a.defeito_id = b.id
-                ) x WHERE rn <= %(por_celula)s LIMIT %(limite)s
+                WITH b AS MATERIALIZED ({base}),
+                pinos AS (
+                    SELECT id FROM (
+                        SELECT b.id, row_number() OVER (
+                            PARTITION BY b.cy, b.cx
+                            ORDER BY b.resolvido, b.apoios DESC,
+                                     CASE b.prioridade WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1
+                                                       WHEN 'media' THEN 2 ELSE 3 END,
+                                     b.data_ref DESC, b.id
+                        ) AS rn
+                        FROM b
+                    ) x WHERE rn <= %(por_celula)s LIMIT %(limite)s
+                )
+                SELECT id, NULL::float8, NULL::float8, NULL::bigint FROM pinos
+                UNION ALL
+                SELECT NULL::uuid, avg(latitude), avg(longitude), count(*) FROM b GROUP BY cy, cx
             """, params)
-            ids = [row[0] for row in cur.fetchall()]
-            cur.execute(f"""
-                SELECT avg(latitude), avg(longitude), count(*) FROM ({base}) b GROUP BY cy, cx
-            """, params)
+            linhas = cur.fetchall()
+            ids = [r[0] for r in linhas if r[0] is not None]
             celulas = [
-                {'latitude': la, 'longitude': lo, 'total': n} for la, lo, n in cur.fetchall()
+                {'latitude': la, 'longitude': lo, 'total': n}
+                for id_, la, lo, n in linhas if id_ is None
             ]
 
-        defeitos = self.queryset.defer('imagem_thumbnail', 'foto_resolucao').filter(id__in=ids)
+        defeitos = self.queryset.leves().filter(id__in=ids)
         return Response({
             'situacao': situacao,
             'celula_graus': celula,
@@ -838,7 +901,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             params['categoria'] = categoria
         # O raio nunca passa de `RAIO_VISIBILIDADE_RESTRITA_M`, então os
         # restritos que aparecem aqui são justamente os que quem está no
-        # ponto já poderia ver (ver `regras.visivel_para`).
+        # ponto já poderia ver (ver `regras.visivel_para`). Anônimo não vê
+        # restritos: o ponto não é verificado e os ids abririam o detalhe.
+        if not request.user.is_authenticated:
+            filtro_categoria += " AND d.visibilidade = 'publica'"
         with connection.cursor() as cur:
             cur.execute(f"""
                 SELECT d.id, d.protocolo, d.titulo, d.categoria, d.categoria_id, d.status,
@@ -1030,13 +1096,13 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             if not municipio:
                 return Response({'detail': 'Nenhum município neste ponto.'}, status=status.HTTP_404_NOT_FOUND)
 
-        completo = gamificacao.ranking_de(
-            municipio_id=municipio['codigo'] if municipio else None,
-            desde=desde,
+        completo = gamificacao.ranking_em_cache(
+            municipio['codigo'] if municipio else None, periodo, desde,
         )
-        eu = None
-        if request.user.is_authenticated:
-            eu = next((i for i in completo if i['usuario_id'] == str(request.user.id)), None)
+        meu_id = str(request.user.id) if request.user.is_authenticated else None
+        eu = next((i for i in completo if i['usuario_id'] == meu_id), None) if meu_id else None
+        # Rota pública: nome mascarado e sem id de usuário (LGPD, contrato v3).
+        # A linha de quem pergunta vem marcada (`eh_voce`) e só ela leva o id.
         return Response({
             'municipio': {
                 'codigo': municipio['codigo'],
@@ -1045,8 +1111,8 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             } if municipio else None,
             'periodo': periodo,
             'total_participantes': len(completo),
-            'ranking': completo[:20],
-            'eu': eu,
+            'ranking': [gamificacao.linha_publica(i, meu_id) for i in completo[:20]],
+            'eu': gamificacao.linha_publica(eu, meu_id) if eu else None,
         })
 
     @action(detail=False, methods=['get'])
@@ -1085,9 +1151,17 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             )
         if not request.user.municipio_id:
             return Response({'error': SEM_MUNICIPIO}, status=status.HTTP_403_FORBIDDEN)
-        qs = Defeito.objects.ativos().filter(id__in=ids, municipio_id=request.user.municipio_id)
+        qs = (
+            Defeito.objects.ativos().leves().filter(id__in=ids, municipio_id=request.user.municipio_id)
+        )
+        if novo_status == 'concluido':
+            # Em lote não vem foto: só conclui o que já tem a evidência exigida.
+            from operacao.views import FOTO_OBRIGATORIA, foto_exigida_para_concluir
         atualizados, erros = 0, {}
         for defeito in qs:
+            if novo_status == 'concluido' and foto_exigida_para_concluir(defeito):
+                erros[str(defeito.id)] = FOTO_OBRIGATORIA
+                continue
             try:
                 fluxo.transicionar(
                     defeito, novo_status, request.user,
@@ -1099,6 +1173,40 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             except TransicaoInvalida as e:
                 erros[str(defeito.id)] = str(e)
         return Response({'updated': atualizados, 'erros': erros})
+
+    @action(detail=True, methods=['get'], permission_classes=(permissions.AllowAny,))
+    def foto(self, request, pk=None):
+        """
+        A foto do chamado como arquivo (`?tipo=reporte|resolucao`), para o
+        detalhe pedido com `?imagens=url` não carregar a imagem em base64.
+        Mesma visibilidade do detalhe; ETag e Cache-Control para o app guardar.
+        """
+        import hashlib
+
+        from django.http import HttpResponse
+
+        from operacao.imagens import tipo_mime
+
+        campo = {'reporte': 'imagem_thumbnail', 'resolucao': 'foto_resolucao'}.get(
+            request.query_params.get('tipo') or 'reporte')
+        if campo is None:
+            return Response({'detail': 'tipo deve ser reporte ou resolucao.'}, status=status.HTTP_400_BAD_REQUEST)
+        defeito = self._objeto_visivel()
+        dados = getattr(defeito, campo)
+        if not dados:
+            raise NotFound('Chamado sem esta foto.')
+        dados = bytes(dados)
+        etag = '"' + hashlib.sha256(dados).hexdigest()[:32] + '"'
+        publico = defeito.visibilidade == Defeito.VISIBILIDADE_PUBLICA
+        cache = f'{"public" if publico else "private"}, max-age=86400'
+        if request.META.get('HTTP_IF_NONE_MATCH') == etag:
+            resposta = HttpResponse(status=304)
+        else:
+            resposta = HttpResponse(dados, content_type=tipo_mime(dados))
+        resposta['ETag'] = etag
+        resposta['Cache-Control'] = cache
+        resposta['X-Content-Type-Options'] = 'nosniff'
+        return resposta
 
     @action(detail=False, methods=['post'])
     def imagem(self, request):

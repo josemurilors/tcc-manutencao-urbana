@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from core import auditoria, permissoes
 from defeitos import fluxo, sla
 from defeitos.fluxo import TransicaoInvalida, TransicaoNaoPermitida
-from defeitos.models import Defeito, DefeitoAnexo, DefeitoEvento, RespostaPadrao, Sinalizacao
+from defeitos.models import COLUNAS_PESADAS, Defeito, DefeitoAnexo, DefeitoEvento, RespostaPadrao, Sinalizacao
 from defeitos.serializers import PRIORIDADES, DefeitoEventoSerializer, _distancia_m
 from gestao.models import CategoriaMunicipio, Equipe, MunicipioConfig
 from users.models import User
@@ -105,7 +105,9 @@ def _carregar(request, pk, gestao=False):
     — o super admin gere qualquer município, como em `permissoes`.
     """
     try:
-        defeito = _base().filter(pk=pk).first()
+        # Sem as colunas pesadas: a ação (e o lote, chamado a chamado) só lê
+        # campos pequenos; a resposta vem de `_detalhe`, que relê completo.
+        defeito = _base().leves().filter(pk=pk).first()
     except DjangoValidationError:
         defeito = None
     if defeito is None:
@@ -172,7 +174,7 @@ def _filtrar_fila(request):
     user = request.user
     p = request.query_params
     agora = timezone.now()
-    qs = fila.anotar(_base().defer('imagem_thumbnail', 'foto_resolucao'), agora)
+    qs = fila.anotar(_base().leves(), agora)
     qs = qs.filter(municipio_id=user.municipio_id)
 
     pedidos = [s.strip() for s in (p.get('status') or 'abertos').split(',') if s.strip()]
@@ -334,6 +336,19 @@ def _tem_foto_depois_valida(defeito):
     return qs.exists()
 
 
+FOTO_OBRIGATORIA = 'Envie a foto do serviço concluído para encerrar o chamado.'
+
+
+def foto_exigida_para_concluir(defeito):
+    """
+    A prefeitura exige foto para concluir e ainda não há foto "depois" válida?
+    Vale para toda conclusão pela equipe — aqui e nas rotas antigas
+    (`defeitos/<id>/status/` e `defeitos/batch_status/`).
+    """
+    return (_parametro(defeito.municipio_id, 'exigir_foto_conclusao')
+            and not _tem_foto_depois_valida(defeito))
+
+
 def _gravar_evidencia(defeito, user, imagem_jpeg, tipo, lat, lng):
     """Cria o anexo e o evento `anexo`, marcando se a foto foi tirada longe do ponto."""
     anexo = DefeitoAnexo.objects.create(
@@ -373,10 +388,8 @@ def _aplicar_transicao(defeito, user, dados, foto=None, lat=None, lng=None):
     # A exigência de foto só entra se a transição em si é possível; senão o
     # `fluxo` responde o erro certo ("não é possível passar de ... para ...").
     possivel = para in fluxo.TRANSICOES.get(fluxo.normalizar_status(defeito.status), ())
-    if (para == 'concluido' and possivel and jpeg is None
-            and _parametro(defeito.municipio_id, 'exigir_foto_conclusao')
-            and not _tem_foto_depois_valida(defeito)):
-        raise TransicaoInvalida('Envie a foto do serviço concluído para encerrar o chamado.')
+    if para == 'concluido' and possivel and jpeg is None and foto_exigida_para_concluir(defeito):
+        raise TransicaoInvalida(FOTO_OBRIGATORIA)
 
     extras = {}
     if checklist is not None:
@@ -607,7 +620,12 @@ def anexos_view(request, pk):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def anexo_imagem_view(request, pk):
-    anexo = get_object_or_404(DefeitoAnexo.objects.select_related('defeito'), pk=pk)
+    # Só a imagem do anexo e os campos de permissão do chamado: sem `defer`
+    # o JOIN traria as fotos e o log do chamado pai a cada imagem servida.
+    anexo = get_object_or_404(
+        DefeitoAnexo.objects.select_related('defeito').defer(*(f'defeito__{c}' for c in COLUNAS_PESADAS)),
+        pk=pk,
+    )
     defeito = anexo.defeito
     if defeito.removido_em is not None and not permissoes.pode_operar(request.user, defeito):
         return _erro('Imagem não encontrada.', status.HTTP_404_NOT_FOUND)
@@ -645,7 +663,7 @@ def sla_view(request, pk):
     anterior = {'prazo_sla_dias': defeito.prazo_sla_dias, 'prazo_em': defeito.prazo_em}
     with transaction.atomic():
         defeito.prazo_sla_dias = dias
-        defeito.prazo_em = sla.calcular_prazo(defeito.criado_em, dias)
+        defeito.prazo_em = sla.calcular_prazo(sla.base_do_prazo(defeito), dias)
         defeito.atualizado_em = timezone.now()
         defeito.save(update_fields=['prazo_sla_dias', 'prazo_em', 'atualizado_em'])
         dados = {

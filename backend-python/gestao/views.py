@@ -26,6 +26,7 @@ from rest_framework.permissions import SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from bi.planilha import texto_seguro
 from core import auditoria, permissoes
 from core.permissoes import NIVEIS
 
@@ -711,7 +712,7 @@ class ModeracaoView(_GestaoView):
 
         mun = self.municipio_id
         sinalizados_qs = (
-            Defeito.objects.ativos()
+            Defeito.objects.ativos().leves()
             .filter(municipio_id=mun, status__in=fluxo.STATUS_ABERTOS)
             .select_related('usuario')
             .annotate(
@@ -729,7 +730,7 @@ class ModeracaoView(_GestaoView):
         ]
 
         removidos_qs = (
-            Defeito.objects.filter(municipio_id=mun, removido_em__isnull=False)
+            Defeito.objects.leves().filter(municipio_id=mun, removido_em__isnull=False)
             .select_related('usuario').order_by('-removido_em')
         )
         removidos_lista = list(removidos_qs[:LIMITE_REMOVIDOS])
@@ -948,7 +949,7 @@ def _auditoria_csv(qs, municipio_id):
     escritor = csv.writer(resposta, delimiter=';')
     escritor.writerow(['data_hora', 'usuario', 'usuario_id', 'acao', 'alvo_tipo', 'alvo_id', 'ip', 'dados'])
     for log in qs[:LIMITE_CSV_AUDITORIA]:
-        escritor.writerow([
+        escritor.writerow([texto_seguro(v) for v in (
             timezone.localtime(log.criado_em).strftime('%Y-%m-%d %H:%M:%S'),
             log.usuario.nome if log.usuario_id and log.usuario else 'Sistema',
             str(log.usuario_id or ''),
@@ -957,5 +958,5 @@ def _auditoria_csv(qs, municipio_id):
             log.alvo_id,
             log.ip,
             json.dumps(log.dados or {}, ensure_ascii=False, default=str),
-        ])
+        )])
     return resposta

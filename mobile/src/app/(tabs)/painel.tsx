@@ -18,7 +18,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { podeVerPainel } from '@/components/bi/acesso';
@@ -52,6 +52,7 @@ import { useSecao, type Secao } from '@/components/bi/use-secao';
 import { ChartCard, ColumnChart, HorizontalBarChart, Legenda, LineChart } from '@/components/charts';
 import { IconButton } from '@/components/ui/icon-button';
 import { KpiCard } from '@/components/ui/kpi-card';
+import { LARGURA_MAX_CONTEUDO, ResponsiveGrid, useBreakpoint } from '@/components/ui/responsive';
 import { SectionHeader } from '@/components/ui/section-header';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -90,7 +91,7 @@ const DIMENSOES_RANKING: { value: Exclude<DimensaoBi, 'status'>; label: string }
   { value: 'equipe', label: 'Equipe' },
 ];
 
-const LARGURA_MAX = 1200;
+const LARGURA_MAX = LARGURA_MAX_CONTEUDO;
 
 export default function PainelScreen() {
   const { user, isAuthenticated } = useAuth();
@@ -117,7 +118,7 @@ function PainelGestor() {
   const colors = useColors();
   const cg = useCoresGrafico();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { largura: width } = useBreakpoint();
   const { user } = useAuth();
   const { filtros, rotulos, pronto, erroPersistencia, aplicar, escolherPeriodo, limparRecortes } = useFiltrosBi(
     user?.id,
@@ -270,7 +271,7 @@ function PainelGestor() {
             ) : (
               <>
                 <Manchete dados={kpis.dados} />
-                <View style={styles.gradeKpi}>
+                <GradeKpi>
                   {KPIS_TOPO.map((k) => (
                     <CartaoKpi
                       key={k}
@@ -287,7 +288,7 @@ function PainelGestor() {
                       }
                     />
                   ))}
-                </View>
+                </GradeKpi>
               </>
             )}
           </View>
@@ -522,7 +523,7 @@ function PainelGestor() {
           <View style={styles.secao}>
             <SectionHeader title="Demanda e qualidade" subtitle="Toque em ⓘ para ver como cada número é calculado." />
             {kpis.dados ? (
-              <View style={styles.gradeKpi}>
+              <GradeKpi>
                 {KPIS_SECUNDARIOS.map((k) => {
                   const recorte = RECORTE_DO_KPI[k];
                   return (
@@ -535,7 +536,7 @@ function PainelGestor() {
                     />
                   );
                 })}
-              </View>
+              </GradeKpi>
             ) : kpis.erro ? null : (
               <EsqueletoKpis quantos={4} />
             )}
@@ -792,14 +793,33 @@ function SecaoGrafico<T>({
   );
 }
 
+/**
+ * Grade dos cartões de KPI. No celular/tablet os cartões quebram linha pelo
+ * `flexBasis` deles; no computador a grade é fixa em 4 colunas iguais.
+ */
+function GradeKpi({ children }: { children: React.ReactNode }) {
+  const { desktop } = useBreakpoint();
+  if (desktop) {
+    return (
+      // `row` na célula: o `flexBasis`/`flexGrow` do cartão vale na largura.
+      <ResponsiveGrid columns={4} gap={Spacing[2]} itemStyle={styles.celulaKpi}>
+        {children}
+      </ResponsiveGrid>
+    );
+  }
+  return <View style={styles.gradeKpi}>{children}</View>;
+}
+
 function EsqueletoKpis({ quantos }: { quantos: number }) {
   return (
-    <View style={styles.gradeKpi} accessibilityLabel="Carregando indicadores" accessibilityRole="progressbar">
-      {Array.from({ length: quantos }, (_, i) => (
-        <View key={i} style={styles.kpiEsqueleto}>
-          <Skeleton height={104} />
-        </View>
-      ))}
+    <View accessibilityLabel="Carregando indicadores" accessibilityRole="progressbar">
+      <GradeKpi>
+        {Array.from({ length: quantos }, (_, i) => (
+          <View key={i} style={styles.kpiEsqueleto}>
+            <Skeleton height={104} />
+          </View>
+        ))}
+      </GradeKpi>
     </View>
   );
 }
@@ -895,6 +915,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing[2],
+  },
+  celulaKpi: {
+    flexDirection: 'row',
   },
   kpiEsqueleto: {
     flexGrow: 1,

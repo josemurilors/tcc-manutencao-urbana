@@ -25,6 +25,8 @@ from django.conf import settings
 from django.db import connection
 from rest_framework.throttling import SimpleRateThrottle
 
+from core.auditoria import ip_cliente
+
 logger = logging.getLogger(__name__)
 
 TAXAS = {
@@ -46,6 +48,8 @@ TAXAS = {
     'meus_dados': '10/h',
     # Processamento de imagem avulso (`defeitos/imagem/`).
     'imagem': '30/h',
+    # Fotos extras de um chamado (`defeitos/<id>/anexar/`): cada uma é decodificada.
+    'anexar': '30/h',
 }
 
 _PERIODOS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
@@ -57,7 +61,20 @@ def _email(request):
     return (valor or '').strip().lower() if isinstance(valor, str) else ''
 
 
-class _Throttle(SimpleRateThrottle):
+class IpRealMixin:
+    """
+    Identifica o cliente pelo IP que o nginx viu (`X-Real-IP`), e não pelo
+    `X-Forwarded-For` inteiro, como o DRF faz sem `NUM_PROXIES`: o nginx só
+    ACRESCENTA ao XFF o que o cliente mandou, então trocar um prefixo
+    aleatório a cada requisição daria uma chave de cache nova e furaria o
+    limite. Mesmo critério da trilha de auditoria (`core.auditoria`).
+    """
+
+    def get_ident(self, request):
+        return ip_cliente(request) or 'desconhecido'
+
+
+class _Throttle(IpRealMixin, SimpleRateThrottle):
     """Base: escopo fixo por classe, taxa de `TAXAS` (ou settings) e fail-open."""
     scope = None
     # O que identifica o "cliente" do limite: 'ip', 'email' ou 'usuario'.
@@ -116,3 +133,4 @@ SenhaRedefinirEmail = throttle('senha_redefinir_email', 'email')
 CriarChamado = throttle('criar_chamado', 'usuario')
 MeusDados = throttle('meus_dados', 'usuario')
 Imagem = throttle('imagem', 'usuario')
+Anexar = throttle('anexar', 'usuario')

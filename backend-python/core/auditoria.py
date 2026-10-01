@@ -7,9 +7,9 @@ com quem fez, de onde e os valores antes/depois em `dados`.
 """
 
 
-def _ip(request):
+def ip_cliente(request):
     """
-    IP de quem agiu. O nginx da frente grava `X-Real-IP` com o `$remote_addr`
+    IP de quem agiu (auditoria) ou de quem pede (throttle). O nginx da frente grava `X-Real-IP` com o `$remote_addr`
     (sobrescreve o que o cliente mandar) e ACRESCENTA esse mesmo endereço ao
     fim do `X-Forwarded-For`. Por isso o primeiro item do XFF é forjável e não
     serve para trilha de auditoria; o último é o que o proxy viu.
@@ -23,6 +23,9 @@ def _ip(request):
     return request.META.get('REMOTE_ADDR', '') or ''
 
 
+_ip = ip_cliente
+
+
 def registrar(request_ou_user, acao, alvo_tipo='', alvo_id='', dados=None, municipio_id=None):
     """Grava uma linha em `audit_log`. Aceita o request (pega usuário e IP) ou só o usuário."""
     from gestao.models import AuditLog
@@ -30,7 +33,7 @@ def registrar(request_ou_user, acao, alvo_tipo='', alvo_id='', dados=None, munic
     ip = ''
     usuario = request_ou_user
     if hasattr(request_ou_user, 'META'):
-        ip = _ip(request_ou_user)
+        ip = ip_cliente(request_ou_user)
         usuario = getattr(request_ou_user, 'user', None)
     if usuario is not None and not getattr(usuario, 'is_authenticated', False):
         usuario = None

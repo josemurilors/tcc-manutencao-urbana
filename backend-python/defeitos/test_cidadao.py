@@ -404,6 +404,24 @@ class TestUploadImagem:
         assert resp.status_code == 400
         assert 'MB' in resp.data['error']
 
+    def test_recusa_resolucao_absurda_antes_de_decodificar(self, monkeypatch):
+        from PIL import Image
+        from services import image_processor
+        monkeypatch.setattr(image_processor, 'PIXELS_MAXIMOS', 100)
+        buf = io.BytesIO()
+        Image.new('RGB', (20, 20), (200, 10, 10)).save(buf, 'PNG')
+        cli, _ = _usuario()
+        resp = cli.post(reverse('defeitos-imagem'), {'file': _arquivo(buf.getvalue())}, format='multipart')
+        assert resp.status_code == 400
+
+    def test_reduz_para_1600(self):
+        from PIL import Image
+        from services.image_processor import process_image
+        buf = io.BytesIO()
+        Image.new('RGB', (4000, 3000), (10, 120, 40)).save(buf, 'JPEG')
+        saida = Image.open(io.BytesIO(process_image(buf.getvalue())['webp_bytes']))
+        assert max(saida.size) == 1600
+
     def test_recusa_nao_imagem(self):
         cli, _ = _usuario()
         pdf = _arquivo(b'%PDF-1.4 ...', 'doc.pdf', 'application/pdf')
@@ -420,6 +438,38 @@ class TestUploadImagem:
             'imagem': _arquivo(io.BytesIO(b'lixo').getvalue(), 'x.jpg', 'image/jpeg'),
         }, format='multipart')
         assert resp.status_code == 400
+
+
+class TestFotoPorUrl:
+
+    def test_detalhe_com_imagens_url_e_rota_da_foto(self):
+        autor, _ = _usuario()
+        criado = _chamado(autor)
+        assert criado['imagem_thumbnail'].startswith('data:image/')  # contrato antigo segue igual
+
+        anonimo = APIClient()
+        detalhe = anonimo.get(reverse('defeitos-detail', args=[criado['id']]), {'imagens': 'url'}).data
+        url = detalhe['imagem_thumbnail']
+        assert url.startswith('http') and '/foto/?tipo=reporte&v=' in url
+        assert detalhe['foto_resolucao_url'] is None
+
+        rota = reverse('defeitos-foto', args=[criado['id']])
+        resp = anonimo.get(rota, {'tipo': 'reporte'})
+        assert resp.status_code == 200
+        assert resp['Content-Type'].startswith('image/') and resp['ETag']
+        assert resp['Cache-Control'].startswith('public')
+        assert anonimo.get(rota, HTTP_IF_NONE_MATCH=resp['ETag']).status_code == 304
+        assert anonimo.get(rota, {'tipo': 'resolucao'}).status_code == 404
+        assert anonimo.get(rota, {'tipo': 'x'}).status_code == 400
+
+    def test_foto_de_restrito_segue_a_visibilidade(self):
+        autor, _ = _usuario()
+        criado = _chamado(autor)
+        Defeito.objects.filter(pk=criado['id']).update(visibilidade='restrita')
+        rota = reverse('defeitos-foto', args=[criado['id']])
+        assert APIClient().get(rota).status_code == 404
+        resp = autor.get(rota)
+        assert resp.status_code == 200 and resp['Cache-Control'].startswith('private')
 
 
 class TestLimiteCriarChamado:

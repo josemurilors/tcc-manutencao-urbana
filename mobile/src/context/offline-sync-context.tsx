@@ -36,7 +36,7 @@ import { AppState } from 'react-native';
 import { useSyncOperacaoEstado, type SyncOperacao } from '@/components/operacao/use-sync-operacao';
 import { useAuth } from '@/context/auth-context';
 import { useToast } from '@/context/toast-context';
-import { DefeitoDuplicadoError, postDefeitoDireto } from '@/services/api';
+import { api, DefeitoDuplicadoError, FotoPerdidaError, postDefeitoDireto } from '@/services/api';
 import {
   esperaAposTentativas,
   fotoExiste,
@@ -89,13 +89,22 @@ function classificar(err: unknown): TipoErro {
     if (status === 400 || status === 409 || status === 422) return 'recusado';
     return 'servidor';
   }
-  if (err instanceof DefeitoDuplicadoError) return 'recusado';
+  if (err instanceof DefeitoDuplicadoError || err instanceof FotoPerdidaError) return 'recusado';
   const msg = err instanceof Error ? err.message : String(err);
   if (msg === 'Network request failed' || msg === 'Failed to fetch' || msg.includes('NetworkError')) {
     return 'rede';
   }
   if (msg.startsWith('Sessão expirada')) return 'sessao';
   return 'servidor';
+}
+
+/** O chamado existente é da própria pessoa (o reenvio achou o que ela já mandou)? */
+async function ehDoAutor(id: string) {
+  try {
+    return !!(await api.detalharDefeito(Number(id))).eh_autor;
+  } catch {
+    return false;
+  }
 }
 
 function plural(n: number, um: string, varios: string) {
@@ -167,6 +176,7 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
 
         setSincronizando(true);
         let enviados = 0;
+        let jaRegistrados = 0;
         let novasFalhas = 0;
 
         for (const item of fila) {
@@ -191,6 +201,24 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
             const tentativas = (item.tentativas ?? 0) + 1;
 
             if (tipo === 'sessao') break;
+            if (err instanceof DefeitoDuplicadoError && err.defeitoExistenteId) {
+              // Sem chave de idempotência na criação: se a resposta do POST se
+              // perdeu, o reenvio acha o próprio chamado e volta 409. Sendo da
+              // pessoa, ele já está registrado e o item sai da fila.
+              if (await ehDoAutor(err.defeitoExistenteId)) {
+                await removeFromQueue(item.id);
+                jaRegistrados++;
+                continue;
+              }
+              await updateQueueItem(item.id, {
+                status: 'falhou',
+                erro: mensagem,
+                tentativas,
+                defeito_existente_id: err.defeitoExistenteId,
+              });
+              novasFalhas++;
+              continue;
+            }
             if (tipo === 'recusado' || (tipo === 'servidor' && tentativas >= MAX_TENTATIVAS_AMBIGUAS)) {
               await updateQueueItem(item.id, { status: 'falhou', erro: mensagem, tentativas });
               novasFalhas++;
@@ -210,6 +238,13 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
 
         if (enviados > 0) {
           toast.success(`${plural(enviados, 'chamado enviado', 'chamados enviados')} da fila offline.`);
+        }
+        if (jaRegistrados > 0) {
+          toast.info(
+            jaRegistrados === 1
+              ? 'Um chamado da fila já estava registrado por você e saiu da fila.'
+              : `${jaRegistrados} chamados da fila já estavam registrados por você e saíram da fila.`,
+          );
         }
         if (novasFalhas > 0) {
           toast.error(
@@ -241,6 +276,7 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
         tentativas: 0,
         proxima_tentativa_em: null,
         erro: null,
+        defeito_existente_id: null,
       });
       await sincronizar({ forcar: true });
     },

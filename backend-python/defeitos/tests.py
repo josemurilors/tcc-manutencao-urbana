@@ -476,6 +476,27 @@ class TestRegraNaoExiste:
         assert Strike.objects.filter(usuario_id=me['id']).count() == 0
         assert auth_client.get(reverse('defeitos-detail', args=[created['id']])).status_code == 404
 
+    def test_autor_nao_apaga_chamado_em_atendimento(self, client, auth_client):
+        created = _create_defeito(auth_client)
+        Defeito.objects.filter(id=created['id']).update(status='em_andamento')
+        resp = _sinalizar(auth_client, created['id'], 'nao_existe')
+        assert resp.status_code == 200
+        assert resp.data['resultado'] is None
+        assert _existe(created['id'])
+        # O "não existe" do autor não conta para a remoção pela comunidade.
+        resp = _sinalizar(_new_user_client(client), created['id'], 'nao_existe')
+        assert resp.data['resultado'] is None
+        assert _existe(created['id'])
+
+    def test_remover_duas_vezes_nao_duplica(self, auth_client):
+        from defeitos import regras
+        from defeitos.models import DefeitoEvento
+        created = _create_defeito(auth_client)
+        d = Defeito.objects.get(id=created['id'])
+        assert regras.remover(d, None, 'teste') is True
+        assert regras.remover(Defeito.objects.get(id=created['id']), None, 'teste') is False
+        assert DefeitoEvento.objects.filter(defeito_id=created['id'], tipo='removido').count() == 1
+
     def test_um_terceiro_nao_apaga(self, client, auth_client):
         created = _create_defeito(auth_client)
         outro = _new_user_client(client)
@@ -570,6 +591,31 @@ class TestQuarentena:
         do_autor = autor.get(reverse('defeitos-municipio'), {'lat': -26.05, 'lng': -52.35})
         assert created['id'] in [d['id'] for d in do_autor.data['defeitos']]
 
+    def test_restrito_sem_detalhe_nem_historico_para_quem_nao_ve(self, client, auth_client, admin_client):
+        from rest_framework.test import APIClient
+        autor = _new_user_client(client)
+        _dar_strikes(client, autor, 3)
+        created = _create_defeito(autor)
+        assert created['visibilidade'] == 'restrita'
+        detalhe = reverse('defeitos-detail', args=[created['id']])
+        eventos = reverse('defeitos-eventos', args=[created['id']])
+
+        anonimo = APIClient()
+        assert anonimo.get(detalhe).status_code == 404
+        assert anonimo.get(eventos).status_code == 404
+        assert _new_user_client(client).get(detalhe).status_code == 404
+        # Quem está no ponto (mesmo critério do mapa) vê.
+        perto = {'lat': created['latitude'], 'lng': created['longitude']}
+        assert anonimo.get(detalhe, perto).status_code == 200
+        assert autor.get(detalhe).status_code == 200
+        assert autor.get(eventos).status_code == 200
+        assert admin_client.get(detalhe).status_code == 200
+        # E o "já reportaram aqui?" não entrega o id a anônimos.
+        proximos = anonimo.get(reverse('defeitos-proximos'), perto)
+        assert created['id'] not in [d['id'] for d in proximos.data]
+        proximos = autor.get(reverse('defeitos-proximos'), perto)
+        assert created['id'] in [d['id'] for d in proximos.data]
+
     def test_confirmacao_publica_e_resgata_strike(self, client, auth_client):
         from defeitos.models import Strike
         autor = _new_user_client(client)
@@ -592,6 +638,30 @@ class TestQuarentena:
         # Segunda confirmação não resgata de novo.
         _apoiar(_new_user_client(client), created['id'])
         assert strikes.count() == 2
+
+    def test_alternar_apoio_nao_zera_strikes(self, client, auth_client):
+        from defeitos.models import Strike
+        autor = _new_user_client(client)
+        _dar_strikes(client, autor, 4)
+        restrito = _create_defeito(autor)
+        autor_id = autor.get(reverse('auth-profile')).data['id']
+        strikes = Strike.objects.filter(usuario_id=autor_id)
+
+        amigo = _new_user_client(client)
+        for _ in range(3):  # apoia, desfaz, apoia...
+            _apoiar(amigo, restrito['id'])
+            _apoiar(amigo, restrito['id'])
+        assert strikes.count() == 3
+
+    def test_chamado_publico_nao_resgata_strike(self, client, auth_client):
+        from defeitos.models import Strike
+        autor = _new_user_client(client)
+        _dar_strikes(client, autor, 2)
+        publico = _create_defeito(autor)
+        assert publico['visibilidade'] == 'publica'
+        autor_id = autor.get(reverse('auth-profile')).data['id']
+        _apoiar(_new_user_client(client), publico['id'])
+        assert Strike.objects.filter(usuario_id=autor_id).count() == 2
 
 
 class TestAtender:
@@ -644,12 +714,26 @@ class TestStatusAction:
         assert resp.status_code == 400
 
     def test_resolvido_sem_foto_resolucao(self, admin_client):
-        """A foto de resolução é opcional: finalizar sem ela é permitido."""
+        """
+        Com `exigir_foto_conclusao` (padrão) a rota antiga também exige a foto,
+        como `operacao/<id>/transicao/`; desligado, a foto é opcional.
+        """
+        from gestao.models import MunicipioConfig
         created = _create_defeito(admin_client)
-        resp = admin_client.patch(
-            reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'concluido'}, format='json',
+        url = reverse(self.STATUS_URL, args=[created['id']])
+        resp = admin_client.patch(url, {'status': 'concluido'}, format='json')
+        assert resp.status_code == 400
+        assert 'foto' in resp.data['error']
+        assert Defeito.objects.get(id=created['id']).status == 'pendente'
+
+        municipio_id = Defeito.objects.get(id=created['id']).municipio_id
+        MunicipioConfig.objects.update_or_create(
+            municipio_id=municipio_id, defaults={'parametros': {'exigir_foto_conclusao': False}},
         )
+        try:
+            resp = admin_client.patch(url, {'status': 'concluido'}, format='json')
+        finally:
+            MunicipioConfig.objects.filter(municipio_id=municipio_id).delete()
         assert resp.status_code == 200
         assert resp.data['status'] == 'concluido'
         assert resp.data['atendido_em']
@@ -743,7 +827,7 @@ class TestStatusAction:
         created = _create_defeito(admin_client)
         first = admin_client.patch(
             reverse(self.STATUS_URL, args=[created['id']]),
-            {'status': 'concluido'}, format='json',
+            {'status': 'concluido', 'foto_resolucao': com_foto({})['imagem']}, format='multipart',
         )
         assert first.status_code == 200
         antes = Defeito.objects.get(id=created['id']).resolvido_em
@@ -855,14 +939,27 @@ class TestBatchStatus:
         assert Defeito.objects.get(id=d1['id']).status == 'em_andamento'
 
     def test_batch_status_resolvido_marca_atendido_em(self, admin_client):
-        """Finalizar em lote é permitido (foto opcional) e registra atendido_em."""
+        """
+        Em lote não vem foto: com `exigir_foto_conclusao` (padrão) o chamado
+        sem evidência volta em `erros`; desligado, finaliza e registra atendido_em.
+        """
+        from gestao.models import MunicipioConfig
         d1 = _create_defeito(admin_client)
-        resp = admin_client.patch(
-            reverse(self.URL),
-            {'ids': [d1['id']], 'status': 'concluido'},
-            format='json',
+        dados = {'ids': [d1['id']], 'status': 'concluido'}
+        resp = admin_client.patch(reverse(self.URL), dados, format='json')
+        assert resp.data['updated'] == 0 and 'foto' in resp.data['erros'][d1['id']]
+        assert Defeito.objects.get(id=d1['id']).status == 'pendente'
+
+        municipio_id = Defeito.objects.get(id=d1['id']).municipio_id
+        MunicipioConfig.objects.update_or_create(
+            municipio_id=municipio_id, defaults={'parametros': {'exigir_foto_conclusao': False}},
         )
+        try:
+            resp = admin_client.patch(reverse(self.URL), dados, format='json')
+        finally:
+            MunicipioConfig.objects.filter(municipio_id=municipio_id).delete()
         assert resp.status_code == 200
+        assert resp.data['updated'] == 1
         obj = Defeito.objects.get(id=d1['id'])
         assert obj.status == 'concluido'
         assert obj.atendido_em
@@ -1273,19 +1370,25 @@ class TestRanking:
         resp = autor.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE})
         assert resp.status_code == 200
         assert resp.data['municipio']['nome'] == 'Cidade Ranking'
-        posicoes = {i['usuario_id']: i for i in resp.data['ranking']}
-        assert posicoes[id_outro]['xp'] == 22
-        assert posicoes[id_autor]['xp'] == 20
-        assert posicoes[id_outro]['posicao'] < posicoes[id_autor]['posicao']
-        assert resp.data['eu']['usuario_id'] == id_autor
+        do_outro = outro.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE}).data['eu']
+        assert do_outro['xp'] == 22 and do_outro['usuario_id'] == id_outro
+        assert resp.data['eu']['xp'] == 20 and resp.data['eu']['usuario_id'] == id_autor
+        assert do_outro['posicao'] < resp.data['eu']['posicao']
+        # Rota pública: nome mascarado, sem id de ninguém além do próprio.
+        (minha,) = [i for i in resp.data['ranking'] if i['eh_voce']]
+        assert minha['usuario_id'] == id_autor
+        for linha in resp.data['ranking']:
+            assert linha['eh_voce'] or 'usuario_id' not in linha
+            assert linha['nome'].endswith('.')
 
         # Chamado do autor resolvido: bônus vira 35 XP e ele passa à frente.
         Defeito.objects.filter(id=a1['id']).update(status='concluido')
+        eu = autor.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE}).data['eu']
+        assert eu['xp'] == 35
+        assert eu['posicao'] < outro.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE}).data['eu']['posicao']
         resp = client.get(reverse('defeitos-ranking'), {'municipio': self.CIDADE})
-        posicoes = {i['usuario_id']: i for i in resp.data['ranking']}
-        assert posicoes[id_autor]['xp'] == 35
-        assert posicoes[id_autor]['posicao'] < posicoes[id_outro]['posicao']
         assert resp.data['eu'] is None
+        assert not any('usuario_id' in i or i['eh_voce'] for i in resp.data['ranking'])
 
     def test_resolve_municipio_pelo_ponto(self, client, auth_client):
         self._cria_municipio()

@@ -38,15 +38,32 @@ def _sinalizacoes(obj):
     return contagem
 
 
-class ThumbnailField(serializers.Field):
-    def to_representation(self, value):
-        if not value:
-            return None
-        b64 = base64.b64encode(value).decode('ascii')
-        return f'data:image/webp;base64,{b64}'
+class FotoField(serializers.Field):
+    """
+    Foto do chamado (`imagem_thumbnail` ou `foto_resolucao`). Por padrão vai
+    inline como data URI (contrato antigo do app). Com `?imagens=url` na
+    requisição vai só a URL de `defeitos/<id>/foto/` — com ETag e
+    Cache-Control, sem repetir centenas de KB em base64 a cada resposta de
+    ação. `v` muda quando o chamado muda, para o cache do app não servir foto velha.
+    """
+    TIPOS = {'imagem_thumbnail': 'reporte', 'foto_resolucao': 'resolucao'}
 
-    def to_internal_value(self, data):
-        return data
+    def __init__(self, campo, **kwargs):
+        self.campo = campo
+        super().__init__(source='*', read_only=True, **kwargs)
+
+    def to_representation(self, obj):
+        valor = getattr(obj, self.campo)
+        if not valor:
+            return None
+        request = self.context.get('request')
+        params = getattr(request, 'query_params', None) or getattr(request, 'GET', None) or {}
+        if request is not None and params.get('imagens') == 'url':
+            from django.urls import reverse
+            versao = int(obj.atualizado_em.timestamp()) if obj.atualizado_em else 0
+            caminho = reverse('defeitos-foto', args=[obj.pk])
+            return request.build_absolute_uri(f'{caminho}?tipo={self.TIPOS[self.campo]}&v={versao}')
+        return f'data:image/webp;base64,{base64.b64encode(valor).decode("ascii")}'
 
 
 class _VisaoMixin:
@@ -141,8 +158,8 @@ class DefeitoListSerializer(_VisaoMixin, serializers.ModelSerializer):
 
 
 class DefeitoDetailSerializer(DefeitoListSerializer):
-    imagem_thumbnail = ThumbnailField(read_only=True)
-    foto_resolucao_url = ThumbnailField(source='foto_resolucao', read_only=True)
+    imagem_thumbnail = FotoField('imagem_thumbnail')
+    foto_resolucao_url = FotoField('foto_resolucao')
     duplicado_de = serializers.SerializerMethodField()
     municipio = serializers.SerializerMethodField()
 

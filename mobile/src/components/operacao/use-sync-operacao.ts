@@ -75,8 +75,10 @@ export function useSyncOperacaoEstado() {
         if (r.enviadas > 0) {
           setOnline(true);
           toast.success(`${plural(r.enviadas, 'ação enviada', 'ações enviadas')} da fila offline.`);
-          ouvintesEnvio.current.forEach((o) => o());
         }
+        // Recusa também recarrega: o efeito otimista daquela ação (o "assumido"
+        // de um lote recusado, por exemplo) não vale mais e a tela precisa saber.
+        if (r.enviadas > 0 || r.falhas > 0) ouvintesEnvio.current.forEach((o) => o());
         if (r.falhas > 0) {
           toast.error(
             `${plural(r.falhas, 'ação não pôde', 'ações não puderam')} ser enviada${r.falhas === 1 ? '' : 's'}.`,

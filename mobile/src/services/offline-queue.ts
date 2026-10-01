@@ -39,6 +39,8 @@ export type PendingDefeito = NovoDefeito & {
   /** ISO; antes disso o sync automático não tenta este item de novo. */
   proxima_tentativa_em?: string | null;
   erro?: string | null;
+  /** Recusado como duplicado: o chamado que já existe ali (a folha leva até ele). */
+  defeito_existente_id?: string | null;
 };
 
 let trava: Promise<unknown> = Promise.resolve();

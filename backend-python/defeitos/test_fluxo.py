@@ -72,7 +72,19 @@ def _chamado(cli, cidade=CIDADE, **extra):
 
 
 def _status(cli, defeito_id, **dados):
-    return cli.patch(reverse('defeitos-status', args=[defeito_id]), dados, format='json')
+    """
+    PATCH status/. Concluir exige a foto do serviço (`exigir_foto_conclusao`,
+    ligado por padrão): sem `foto_resolucao` explícita, vai uma foto junto.
+    `foto_resolucao=None` manda sem foto.
+    """
+    url = reverse('defeitos-status', args=[defeito_id])
+    if dados.get('status') == 'concluido' and 'foto_resolucao' not in dados:
+        dados = com_foto(dados)
+        dados['foto_resolucao'] = dados.pop('imagem')
+        return cli.patch(url, dados, format='multipart')
+    if dados.get('foto_resolucao', 0) is None:
+        dados.pop('foto_resolucao')
+    return cli.patch(url, dados, format='json')
 
 
 class TestTransicoes:
@@ -101,7 +113,7 @@ class TestTransicoes:
         tipos = list(DefeitoEvento.objects.filter(defeito_id=d['id']).values_list('tipo', 'para_status'))
         assert tipos == [
             ('criado', 'pendente'), ('status', 'em_analise'),
-            ('status', 'em_andamento'), ('status', 'concluido'),
+            ('status', 'em_andamento'), ('status', 'concluido'), ('anexo', None),
         ]
 
     @pytest.mark.parametrize('de,para', [
@@ -244,12 +256,20 @@ class TestPermissoes:
         assert autor.delete(url).status_code == 403
 
     def test_equipe_edita_dados_de_triagem(self):
+        from gestao.models import AuditLog
         op, _ = _usuario('operador', CIDADE)
+        gestor, _ = _usuario('gestor', CIDADE)
         d = _chamado(_usuario()[0])
-        resp = op.patch(reverse('defeitos-detail', args=[d['id']]), {'prioridade': 'urgente'}, format='json')
+        url = reverse('defeitos-detail', args=[d['id']])
+        assert op.patch(url, {'bairro': 'Centro Novo'}, format='json').status_code == 200
+        # Prioridade só gestor+ (e auditada), como em operacao/<id>/prioridade/.
+        assert op.patch(url, {'prioridade': 'urgente'}, format='json').status_code == 403
+        assert Defeito.objects.get(id=d['id']).prioridade != 'urgente'
+        resp = gestor.patch(url, {'prioridade': 'urgente'}, format='json')
         assert resp.status_code == 200
         assert resp.data['prioridade'] == 'urgente'
         assert DefeitoEvento.objects.filter(defeito_id=d['id'], tipo='prioridade', publico=False).exists()
+        assert AuditLog.objects.filter(acao='defeito.prioridade', alvo_id=str(d['id'])).exists()
 
     def test_operador_de_outro_municipio_bloqueado(self):
         d = _chamado(_usuario()[0])

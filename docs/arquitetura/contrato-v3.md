@@ -283,6 +283,13 @@ Detalhes da implementação (`backend-python/operacao/`):
   ativo (restrito: equipe e autor); fora da equipe, `autor_nome` sai
   "Prefeitura" (antes/depois) ou mascarado (cidadão).
 - `lote/` não leva foto: concluir em lote obedece à mesma exigência acima.
+  As rotas antigas `PATCH defeitos/<id>/status/` (400 sem `foto_resolucao`) e
+  `PATCH defeitos/batch_status/` (o chamado volta em `erros`) também.
+- `sla/` (e a mudança de SLA da categoria em gestão) recalcula `prazo_em` a
+  partir da última reabertura, se houve, e não de `criado_em` — a mesma base
+  que a reabertura usa.
+- O PATCH genérico `defeitos/<id>/` só aceita `prioridade` de gestor+ (403
+  para operador) e audita `defeito.prioridade`, como `prioridade/`.
 - Extra: GET `chamados/<id>/ordem-servico/` → PDF da OS (protocolo, equipe,
   responsável, prazo e checklist da categoria). As rotas legadas
   `GET defeitos/<id>/ordem_servico/` e `GET defeitos/operacao/` (fila sem
@@ -336,6 +343,7 @@ Como o app usa a 7.1 (aba Operação):
 | POST `<id>/reabrir/` | `{motivo}` (autor até 30 dias após `resolvido_em`, ou gestor+) | detalhe |
 | GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios, raio_duplicado_m}]` (abertos no raio + resolvidos há ≤30 dias); cabeçalhos `X-Raio-Duplicado-M`, `X-Raio-M` |
 | GET `protocolo/<protocolo>/` (público) | — | detalhe público |
+| GET `<id>/foto/` (público) | `tipo=reporte\|resolucao` | a imagem (`ETag`, `Cache-Control`; 304 com `If-None-Match`) |
 | GET `area/` | + `situacao=abertos\|resolvidos\|todos` (padrão abertos), `categorias=<ids>` | como hoje, com `celulas` para todos os usuários |
 
 Detalhes de 7.2 (implementação):
@@ -369,6 +377,23 @@ Detalhes de 7.2 (implementação):
 - `protocolo/<protocolo>/`: sem diferenciar caixa; 404 para removido ou
   restrito que o visitante não pode ver (`regras.visivel_para`). Nome da rota:
   `defeitos-protocolo`.
+- Detalhe `<id>/`, `<id>/eventos/` e `<id>/foto/` seguem a mesma regra: chamado
+  restrito só para o autor, a equipe ou quem manda `?lat=&lng=` a até 500 m
+  (critério do mapa); os demais recebem 404. `proximos/` não lista restritos
+  para anônimos.
+- Fotos por URL: com `?imagens=url` em qualquer rota que devolve o detalhe
+  (inclusive as ações de 7.1), `imagem_thumbnail` e `foto_resolucao_url` vêm
+  como URL absoluta de `<id>/foto/?tipo=…&v=<atualizado_em>` em vez de data
+  URI base64. Sem o parâmetro, segue o data URI (contrato antigo do app).
+- `ranking/` (público): `nome` mascarado ("Maria S.") e sem `usuario_id`; a
+  linha de quem está logado vem com `eh_voce: true` e só ela traz
+  `usuario_id`. Cache de 2 min por (município, período)
+  (`settings.CIU_RANKING_CACHE_S`).
+- Sinalização "não existe" do autor remove na hora só enquanto `pendente`
+  (como o DELETE); depois disso não remove nem conta para a remoção pela
+  comunidade. Corrida de sinalizações: a linha é travada; transição que já não
+  vale responde 409. A "redenção" de strike pela 1ª confirmação de terceiro
+  vale uma vez, e só para chamado restrito.
 - `area`: `resolvidos` = `concluido` com `resolvido_em` nos últimos 90 dias
   (`AREA_RESOLVIDOS_DIAS`); `todos` = abertos + esses resolvidos; rejeitados
   nunca. Na célula, abertos vêm antes dos resolvidos e a data de desempate é
@@ -381,9 +406,13 @@ Detalhes de 7.2 (implementação):
 - Upload de foto (criar, `anexar`, `status` com `foto_resolucao`, `imagem`):
   até 8 MB, `Content-Type` `image/*` (ou vazio/`octet-stream`, que o Pillow
   decide); fora disso, 400 com mensagem. `imagem/` agora exige login.
+  Resolução acima de 60 MP é recusada antes de decodificar; a foto é reduzida
+  a 1600 px antes do desfoque de privacidade.
 - Limites (429, `users/throttles.py`, sobreponíveis por
   `settings.CIU_THROTTLE_TAXAS`): criar chamado 30/h por usuário, `imagem`
-  30/h por usuário; ver 7.7 para as rotas de conta.
+  30/h por usuário, `anexar` 30/h por usuário; ver 7.7 para as rotas de conta.
+  O IP dos limites por IP é o `X-Real-IP` do nginx (o mesmo da auditoria), não
+  o `X-Forwarded-For` inteiro, que o cliente forja.
 
 ### 7.3 Notificações — `api/v1/notificacoes/` (autenticado)
 
@@ -523,7 +552,8 @@ de America/Sao_Paulo, `fim` inclusivo, máximo 731 dias):
 - GET `api/v1/dados-abertos/<codigo>/chamados.csv` e `.geojson` (coordenadas com 4 casas).
 - Open311 GeoReport v2 (leitura): `api/v1/open311/v2/services.json`, `requests.json`.
 
-Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min):
+Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min por IP;
+dados abertos 10/min):
 
 - Transparência: cache de 10 min; campo extra `atualizado_em`; município
   inexistente → 404. Agregados contam todos os chamados não removidos; listas
@@ -532,6 +562,9 @@ Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min):
   orgao_responsavel, bairro, rua, latitude, longitude, criado_em, prazo_em,
   resolvido_em, no_prazo, total_apoios`; `?inicio=&fim=` (AAAA-MM-DD) opcionais sobre
   a abertura; sem título/descrição; até 100 mil linhas; CSV com BOM e `;`.
+  CSV e GeoJSON saem em streaming (cursor do servidor, lotes de 2000). Texto que
+  começa com `=`, `+`, `-`, `@`, tab ou CR ganha um `'` na frente (injeção de
+  fórmula), aqui, na exportação do BI e no CSV da auditoria.
 - Open311: `jurisdiction_id` (código IBGE) obrigatório; `service_request_id` =
   protocolo; `service_code` = id da categoria; sem filtro de data/id devolve os
   últimos 90 dias, até 1000; também `v2/requests/<protocolo>.json`; erros no formato
@@ -658,8 +691,23 @@ Detalhes de 7.7 (implementação):
 - `register/` aceita `aceite_termos: true` (grava `aceite_termos_em`).
   `aceite-termos/` (autenticado) grava agora e devolve `{user}`.
 - `meus-dados/` (autenticado): `{gerado_em, usuario, chamados (inclusive
-  removidos), apoios, sinalizacoes, avaliacoes, strikes, notificacoes}`, com
+  removidos), apoios, sinalizacoes, avaliacoes, strikes, notificacoes, anexos
+  (fotos enviadas, com latitude/longitude e imagem_url), eventos (histórico de
+  autoria da pessoa), aparelhos_push (sem o token), registros_tecnicos
+  (auditoria: acao, alvo_tipo, ip, criado_em), convites (para o e-mail)}`, com
   `Content-Disposition: attachment`; registra `lgpd.exportacao` na auditoria.
+- Excluir a conta (`DELETE profile/`): além de desligar os chamados, troca
+  `nome`/`email` por "(conta excluída)" em `audit_log.dados` dos registros
+  sobre a pessoa, apaga convites pendentes para o e-mail e zera o e-mail dos
+  aceitos; audita `conta.excluir` só com o id.
+- Retenção: `manage.py aplicar_retencao [--simular]`, às 3h pelo agendador.
+  Zera `audit_log.ip` após 30 dias; apaga strikes após 90 dias, convites não
+  aceitos 30 dias depois de vencer, notificações lidas há 180 dias e aparelhos
+  de push sem uso há 180 dias; 30 dias depois de o autor excluir um chamado,
+  apaga a foto, as fotos extras, os anexos e a descrição.
+- `admin/users/` (admin municipal): só a equipe do município (papel diferente
+  de `cidadao`); `?email=` acrescenta o cidadão com esse e-mail, com nome
+  mascarado e sem município. Servidor de outra prefeitura não aparece.
 - Limites (429): `login/` 10/min por IP e 20/h por e-mail; `existe/` 10/min
   por IP; `verificar-email/` 5 a cada 10 min por usuário; `reenviar-codigo/`
   5/h; `senha/esqueci/` 5/h por IP e por e-mail; `senha/redefinir/` 5 a cada

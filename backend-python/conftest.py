@@ -136,3 +136,9 @@ def _sem_limite_de_deslocamento(request, monkeypatch):
         return
     from defeitos import regras
     monkeypatch.setattr(regras, 'VELOCIDADE_MAX_KMH', float('inf'))
+
+
+@pytest.fixture(autouse=True)
+def _ranking_sem_cache(settings):
+    """O cache do ranking vive no Redis compartilhado: nos testes, sempre recalcula."""
+    settings.CIU_RANKING_CACHE_S = 0

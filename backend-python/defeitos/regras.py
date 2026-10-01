@@ -24,6 +24,7 @@ Todos os números vivem aqui para ajuste fino sem caçar pelo código.
 import json
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -92,8 +93,11 @@ def _registrar_atualizacao(defeito, texto):
 def remover(defeito, usuario, motivo, *, papel=None, texto=''):
     """
     Soft delete: o chamado sai de todas as listagens (`removido_em`), mas o
-    registro e o histórico ficam para a prefeitura e a auditoria.
+    registro e o histórico ficam para a prefeitura e a auditoria. Chamado já
+    removido não é removido de novo (nem ganha outro evento).
     """
+    if defeito.removido_em is not None:
+        return False
     agora = timezone.now()
     defeito.removido_em = agora
     defeito.removido_motivo = motivo
@@ -102,6 +106,7 @@ def remover(defeito, usuario, motivo, *, papel=None, texto=''):
     fluxo.registrar_evento(
         defeito, 'removido', usuario, papel=papel, texto=texto, dados={'motivo': motivo},
     )
+    return True
 
 
 def aplicar_sinalizacao(defeito, usuario, tipo):
@@ -127,47 +132,66 @@ def aplicar_sinalizacao(defeito, usuario, tipo):
         return None
 
     # tipo == NAO_EXISTE
+    # O autor só desfaz o próprio chamado enquanto ninguém o pegou (a mesma
+    # regra do DELETE). Depois disso o "não existe" dele vira insumo para a
+    # moderação e não conta para a remoção pela comunidade.
     if autor:
+        if defeito.status != 'pendente':
+            return None
         remover(defeito, usuario, 'autor', papel='cidadao', texto='Removido pelo próprio autor')
         return RESULTADO_INEXISTENTE
 
+    nao_existe = contagem[Sinalizacao.NAO_EXISTE]
+    if defeito.usuario_id is not None:
+        nao_existe -= Sinalizacao.objects.filter(
+            defeito=defeito, tipo=Sinalizacao.NAO_EXISTE, usuario_id=defeito.usuario_id,
+        ).count()
     apoios = Apoio.objects.filter(defeito=defeito).count()
-    if contagem[Sinalizacao.NAO_EXISTE] >= NAO_EXISTE_MIN + apoios:
-        if defeito.usuario_id is not None:
+    if nao_existe >= NAO_EXISTE_MIN + apoios:
+        removido = remover(
+            defeito, usuario, 'comunidade', papel='comunidade',
+            texto='Removido por sinalizações de "não existe"',
+        )
+        if removido and defeito.usuario_id is not None:
             Strike.objects.create(
                 usuario_id=defeito.usuario_id,
                 titulo=defeito.titulo,
                 criado_em=timezone.now(),
             )
-        remover(
-            defeito, usuario, 'comunidade', papel='comunidade',
-            texto='Removido por sinalizações de "não existe"',
-        )
         return RESULTADO_INEXISTENTE
     return None
 
 
 def aplicar_confirmacao(defeito, usuario):
     """
-    Chamada quando `usuario` confirma/apoia `defeito` pela primeira vez. Se for
-    a primeira confirmação de outra pessoa, o chamado vira público e o autor
-    resgata um strike. Devolve True se a visibilidade mudou.
+    Chamada quando `usuario` confirma/apoia `defeito`. Se o chamado é
+    restrito e esta é a primeira confirmação de outra pessoa, ele vira público
+    e o autor resgata um strike. Devolve True se a visibilidade mudou.
+
+    O resgate acontece uma vez só por chamado: a virada para público é um
+    UPDATE condicional (`visibilidade='restrita'`), então desfazer e refazer o
+    apoio — ou dois apoios simultâneos — não apaga outro strike. Chamado que
+    nasceu público não resgata nada.
     """
     if defeito.usuario_id is None or defeito.usuario_id == usuario.id:
+        return False
+    if defeito.visibilidade != Defeito.VISIBILIDADE_RESTRITA:
         return False
     de_terceiros = Apoio.objects.filter(defeito=defeito).exclude(usuario_id=defeito.usuario_id).count()
     if de_terceiros != 1:
         return False
 
-    mais_antigo = strikes_ativos(defeito.usuario).order_by('criado_em').first()
-    if mais_antigo is not None:
-        mais_antigo.delete()
-
-    if defeito.visibilidade == Defeito.VISIBILIDADE_RESTRITA:
-        defeito.visibilidade = Defeito.VISIBILIDADE_PUBLICA
-        defeito.save(update_fields=['visibilidade'])
-        return True
-    return False
+    with transaction.atomic():
+        virou = Defeito.objects.filter(
+            pk=defeito.pk, visibilidade=Defeito.VISIBILIDADE_RESTRITA,
+        ).update(visibilidade=Defeito.VISIBILIDADE_PUBLICA)
+        if not virou:
+            return False
+        mais_antigo = strikes_ativos(defeito.usuario).order_by('criado_em').first()
+        if mais_antigo is not None:
+            mais_antigo.delete()
+    defeito.visibilidade = Defeito.VISIBILIDADE_PUBLICA
+    return True
 
 
 def visivel_para(defeito, usuario, lat=None, lng=None):

@@ -16,10 +16,20 @@ def gerar_protocolo(quando=None):
     return f'{ano}-{numero:06d}'
 
 
+# Colunas grandes do chamado: as BYTEA (foto e foto de resolução), as fotos
+# extras em base64 e o log JSON de atualizações. Listagens, filas e laços que
+# não as mostram não devem trazê-las do banco.
+COLUNAS_PESADAS = ('imagem_thumbnail', 'foto_resolucao', 'imagens_extra', 'atualizacoes')
+
+
 class DefeitoQuerySet(models.QuerySet):
     def ativos(self):
         """Sem os removidos (soft delete); é o que toda listagem deve usar."""
         return self.filter(removido_em__isnull=True)
+
+    def leves(self):
+        """Sem as `COLUNAS_PESADAS` (carregadas sob demanda se alguém as ler)."""
+        return self.defer(*COLUNAS_PESADAS)
 
 
 class Defeito(models.Model):

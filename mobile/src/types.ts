@@ -246,7 +246,9 @@ export type Progresso = {
 
 export type RankingEntry = {
   posicao: number;
-  usuario_id: string;
+  /** Só vem na linha do próprio usuário (as demais são anônimas). */
+  usuario_id?: string;
+  eh_voce?: boolean;
   nome: string;
   xp: number;
   nivel: number;

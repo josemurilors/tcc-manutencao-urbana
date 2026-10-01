@@ -6,6 +6,7 @@ requisição nas rotas sensíveis e estatísticas sem chamados removidos.
 import random
 import uuid
 from datetime import timedelta
+from unittest.mock import ANY
 
 import pytest
 from django.urls import reverse
@@ -200,6 +201,17 @@ class TestThrottleEntrada:
         assert cli.post(reverse('auth-existe'), {'email': 'a@b.com'}, format='json', REMOTE_ADDR=ip).status_code == 200
         assert cli.post(reverse('auth-existe'), {'email': 'c@d.com'}, format='json', REMOTE_ADDR=ip).status_code == 429
 
+    def test_xff_forjado_nao_fura_o_limite(self, settings):
+        # O nginx sobrescreve X-Real-IP e só acrescenta ao X-Forwarded-For o que o
+        # cliente mandou: trocar o prefixo do XFF não pode dar uma chave nova.
+        settings.CIU_THROTTLE_TAXAS = {'existe_ip': '1/m'}
+        ip = _ip()
+        cli = APIClient()
+        codigos = [cli.post(reverse('auth-existe'), {'email': 'a@b.com'}, format='json',
+                            HTTP_X_REAL_IP=ip, HTTP_X_FORWARDED_FOR=f'{_ip()}, {ip}').status_code
+                   for _ in range(2)]
+        assert codigos == [200, 429]
+
     def test_verificar_email_por_usuario(self, settings):
         settings.CIU_THROTTLE_TAXAS = {'verificar_email': '2/10m'}
         cli, _, _ = _registrar()
@@ -257,6 +269,24 @@ class TestMeusDados:
             'avaliado_em': Defeito.objects.get(pk=meu['id']).avaliado_em,
         }]
         assert 'strikes' in dados and 'notificacoes' in dados
+        assert {'criado', 'avaliacao'} <= {e['tipo'] for e in dados['eventos']}
+        assert all(str(e['defeito_id']) in (meu['id'], alheio['id']) for e in dados['eventos'])
+
+        # Fotos com GPS, aparelhos de push (sem o token) e IP da auditoria.
+        from defeitos.models import DefeitoAnexo
+        from notificacoes.models import PushToken
+        DefeitoAnexo.objects.create(defeito_id=meu['id'], tipo='cidadao', imagem=b'x', autor=user,
+                                    latitude=-30.5, longitude=-59.5)
+        PushToken.objects.create(usuario=user, token=f'ExponentPushToken[{uuid.uuid4().hex}]', plataforma='android')
+        dados = cli.get(reverse('auth-meus-dados'), REMOTE_ADDR='10.9.8.7').data
+        (anexo,) = dados['anexos']
+        assert (anexo['latitude'], anexo['longitude']) == (-30.5, -59.5)
+        assert anexo['imagem_url'].endswith(f'/anexos/{anexo["id"]}/imagem/')
+        assert dados['aparelhos_push'] == [{'tipo': 'expo', 'plataforma': 'android', 'criado_em': ANY,
+                                            'ultimo_uso': ANY}]
+        assert 'ExponentPushToken' not in str(dados)
+        assert any(r['acao'] == 'lgpd.exportacao' and r['ip'] for r in dados['registros_tecnicos'])
+        assert dados['convites'] == []
         # Nada de outra pessoa vaza na exportação.
         assert Apoio.objects.filter(usuario=user).count() == 1
         assert Sinalizacao.objects.filter(usuario=user).count() == 1
@@ -264,6 +294,49 @@ class TestMeusDados:
 
     def test_exige_login(self):
         assert APIClient().get(reverse('auth-meus-dados')).status_code == 401
+
+
+class TestExcluirConta:
+
+    def test_tira_nome_e_email_da_auditoria_e_dos_convites(self):
+        from gestao.models import AuditLog, Convite
+
+        cli, user, _ = _registrar()
+        agora = timezone.now()
+        aceito = Convite.objects.create(
+            email=user.email, municipio_id='9999920', papel='operador', token=uuid.uuid4().hex,
+            expira_em=agora + timedelta(days=7), aceito_em=agora, aceito_por=user,
+        )
+        pendente = Convite.objects.create(
+            email=user.email.upper(), municipio_id='9999921', papel='operador', token=uuid.uuid4().hex,
+            expira_em=agora + timedelta(days=7),
+        )
+        logs = [
+            AuditLog.objects.create(acao='convite.aceitar', alvo_tipo='usuario', alvo_id=str(user.pk),
+                                    dados={'nome': user.nome, 'email': user.email, 'antes': {'papel': 'cidadao'}}),
+            AuditLog.objects.create(acao='membro.alterar', alvo_tipo='usuario', alvo_id=str(user.pk),
+                                    dados={'nome': user.nome, 'antes': {}, 'depois': {}}),
+            AuditLog.objects.create(acao='convite.criar', alvo_tipo='convite', alvo_id=str(aceito.pk),
+                                    dados={'email': user.email, 'papel': 'operador'}),
+        ]
+        alheio = AuditLog.objects.create(acao='membro.alterar', alvo_tipo='usuario', alvo_id=str(uuid.uuid4()),
+                                         dados={'nome': 'Outra Pessoa', 'email': 'outra@example.com'})
+
+        assert cli.delete(reverse('auth-profile')).status_code == 204
+
+        for log in logs:
+            log.refresh_from_db()
+            texto = str(log.dados)
+            assert user.email not in texto and user.nome not in texto, log.acao
+        logs[0].refresh_from_db()
+        assert logs[0].dados['antes'] == {'papel': 'cidadao'}
+        alheio.refresh_from_db()
+        assert alheio.dados['nome'] == 'Outra Pessoa'
+        aceito.refresh_from_db()
+        assert aceito.email == '' and aceito.aceito_por_id is None
+        assert not Convite.objects.filter(pk=pendente.pk).exists()
+        saida = AuditLog.objects.get(acao='conta.excluir', alvo_id=str(user.pk))
+        assert saida.dados == {}
 
 
 class TestEstatisticasSemRemovidos:

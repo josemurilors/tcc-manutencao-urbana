@@ -37,6 +37,7 @@ import { OperacaoSheet } from '@/components/operacao-sheet';
 import type { Roteiro } from '@/components/roteiro-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { SplitView, useBreakpoint } from '@/components/ui/responsive';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { StateView } from '@/components/ui/state-view';
 import { AppText } from '@/components/ui/text';
@@ -92,6 +93,7 @@ function progresso(r: Roteiro): Roteiro {
 export default function OperacaoScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { desktop } = useBreakpoint();
   const toast = useToast();
   const { user } = useAuth();
   const { posicao, bussola, permitido, erro: erroGps, tentarNovamente } = useLocalizacao();
@@ -298,7 +300,7 @@ export default function OperacaoScreen() {
           style={styles.visao}
         />
       </View>
-      <FaixaOffline cacheDe={fila.cacheDe} />
+      <FaixaOffline cacheDe={fila.cacheDe} aviso={fila.cacheAviso} />
     </View>
   );
 
@@ -424,101 +426,146 @@ export default function OperacaoScreen() {
     );
   }
 
+  // Visão dividida (computador): a fila à esquerda e a ficha do chamado à
+  // direita, no lugar do bottom sheet. No celular e no mapa nada muda.
+  const dividida = desktop && visao === 'lista';
+
+  const listaFila = (
+    <FlatList
+      data={visiveis}
+      keyExtractor={(c) => String(c.id)}
+      extraData={[selecao, selecionando, sync.idsPendentes]}
+      ListHeaderComponent={cabecalhoLista}
+      ListEmptyComponent={corpoVazio()}
+      contentContainerStyle={[styles.lista, { paddingBottom: Spacing[6] + (selecao.size > 0 ? 160 : 0) }]}
+      style={fila.buscando ? styles.esmaecida : undefined}
+      renderItem={({ item }) => (
+        <View style={styles.margem}>
+          <ChamadoCard
+            chamado={item}
+            icone={catalogos.icones.get(nomeCategoria(item))}
+            meuId={meuId}
+            pendente={sync.idsPendentes.has(String(item.id))}
+            modoSelecao={selecionando}
+            selecionado={selecao.has(String(item.id))}
+            onPress={tocar}
+            onLongPress={alternarSelecao}
+          />
+        </View>
+      )}
+      refreshControl={
+        <RefreshControl
+          refreshing={fila.atualizando}
+          onRefresh={() => {
+            fila.puxar();
+            sync.sincronizar(true);
+          }}
+          tintColor={colors.primaryText}
+          colors={[colors.primary]}
+        />
+      }
+      onEndReachedThreshold={0.4}
+      onEndReached={() => fila.carregarMais()}
+      ListFooterComponent={
+        fila.carregandoMais ? (
+          <StateView kind="loading" skeleton={1} title="Carregando mais" />
+        ) : fila.next && fila.erro ? (
+          <View style={styles.rodapeLista}>
+            <Button variant="secondary" onPress={() => fila.carregarMais()}>
+              Carregar mais
+            </Button>
+          </View>
+        ) : null
+      }
+    />
+  );
+
+  const loteBarra =
+    visao === 'lista' && selecionados.length > 0 ? (
+      <LoteBarra
+        selecionados={selecionados}
+        meuId={meuId}
+        gestor={gestor}
+        equipes={catalogos.equipes}
+        onRecarregarEquipes={catalogos.recarregar}
+        exigirFoto={exigirFoto}
+        onLimpar={sairDaSelecao}
+        onAplicado={aposLote}
+      />
+    ) : null;
+
   return (
     <View style={[styles.raiz, { backgroundColor: colors.bg }]}>
       {cabecalho}
 
-      {visao === 'lista' ? (
-        <FlatList
-          data={visiveis}
-          keyExtractor={(c) => String(c.id)}
-          extraData={[selecao, selecionando, sync.idsPendentes]}
-          ListHeaderComponent={cabecalhoLista}
-          ListEmptyComponent={corpoVazio()}
-          contentContainerStyle={[styles.lista, { paddingBottom: Spacing[6] + (selecao.size > 0 ? 160 : 0) }]}
-          style={fila.buscando ? styles.esmaecida : undefined}
-          renderItem={({ item }) => (
-            <View style={styles.margem}>
-              <ChamadoCard
-                chamado={item}
-                icone={catalogos.icones.get(nomeCategoria(item))}
-                meuId={meuId}
-                pendente={sync.idsPendentes.has(String(item.id))}
-                modoSelecao={selecionando}
-                selecionado={selecao.has(String(item.id))}
-                onPress={tocar}
-                onLongPress={alternarSelecao}
-              />
+      {dividida ? (
+        <SplitView
+          lista={
+            <View style={styles.flex}>
+              {listaFila}
+              {loteBarra}
             </View>
-          )}
-          refreshControl={
-            <RefreshControl
-              refreshing={fila.atualizando}
-              onRefresh={() => {
-                fila.puxar();
-                sync.sincronizar(true);
-              }}
-              tintColor={colors.primaryText}
-              colors={[colors.primary]}
-            />
           }
-          onEndReachedThreshold={0.4}
-          onEndReached={() => fila.carregarMais()}
-          ListFooterComponent={
-            fila.carregandoMais ? (
-              <StateView kind="loading" skeleton={1} title="Carregando mais" />
-            ) : fila.next && fila.erro ? (
-              <View style={styles.rodapeLista}>
-                <Button variant="secondary" onPress={() => fila.carregarMais()}>
-                  Carregar mais
-                </Button>
-              </View>
-            ) : null
+          detalhe={
+            aberto ? (
+              <OperacaoSheet
+                embutida
+                chamado={aberto}
+                catalogos={catalogos}
+                pendente={sync.idsPendentes.has(String(aberto.id))}
+                exigirFoto={exigirFoto}
+                origem={posicao}
+                onClose={() => setAberto(null)}
+                onAtualizado={aoAtualizar}
+              />
+            ) : (
+              <StateView
+                kind="empty"
+                icon="document-text-outline"
+                title="Nenhum chamado aberto"
+                description="Escolha um chamado na fila para ver a ficha de atendimento aqui."
+              />
+            )
           }
         />
       ) : (
-        <MapaOperacao
-          itens={fila.itens}
-          roteiro={roteiro}
-          icones={catalogos.icones}
-          posicao={posicao}
-          bussola={bussola}
-          erroGps={erroGps}
-          permitidoGps={permitido}
-          tentarGps={tentarNovamente}
-          meuId={meuId}
-          selecionadoId={aberto ? String(aberto.id) : null}
-          pendentes={sync.idsPendentes}
-          rodape={Spacing[4]}
-          onAbrir={setAberto}
-          onRoteiro={(r) => mudarRoteiro(() => r)}
-          onPular={pular}
-          onEncerrar={encerrar}
-        />
+        <>
+          {visao === 'lista' ? (
+            listaFila
+          ) : (
+            <MapaOperacao
+              itens={fila.itens}
+              roteiro={roteiro}
+              icones={catalogos.icones}
+              posicao={posicao}
+              bussola={bussola}
+              erroGps={erroGps}
+              permitidoGps={permitido}
+              tentarGps={tentarNovamente}
+              meuId={meuId}
+              selecionadoId={aberto ? String(aberto.id) : null}
+              pendentes={sync.idsPendentes}
+              rodape={Spacing[4]}
+              onAbrir={setAberto}
+              onRoteiro={(r) => mudarRoteiro(() => r)}
+              onPular={pular}
+              onEncerrar={encerrar}
+            />
+          )}
+
+          {loteBarra}
+
+          <OperacaoSheet
+            chamado={aberto}
+            catalogos={catalogos}
+            pendente={aberto ? sync.idsPendentes.has(String(aberto.id)) : false}
+            exigirFoto={exigirFoto}
+            origem={posicao}
+            onClose={() => setAberto(null)}
+            onAtualizado={aoAtualizar}
+          />
+        </>
       )}
-
-      {visao === 'lista' && selecionados.length > 0 ? (
-        <LoteBarra
-          selecionados={selecionados}
-          meuId={meuId}
-          gestor={gestor}
-          equipes={catalogos.equipes}
-          onRecarregarEquipes={catalogos.recarregar}
-          exigirFoto={exigirFoto}
-          onLimpar={sairDaSelecao}
-          onAplicado={aposLote}
-        />
-      ) : null}
-
-      <OperacaoSheet
-        chamado={aberto}
-        catalogos={catalogos}
-        pendente={aberto ? sync.idsPendentes.has(String(aberto.id)) : false}
-        exigirFoto={exigirFoto}
-        origem={posicao}
-        onClose={() => setAberto(null)}
-        onAtualizado={aoAtualizar}
-      />
     </View>
   );
 }

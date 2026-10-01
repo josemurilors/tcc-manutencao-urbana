@@ -68,6 +68,8 @@ type Props = {
   onClose: () => void;
   /** Novo estado do chamado (resposta do servidor ou patch otimista). */
   onAtualizado: (id: ChamadoFila['id'], patch: Partial<ChamadoFila>) => void;
+  /** Ficha dentro da tela (visão dividida no computador), sem bottom sheet. */
+  embutida?: boolean;
 };
 
 type Folha = 'atribuir' | 'sla' | 'prioridade' | null;
@@ -86,6 +88,7 @@ function Ficha({
   origem,
   onClose,
   onAtualizado,
+  embutida,
 }: Props & { chamado: ChamadoFila }) {
   const colors = useColors();
   const toast = useToast();
@@ -350,7 +353,12 @@ function Ficha({
   );
 
   return (
-    <FichaDetalhe defeito={c} onClose={onClose} destaque={destaque} fotos={<FotosChamado chamado={c} versao={versao} />}>
+    <FichaDetalhe
+      defeito={c}
+      onClose={onClose}
+      destaque={destaque}
+      fotos={<FotosChamado chamado={c} versao={versao} />}
+      embutida={embutida}>
       <View style={styles.corpo}>
         <Grupo titulo="Registro">
           {!fechado ? (

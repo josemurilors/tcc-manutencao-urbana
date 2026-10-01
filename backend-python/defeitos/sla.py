@@ -91,6 +91,38 @@ def calcular_prazo(criado_em, prazo_sla_dias):
     return criado_em + timedelta(days=prazo_sla_dias)
 
 
+def base_do_prazo(defeito):
+    """
+    De onde o prazo conta: a última reabertura, se houve (é o que
+    `fluxo.transicionar` usa ao reabrir), senão a abertura. Mudar o SLA de um
+    chamado reaberto a partir de `criado_em` o deixaria "vencido há N dias".
+    Aceita a anotação `ultima_reabertura` para não consultar linha a linha.
+    """
+    if hasattr(defeito, 'ultima_reabertura'):
+        return defeito.ultima_reabertura or defeito.criado_em
+    if not defeito.reaberturas:
+        return defeito.criado_em
+    from .models import DefeitoEvento
+
+    ultima = (
+        DefeitoEvento.objects.filter(defeito_id=defeito.pk, tipo='reaberto')
+        .order_by('-criado_em').values_list('criado_em', flat=True).first()
+    )
+    return ultima or defeito.criado_em
+
+
+def anotar_ultima_reabertura(qs):
+    """`ultima_reabertura` (criado_em do último evento 'reaberto') para `base_do_prazo`."""
+    from django.db.models import OuterRef, Subquery
+
+    from .models import DefeitoEvento
+
+    return qs.annotate(ultima_reabertura=Subquery(
+        DefeitoEvento.objects.filter(defeito_id=OuterRef('pk'), tipo='reaberto')
+        .order_by('-criado_em').values('criado_em')[:1]
+    ))
+
+
 def sla_vencido(defeito, agora=None):
     from .fluxo import STATUS_ABERTOS
 

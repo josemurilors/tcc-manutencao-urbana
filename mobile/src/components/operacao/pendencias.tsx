@@ -41,9 +41,11 @@ function resumoDaFila(pendentes: number, falhas: number) {
 type Props = {
   /** ISO de quando o cache exibido foi salvo; null = dados ao vivo. */
   cacheDe: string | null;
+  /** Com cache: o recorte exibido não é o que foi salvo (`useFila().cacheAviso`). */
+  aviso?: string | null;
 };
 
-export function FaixaOffline({ cacheDe }: Props) {
+export function FaixaOffline({ cacheDe, aviso }: Props) {
   const colors = useColors();
   const { pendentes, falhas, abrirPainel } = useSyncOperacao();
 
@@ -53,6 +55,7 @@ export function FaixaOffline({ cacheDe }: Props) {
   const cor = corDoTom(colors, tom);
   const partes = [
     ...(cacheDe ? [`Offline · fila de ${hora(cacheDe)}`] : []),
+    ...(cacheDe && aviso ? [aviso] : []),
     ...resumoDaFila(pendentes, falhas),
   ];
 

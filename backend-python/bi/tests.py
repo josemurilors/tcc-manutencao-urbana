@@ -338,6 +338,10 @@ class TestRecortes:
         assert [l['chave'] for l in equipes] == ['nenhum']
         k = g.get('/api/v1/bi/kpis/', {**MARCO, 'equipe_id': 'nenhum'}).data['kpis']
         assert k['recebidos'] == 4
+        # O drill-down da equipe "nenhum" também vale para a produtividade.
+        prod = g.get('/api/v1/bi/produtividade/', {**MARCO, 'equipe_id': 'nenhum'})
+        assert prod.status_code == 200, prod.data
+        assert 'Olga Operadora' in [l['nome'] for l in prod.data]
         _chamado(_dt(3, 7), categoria='Buraco', categoria_id=None, secretaria_responsavel='Zeladoria Antiga')
         linhas = g.get('/api/v1/bi/distribuicao/', {**MARCO, 'dimensao': 'secretaria'}).data
         chave = next(l['chave'] for l in linhas if l['rotulo'] == 'Zeladoria Antiga')
@@ -421,6 +425,14 @@ class TestExportacao:
         assert _cliente(base['gestor']).get('/api/v1/bi/exportar/', {'formato': 'pdf'}).status_code == 400
 
 
+def test_csv_neutraliza_formula():
+    from bi.planilha import gerar_csv
+    linhas = [{'rua': "=cmd|' /C calc'!A0", 'bairro': '@SOMA(A1)', 'nota': -2.5, 'ok': 'Centro'}]
+    texto = b''.join(gerar_csv(['rua', 'bairro', 'nota', 'ok'], linhas)).decode('utf-8').lstrip('﻿')
+    linha = list(csv.reader(io.StringIO(texto), delimiter=';'))[1]
+    assert linha == ["'=cmd|' /C calc'!A0", "'@SOMA(A1)", '-2,5', 'Centro']
+
+
 class TestRelatorio:
     def test_pdf_mensal(self, base):
         from pypdf import PdfReader
@@ -436,6 +448,15 @@ class TestRelatorio:
         assert 'Chamados recebidos' in texto
         from gestao.models import AuditLog
         assert AuditLog.objects.filter(acao='bi.relatorio', municipio_id=MUN).exists()
+
+    def test_bairro_com_markup_nao_derruba_o_pdf(self, base):
+        from pypdf import PdfReader
+        _chamado(_dt(3, 12), bairro='Centro <b')
+        _chamado(_dt(3, 13), bairro='<font')
+        resp = _cliente(base['gestor']).get('/api/v1/bi/relatorio/', {'mes': '2026-03', 'bairro': '<font'})
+        assert resp.status_code == 200
+        texto = '\n'.join(p.extract_text() for p in PdfReader(io.BytesIO(resp.content)).pages)
+        assert 'Centro <b' in texto or '<font' in texto
 
     def test_mes_invalido(self, base):
         assert _cliente(base['gestor']).get('/api/v1/bi/relatorio/', {'mes': '2026-13'}).status_code == 400
@@ -522,7 +543,7 @@ class TestDadosAbertos:
     def test_geojson(self, publico):
         resp = APIClient().get(f'/api/v1/dados-abertos/{MUN_PUBLICO}/chamados.geojson')
         assert resp.status_code == 200
-        geo = json.loads(resp.content)
+        geo = json.loads(b''.join(resp.streaming_content))
         assert geo['type'] == 'FeatureCollection' and len(geo['features']) == 2
         f = next(f for f in geo['features'] if f['properties']['protocolo'] == publico['resolvido'].protocolo)
         assert f['geometry'] == {'type': 'Point', 'coordinates': [-46.6543, -23.1235]}
@@ -532,7 +553,7 @@ class TestDadosAbertos:
         hoje = timezone.localtime(timezone.now(), SP).date()
         resp = APIClient().get(f'/api/v1/dados-abertos/{MUN_PUBLICO}/chamados.geojson',
                                {'inicio': (hoje - timedelta(days=5)).isoformat()})
-        assert len(json.loads(resp.content)['features']) == 1
+        assert len(json.loads(b''.join(resp.streaming_content))['features']) == 1
         assert APIClient().get(f'/api/v1/dados-abertos/{MUN_PUBLICO}/chamados.geojson',
                                {'inicio': 'ontem'}).status_code == 400
         assert APIClient().get('/api/v1/dados-abertos/0000000/chamados.csv').status_code == 404

@@ -44,6 +44,23 @@ def _texto_csv(valor):
     if isinstance(valor, float):
         # Vírgula decimal: com `;` de separador o Excel pt-BR lê como número.
         return repr(valor).replace('.', ',')
+    if isinstance(valor, str):
+        return texto_seguro(valor)
+    return valor
+
+
+# Início que o Excel/LibreOffice interpreta como fórmula (ou DDE).
+_GATILHOS_FORMULA = ('=', '+', '-', '@', '\t', '\r')
+
+
+def texto_seguro(valor):
+    """
+    Neutraliza injeção de fórmula em CSV: rua, bairro e nome são texto livre
+    de quem usa o app, e o arquivo é feito para abrir direto no Excel. Um
+    apóstrofo na frente faz a planilha mostrar o texto em vez de avaliá-lo.
+    """
+    if isinstance(valor, str) and valor.startswith(_GATILHOS_FORMULA):
+        return "'" + valor
     return valor
 
 

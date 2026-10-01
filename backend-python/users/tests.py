@@ -297,6 +297,28 @@ class TestAdminUsers:
         assert resp.status_code == 200
         assert isinstance(resp.data, list)
 
+    def test_admin_municipal_ve_so_a_equipe(self, admin_client):
+        import uuid
+        from conftest import CIDADE_TESTES
+        from users.models import User
+        uid = uuid.uuid4().hex[:8]
+        morador = User.objects.create_user(f'morador-{uid}@example.com', 'Maria Morador Silva', 'Test@123456',
+                                           municipio_id=CIDADE_TESTES)
+        servidor = User.objects.create_user(f'servidor-{uid}@example.com', 'Sérgio Servidor', 'Test@123456',
+                                            papel='operador', municipio_id=CIDADE_TESTES)
+        de_fora = User.objects.create_user(f'fora-{uid}@example.com', 'Fora Daqui', 'Test@123456',
+                                           papel='operador', municipio_id='9999901')
+        ids = [u['id'] for u in admin_client.get(reverse(self.URL)).data]
+        assert str(servidor.id) in ids
+        assert str(morador.id) not in ids
+        # Busca por e-mail: cidadão vem com nome mascarado e sem cidade.
+        resp = admin_client.get(reverse(self.URL), {'email': morador.email.upper()})
+        (achado,) = [u for u in resp.data if u['id'] == str(morador.id)]
+        assert achado['nome'] == 'Maria S.' and achado['municipio'] is None
+        # Servidor de outra prefeitura não é encontrado.
+        resp = admin_client.get(reverse(self.URL), {'email': de_fora.email})
+        assert str(de_fora.id) not in [u['id'] for u in resp.data]
+
     def test_unauthenticated(self, client):
         resp = client.get(reverse(self.URL))
         assert resp.status_code == 401

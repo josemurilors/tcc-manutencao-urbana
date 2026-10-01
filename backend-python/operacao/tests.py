@@ -450,6 +450,16 @@ class TestGestao:
         assert gestor.post(_url('sla', d.id), {'prazo_sla_dias': 2}, format='json').status_code == 400
         assert gestor.post(_url('sla', d.id), {'prazo_sla_dias': 0, 'motivo': 'abc'}, format='json').status_code == 400
 
+    def test_sla_de_reaberto_conta_da_reabertura(self):
+        gestor, _ = _usuario('gestor')
+        d = _defeito(idade_dias=60, prazo_dias=5, reaberturas=1)
+        reaberto_em = timezone.now() - timedelta(hours=1)
+        DefeitoEvento.objects.create(defeito=d, tipo='reaberto', publico=True, criado_em=reaberto_em)
+        resp = gestor.post(_url('sla', d.id), {'prazo_sla_dias': 10, 'motivo': 'Ajuste'}, format='json')
+        assert resp.status_code == 200, resp.data
+        obj = Defeito.objects.get(id=d.id)
+        assert obj.prazo_em == reaberto_em + timedelta(days=10)
+
     def test_prioridade(self):
         gestor, _ = _usuario('gestor')
         d = _defeito()

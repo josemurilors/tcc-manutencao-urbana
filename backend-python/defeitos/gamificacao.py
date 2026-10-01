@@ -27,11 +27,22 @@ O ranking é por município e mede **contribuição naquela cidade** (chamados
 abertos lá + confirmações em chamados de lá); strikes são reputação global e
 ficam de fora — o chamado removido já deixou de pontuar.
 """
+import logging
 
+from django.conf import settings
+from django.core.cache import cache
+from django.db import connection
 from django.db.models import Count, F, Q
 
 from . import regras
 from .models import Apoio, Defeito
+
+logger = logging.getLogger(__name__)
+
+# O ranking agrega chamados e apoios da cidade (ou do país) inteira: a tela é
+# pública e muito aberta, então o resultado fica alguns minutos em cache.
+# `settings.CIU_RANKING_CACHE_S = 0` desliga (testes).
+RANKING_CACHE_S = 120
 
 XP_CHAMADO = 10
 XP_CONFIRMACAO = 6
@@ -182,3 +193,42 @@ def ranking_de(municipio_id=None, desde=None):
     for posicao, item in enumerate(itens, start=1):
         item['posicao'] = posicao
     return itens
+
+
+def ranking_em_cache(municipio_id, periodo, desde):
+    """`ranking_de` com cache de `RANKING_CACHE_S` por (município, período); fail-open."""
+    ttl = getattr(settings, 'CIU_RANKING_CACHE_S', RANKING_CACHE_S)
+    if not ttl:
+        return ranking_de(municipio_id=municipio_id, desde=desde)
+    banco = connection.settings_dict.get('NAME', '')
+    chave = f'ciu_ranking:{banco}:{municipio_id or "geral"}:{periodo}'
+    try:
+        guardado = cache.get(chave)
+    except Exception:
+        logger.warning('cache indisponível ao ler %s', chave, exc_info=True)
+        guardado = None
+    if guardado is not None:
+        return guardado
+    itens = ranking_de(municipio_id=municipio_id, desde=desde)
+    try:
+        cache.set(chave, itens, ttl)
+    except Exception:
+        logger.warning('cache indisponível ao gravar %s', chave, exc_info=True)
+    return itens
+
+
+def linha_publica(item, meu_id=None):
+    """
+    Linha do ranking para a rota pública: nome mascarado ('Maria S.') e sem o
+    id do usuário, como no resto da API. `eh_voce` marca a linha de quem
+    pergunta, e só ela leva `usuario_id` (é o próprio id de quem está logado).
+    """
+    from .serializers import mascarar_nome
+
+    eh_voce = meu_id is not None and item['usuario_id'] == meu_id
+    linha = {k: v for k, v in item.items() if k != 'usuario_id'}
+    linha['nome'] = mascarar_nome(item['nome'])
+    linha['eh_voce'] = eh_voce
+    if eh_voce:
+        linha['usuario_id'] = item['usuario_id']
+    return linha

@@ -9,6 +9,7 @@ gráfico de barras): nada de navegador nem de matplotlib na imagem.
 import io
 from calendar import monthrange
 from datetime import date
+from xml.sax.saxutils import escape
 
 from django.utils import timezone
 from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -201,14 +202,14 @@ def gerar_relatorio_mensal(base, ano, mes, municipio, filtros_texto=''):
         Spacer(1, 60 * mm),
         Paragraph('Relatório mensal de zeladoria urbana', e['capa_titulo']),
         Spacer(1, 8 * mm),
-        Paragraph(f'{nome_cidade}{" / " + uf if uf else ""}', e['capa_sub']),
+        Paragraph(escape(f'{nome_cidade}{" / " + uf if uf else ""}'), e['capa_sub']),
         Paragraph(titulo_mes, e['capa_sub']),
         Spacer(1, 30 * mm),
         Paragraph('Central de Inteligência Urbana', e['capa_info']),
         Paragraph(f'Gerado em {gerado}', e['capa_info']),
     ]
     if filtros_texto:
-        historia.append(Paragraph(f'Filtros aplicados: {filtros_texto}', e['capa_info']))
+        historia.append(Paragraph(f'Filtros aplicados: {escape(filtros_texto)}', e['capa_info']))
     historia.append(PageBreak())
 
     # Indicadores
@@ -237,7 +238,9 @@ def gerar_relatorio_mensal(base, ano, mes, municipio, filtros_texto=''):
     # Top categorias e bairros
     def linhas_dist(itens):
         return [
-            [Paragraph(i['rotulo'], e['texto']), _fmt(i['recebidos'], 'int'),
+            # O rótulo do bairro é texto livre do cidadão: Paragraph interpreta
+            # markup (tags inválidas derrubam o PDF; <img> busca recurso).
+            [Paragraph(escape(str(i['rotulo'])), e['texto']), _fmt(i['recebidos'], 'int'),
              _fmt(i['resolvidos'], 'int'), _fmt(i['abertos'], 'int'),
              _fmt(i['pct_no_prazo'], 'pct'), _fmt(i['lead_time_p50_h'], 'horas')]
             for i in itens

@@ -244,9 +244,65 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
         cidade, mas perdem o vínculo com a pessoa: a FK vira NULL e o e-mail
         gravado no chamado é apagado. Apoios, sinalizações, strikes e inscrições
         de push são removidos em cascata pelo próprio modelo.
+
+        A trilha de auditoria fica (é da prefeitura), mas sem o nome e o
+        e-mail da pessoa: `anonimizar_titular` troca esses campos em
+        `audit_log.dados` e nos convites. A própria exclusão é auditada só
+        com o id.
         """
-        user.defeitos_defeitos.update(usuario=None, usuario_email='')
-        user.delete()
+        from django.db import transaction
+
+        with transaction.atomic():
+            anonimizar_titular(user)
+            user.defeitos_defeitos.update(usuario=None, usuario_email='')
+            auditoria.registrar(None, 'conta.excluir', 'usuario', user.pk, municipio_id=user.municipio_id)
+            user.delete()
+
+
+CONTA_EXCLUIDA = '(conta excluída)'
+_CAMPOS_PESSOAIS = ('nome', 'email')
+
+
+def _sem_pessoais(valor, email):
+    """Cópia de `valor` (JSON) com nome/e-mail trocados pelo marcador."""
+    if isinstance(valor, dict):
+        return {
+            k: (CONTA_EXCLUIDA if k in _CAMPOS_PESSOAIS and v else _sem_pessoais(v, email))
+            for k, v in valor.items()
+        }
+    if isinstance(valor, list):
+        return [_sem_pessoais(v, email) for v in valor]
+    if isinstance(valor, str) and email and valor.strip().lower() == email:
+        return CONTA_EXCLUIDA
+    return valor
+
+
+def anonimizar_titular(user):
+    """
+    Tira nome e e-mail de `user` do que sobrevive à exclusão da conta:
+    convites (os pendentes para o e-mail somem; os aceitos ficam sem e-mail)
+    e `audit_log.dados` dos registros sobre a pessoa (membro.*, convite.*,
+    usuario.*) ou que citam o e-mail dela.
+    """
+    from gestao.models import AuditLog, Convite
+
+    email = (user.email or '').strip().lower()
+    convites = Convite.objects.filter(aceito_por=user)
+    if email:
+        convites = Convite.objects.filter(Q(aceito_por=user) | Q(email__iexact=email))
+    convite_ids = [str(i) for i in convites.values_list('pk', flat=True)]
+    convites.filter(aceito_em__isnull=True).delete()
+    convites.update(email='')
+
+    filtro = Q(alvo_tipo='usuario', alvo_id=str(user.pk)) | Q(usuario=user)
+    if convite_ids:
+        filtro |= Q(alvo_tipo='convite', alvo_id__in=convite_ids)
+    if email:
+        filtro |= Q(dados__email__iexact=email)
+    for log in AuditLog.objects.filter(filtro).only('id', 'dados'):
+        limpo = _sem_pessoais(log.dados or {}, email)
+        if limpo != log.dados:
+            AuditLog.objects.filter(pk=log.pk).update(dados=limpo)
 
 
 class ChangePasswordView(APIView):
@@ -471,15 +527,21 @@ class MeusDadosView(APIView):
     """
     Exportação dos dados pessoais do titular (LGPD, art. 18): perfil,
     chamados (inclusive os removidos, que continuam ligados à pessoa),
-    apoios, sinalizações, avaliações, strikes e notificações. Fica na
-    auditoria — é a resposta formal a um pedido de acesso.
+    apoios, sinalizações, avaliações, strikes, notificações, fotos que
+    enviou (com a posição GPS e o link da imagem), eventos de histórico de
+    sua autoria, aparelhos inscritos para push (sem o token), registros
+    técnicos da auditoria (ação, IP e horário) e convites para o seu e-mail.
+    Fica na auditoria — é a resposta formal a um pedido de acesso.
     """
     permission_classes = (permissions.IsAuthenticated,)
     throttle_classes = (throttles.MeusDados,)
 
     def get(self, request):
-        from defeitos.models import Apoio, Defeito, Sinalizacao, Strike
-        from notificacoes.models import Notificacao
+        from django.urls import reverse
+
+        from defeitos.models import Apoio, Defeito, DefeitoAnexo, DefeitoEvento, Sinalizacao, Strike
+        from gestao.models import AuditLog, Convite
+        from notificacoes.models import Notificacao, PushToken
 
         user = request.user
         chamados = list(
@@ -517,6 +579,41 @@ class MeusDadosView(APIView):
             )
         )
 
+        anexos = [
+            {**a, 'imagem_url': request.build_absolute_uri(reverse('operacao-anexo-imagem', args=[a['id']]))}
+            for a in DefeitoAnexo.objects.filter(autor=user).order_by('criado_em').values(
+                'id', 'defeito_id', 'defeito__protocolo', 'tipo', 'latitude', 'longitude', 'criado_em',
+            )
+        ]
+        eventos = list(
+            DefeitoEvento.objects.filter(autor=user).order_by('criado_em').values(
+                'defeito_id', 'defeito__protocolo', 'tipo', 'de_status', 'para_status',
+                'papel', 'publico', 'texto', 'criado_em',
+            )
+        )
+        # O token do aparelho é credencial de envio: fica fora do arquivo.
+        aparelhos = [
+            {'tipo': 'expo', 'plataforma': t['plataforma'], 'criado_em': t['criado_em'],
+             'ultimo_uso': t['ultimo_uso']}
+            for t in PushToken.objects.filter(usuario=user).order_by('criado_em').values(
+                'plataforma', 'criado_em', 'ultimo_uso',
+            )
+        ] + [
+            {'tipo': 'web', 'plataforma': 'navegador', 'criado_em': s['criado_em'], 'ultimo_uso': None}
+            for s in PushSubscription.objects.filter(usuario=user).order_by('criado_em').values('criado_em')
+        ]
+        # Sem `dados`: o que a pessoa fez sobre terceiros não é dado dela.
+        registros_tecnicos = list(
+            AuditLog.objects.filter(usuario=user).order_by('criado_em').values(
+                'acao', 'alvo_tipo', 'ip', 'criado_em',
+            )
+        )
+        convites = list(
+            Convite.objects.filter(email__iexact=user.email).order_by('criado_em').values(
+                'municipio_id', 'papel', 'criado_em', 'expira_em', 'aceito_em',
+            )
+        ) if user.email else []
+
         auditoria.registrar(request, 'lgpd.exportacao', 'usuario', user.pk)
         resposta = Response({
             'gerado_em': timezone.now(),
@@ -527,6 +624,11 @@ class MeusDadosView(APIView):
             'avaliacoes': avaliacoes,
             'strikes': strikes,
             'notificacoes': notificacoes,
+            'anexos': anexos,
+            'eventos': eventos,
+            'aparelhos_push': aparelhos,
+            'registros_tecnicos': registros_tecnicos,
+            'convites': convites,
         })
         resposta['Content-Disposition'] = 'attachment; filename="meus-dados-ciu.json"'
         return resposta
@@ -555,24 +657,29 @@ def _eh_super_admin(user):
 
 class AdminUsersView(APIView):
     """
-    Usuários que o admin da prefeitura gerencia: os do seu município (equipe
-    e cidadãos que moram lá). `?email=` acha uma pessoa específica para
-    trazer à equipe. O super admin vê todos. Nunca a base inteira para a
-    prefeitura (LGPD).
+    Usuários que o admin da prefeitura gerencia: a EQUIPE do seu município
+    (cidadãos não entram: a prefeitura não precisa do e-mail de quem só usa o
+    app — LGPD, necessidade). `?email=` acha um cidadão específico para
+    trazer à equipe, com o nome mascarado e sem a cidade dele; servidor de
+    outra prefeitura não aparece. O caminho preferido é o convite
+    (`gestao/convites/`), que não revela se a conta existe. O super admin vê
+    todos.
     """
     permission_classes = (permissions.IsAuthenticated, permissoes.EhAdminMunicipal)
 
     def get(self, request):
+        from defeitos.serializers import mascarar_nome
+
         user = request.user
         qs = User.objects.order_by('nome')
+        achado = None
         if permissoes.papel(user) != 'super_admin':
             if not user.municipio_id:
                 return Response({'error': 'Operador sem município vinculado'}, status=status.HTTP_403_FORBIDDEN)
-            filtro = Q(municipio_id=user.municipio_id)
+            qs = qs.filter(municipio_id=user.municipio_id).exclude(papel='cidadao')
             email = (request.query_params.get('email') or '').strip().lower()
             if email:
-                filtro |= Q(email__iexact=email)
-            qs = qs.filter(filtro)
+                achado = User.objects.filter(email__iexact=email, papel='cidadao').first()
         rows = list(qs.values_list('id', 'nome', 'email', 'papel', 'municipio_id'))
         mun_ids = list({str(r[4]) for r in rows if r[4]})
         municipios = {}
@@ -597,7 +704,10 @@ class AdminUsersView(APIView):
                 'municipio': municipios.get(str(r[4])) if r[4] else None,
             }
             for r in rows
-        ])
+        ] + ([{
+            'id': str(achado.pk), 'nome': mascarar_nome(achado.nome), 'email': achado.email,
+            'papel': 'cidadao', 'admin': False, 'super_admin': False, 'municipio': None,
+        }] if achado else []))
 
 
 class AdminToggleAdminView(APIView):

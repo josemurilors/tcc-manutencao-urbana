@@ -148,16 +148,18 @@ def recalcular_prazos(municipio_id, categoria, prazo_antigo, prazo_novo, autor):
 
     if not prazo_novo or prazo_antigo == prazo_novo:
         return 0
-    qs = (
+    qs = sla.anotar_ultima_reabertura(
         Defeito.objects.ativos()
         .filter(municipio_id=str(municipio_id), status__in=fluxo.STATUS_ABERTOS, prazo_sla_dias=prazo_antigo)
         .filter(Q(categoria_id=categoria.id) | Q(categoria_id__isnull=True, categoria__iexact=categoria.nome))
+        .defer('imagem_thumbnail', 'foto_resolucao', 'imagens_extra', 'atualizacoes')
     )
     total = 0
     for defeito in qs:
         prazo_em_antes = defeito.prazo_em
         defeito.prazo_sla_dias = prazo_novo
-        defeito.prazo_em = sla.calcular_prazo(defeito.criado_em, prazo_novo)
+        # Chamado reaberto conta da reabertura, como em `fluxo.transicionar`.
+        defeito.prazo_em = sla.calcular_prazo(sla.base_do_prazo(defeito), prazo_novo)
         defeito.save(update_fields=['prazo_sla_dias', 'prazo_em'])
         fluxo.registrar_evento(
             defeito, 'sla', autor, publico=False,

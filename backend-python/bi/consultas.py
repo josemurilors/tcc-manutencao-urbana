@@ -238,6 +238,25 @@ def _executar(sql, params):
         return [dict(zip(colunas, linha)) for linha in cur.fetchall()]
 
 
+def _iterar(sql, params, lote=2000):
+    """
+    Como `_executar`, mas em lotes por cursor do lado do servidor: a
+    exportação de dados abertos (até 100 mil linhas) não fica inteira na
+    memória do worker antes do primeiro byte sair.
+    """
+    with connection.chunked_cursor() as cur:
+        cur.execute(sql, params)
+        colunas = None
+        while True:
+            linhas = cur.fetchmany(lote)
+            if not linhas:
+                break
+            if colunas is None:
+                colunas = [c[0] for c in cur.description]
+            for linha in linhas:
+                yield dict(zip(colunas, linha))
+
+
 def _r(valor, casas=1):
     return None if valor is None else round(float(valor), casas)
 
@@ -587,7 +606,13 @@ def produtividade(escopo):
     concluídos no período, mediana do lead time e chamados abertos hoje sob
     sua responsabilidade.
     """
-    filtro_equipe = 'AND u.equipe_id = %(equipe_id)s' if escopo.equipe_id is not None else ''
+    # 'nenhum' (drill-down de distribuicao?dimensao=equipe) = servidores sem equipe.
+    if escopo.equipe_id == SEM:
+        filtro_equipe = 'AND u.equipe_id IS NULL'
+    elif escopo.equipe_id is not None:
+        filtro_equipe = 'AND u.equipe_id = %(equipe_id)s'
+    else:
+        filtro_equipe = ''
     sql = f"""
     WITH {_cte_base(escopo)}
     SELECT u.id AS usuario_id, u.nome, MIN(e.nome) AS equipe_nome,
@@ -821,7 +846,7 @@ def chamados_publicos(municipio_id, *, inicio=None, fim=None, protocolos=None,
      ORDER BY d.criado_em DESC
      {limite_sql}
     """
-    for linha in _executar(sql, params):
+    for linha in _iterar(sql, params):
         aberto = linha['status'] in STATUS_ABERTOS
         resolvido_em = linha['resolvido_em'] if linha['status'] == 'concluido' else None
         no_prazo = None
