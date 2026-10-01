@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import timedelta
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -13,6 +14,7 @@ from core import auditoria, permissoes
 from .models import Defeito, Apoio, Sinalizacao, DefeitoAnexo, DefeitoEvento
 from . import fluxo, gamificacao, regras, sla
 from .fluxo import TransicaoInvalida, TransicaoNaoPermitida
+from users import throttles
 from .serializers import (
     municipio_do_ponto,
     DefeitoListSerializer, DefeitoDetailSerializer, DefeitoEventoSerializer,
@@ -30,6 +32,72 @@ def _negado(user):
         {'error': FORA_DO_MUNICIPIO if permissoes.eh_equipe(user) else 'Permissao negada'},
         status=status.HTTP_403_FORBIDDEN,
     )
+
+
+def _suspenso(user):
+    """
+    403 com explicação se o usuário está suspenso pela moderação
+    (`users.suspenso_ate` no futuro); None se pode participar. Suspenso
+    continua vendo e acompanhando os chamados — só não reporta, apoia,
+    sinaliza, anexa, avalia nem reabre.
+    """
+    ate = getattr(user, 'suspenso_ate', None)
+    if not ate or ate <= timezone.now():
+        return None
+    quando = timezone.localtime(ate).strftime('%d/%m/%Y às %H:%M')
+    return Response(
+        {
+            'detail': (
+                f'Sua conta está suspensa até {quando} por descumprir as regras de uso. '
+                'Até lá você pode acompanhar os chamados, mas não pode reportar, apoiar '
+                'nem sinalizar problemas.'
+            ),
+            'codigo': 'conta_suspensa',
+            'suspenso_ate': ate,
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+# Upload de foto: teto de tamanho e só imagem. O teto vem antes do Pillow
+# abrir o arquivo — sem ele qualquer um manda centenas de MB para o servidor
+# decodificar.
+MAX_IMAGEM_BYTES = 8 * 1024 * 1024
+# Alguns clientes (web, apps antigos) mandam a foto sem tipo; o Pillow decide.
+TIPOS_GENERICOS = ('', 'application/octet-stream')
+
+
+def _ler_imagem(arquivo):
+    """(bytes, None) se `arquivo` é uma imagem aceitável; (None, Response 400) se não."""
+    if arquivo.size is not None and arquivo.size > MAX_IMAGEM_BYTES:
+        return None, Response(
+            {'error': f'A foto passa de {MAX_IMAGEM_BYTES // (1024 * 1024)} MB. Tire outra ou reduza a resolução.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    tipo = (getattr(arquivo, 'content_type', '') or '').lower()
+    if not tipo.startswith('image/') and tipo not in TIPOS_GENERICOS:
+        return None, Response(
+            {'error': 'O arquivo enviado não é uma imagem.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return arquivo.read(), None
+
+
+def _processar(arquivo):
+    """`process_image` do upload validado: (resultado, None) ou (None, Response 400)."""
+    from services.image_processor import process_image
+    dados, erro = _ler_imagem(arquivo)
+    if erro is not None:
+        return None, erro
+    try:
+        return process_image(dados), None
+    except Exception:
+        # Pillow levanta vários tipos (UnidentifiedImageError, OSError,
+        # DecompressionBombError); para o cliente é tudo "não é uma foto".
+        return None, Response(
+            {'error': 'Não foi possível ler a imagem. Envie uma foto JPG, PNG ou WEBP.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 def _municipio_por_codigo(codigo):
@@ -51,6 +119,22 @@ SEM_MUNICIPIO = 'Operador sem município vinculado'
 AREA_GRADE = 8
 AREA_POR_CELULA = 4
 AREA_LIMITE = 400
+AREA_SITUACOES = ('abertos', 'resolvidos', 'todos')
+# Resolvidos no mapa: só os recentes, para mostrar entrega sem poluir.
+AREA_RESOLVIDOS_DIAS = 90
+
+# "Já reportaram aqui?" (`proximos`): raio padrão quando a prefeitura não
+# configurou `raio_duplicado_m`, teto do ?raio= e janela dos resolvidos.
+PROXIMOS_RAIO_PADRAO_M = 30
+PROXIMOS_RAIO_MAX_M = 500
+PROXIMOS_RESOLVIDOS_DIAS = 30
+PROXIMOS_LIMITE = 50
+
+# Avaliação do atendimento pelo autor (CSAT).
+AVALIACAO_EDITAVEL_DIAS = 7
+AVALIACAO_COMENTARIO_MAX = 1000
+# Reabertura exige um motivo de verdade, não um clique por engano.
+REABERTURA_MOTIVO_MIN = 5
 
 # Fotos extras por chamado (anexar): cada uma vai inteira em `defeito_anexos`
 # e a miniatura em `imagens_extra`; sem teto, a linha incharia sem limite.
@@ -127,11 +211,24 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         if self.action in ('create', 'apoiar', 'meus', 'apoiados', 'apoiei', 'atender', 'status',
                            'sinalizar', 'sinalizei', 'progresso',
                            'batch_status', 'ordem_servico', 'operacao',
-                           'update', 'partial_update', 'destroy', 'anexar'):
+                           'update', 'partial_update', 'destroy', 'anexar',
+                           'avaliar', 'reabrir', 'imagem'):
             return (permissions.IsAuthenticated(),)
         return (permissions.AllowAny(),)
 
+    def get_throttles(self):
+        # Só as ações que geram custo (processar foto, abrir chamado) têm teto
+        # por usuário; leitura e mapa ficam livres.
+        if self.action == 'create':
+            return (throttles.CriarChamado(),)
+        if self.action == 'imagem':
+            return (throttles.Imagem(),)
+        return super().get_throttles()
+
     def create(self, request, *args, **kwargs):
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
         # Chamado só com foto do local, tirada na hora (o app abre a câmera;
         # galeria não entra). Sem imagem não há como a prefeitura triar.
         if 'imagem' not in request.FILES:
@@ -139,6 +236,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 {'imagem': 'Tire uma foto do problema para abrir o chamado.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        self._imagem, erro = _processar(request.FILES['imagem'])
+        if erro is not None:
+            return erro
         # Ninguém reporta em dois lugares que não daria tempo de percorrer.
         try:
             lat = float(request.data.get('latitude', ''))
@@ -163,11 +263,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             raise
 
     def perform_create(self, serializer):
-        webp = None
-        if 'imagem' in self.request.FILES:
-            from services.image_processor import process_image
-            result = process_image(self.request.FILES['imagem'].read())
-            webp = result['webp_bytes']
+        # Já validada e processada em `create`.
+        processada = getattr(self, '_imagem', None)
+        webp = processada['webp_bytes'] if processada else None
 
         # Em qual cidade o ponto caiu — gravado no chamado, não no usuário. É
         # a cidade que decide o roteamento (a prefeitura pode ter regra própria).
@@ -198,6 +296,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def apoiar(self, request, pk=None):
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
         defeito = self.get_object()
         apoio, created = Apoio.objects.get_or_create(
             usuario=request.user, defeito=defeito,
@@ -220,6 +321,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         fecha (`resultado: 'concluido'`, vem o `defeito` atualizado) ou some
         (`resultado: 'inexistente'`, o chamado já não existe mais).
         """
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
         defeito = self.get_object()
         tipo = request.data.get('tipo')
         if tipo not in dict(Sinalizacao.TIPO_CHOICES):
@@ -295,14 +399,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         foto = None
         arquivo = request.FILES.get('foto_resolucao')
         if arquivo is not None:
-            from services.image_processor import process_image
-            try:
-                foto = process_image(arquivo.read())['webp_bytes']
-            except Exception:
-                return Response(
-                    {'error': 'Imagem de resolucao invalida'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            processada, erro = _processar(arquivo)
+            if erro is not None:
+                return erro
+            foto = processada['webp_bytes']
         try:
             with transaction.atomic():
                 fluxo.transicionar(
@@ -464,6 +564,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         Foto extra: do autor (`cidadao`) ou da equipe do município (`antes`/
         `depois`, via `tipo`). Terceiros não anexam em chamado alheio.
         """
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
         defeito = self.get_object()
         user = request.user
         if permissoes.pode_operar(user, defeito):
@@ -480,11 +583,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 {'error': f'Limite de {MAX_ANEXOS} fotos por chamado atingido.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        from services.image_processor import process_image
-        try:
-            result = process_image(file.read())
-        except Exception:
-            return Response({'error': 'Imagem invalida'}, status=status.HTTP_400_BAD_REQUEST)
+        result, erro = _processar(file)
+        if erro is not None:
+            return erro
         extras = json.loads(defeito.imagens_extra or '[]')
         b64 = base64.b64encode(result['thumbnail_bytes']).decode('ascii')
         extras.append(f'data:image/webp;base64,{b64}')
@@ -565,19 +666,26 @@ class DefeitoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
     def area(self, request):
         """
-        Chamados abertos dentro do retângulo visível do mapa
+        Chamados dentro do retângulo visível do mapa
         (?min_lat=&max_lat=&min_lng=&max_lng=), rareados conforme o zoom.
 
-        O retângulo é dividido numa grade de ~`AREA_GRADE` células por lado e
-        cada célula devolve no máximo `AREA_POR_CELULA` chamados (os mais
-        apoiados/urgentes primeiro): com zoom de rua sai tudo; afastando, cada
-        célula cobre mais chão e o total visível fica estável. A célula é uma
-        potência de 2 em graus, alinhada ao globo — arrastar o mapa no mesmo
-        zoom não embaralha quais pinos aparecem.
+        `situacao=abertos|resolvidos|todos` (padrão abertos): resolvidos são
+        os concluídos há até `AREA_RESOLVIDOS_DIAS` dias, contados por
+        `resolvido_em` — o mapa mostra o que a prefeitura entregou, não o
+        histórico inteiro. Rejeitados nunca aparecem. `categorias=1,4,7`
+        filtra por `categoria_id`.
 
-        `celulas` traz a contagem real de cada célula (centro de massa), para
-        o mapa de calor não perder a densidade que o corte escondeu.
-        ?lat=&lng= (posição do usuário) libera os restritos que estão perto.
+        O retângulo é dividido numa grade de ~`AREA_GRADE` células por lado e
+        cada célula devolve no máximo `AREA_POR_CELULA` chamados (abertos antes
+        de resolvidos, depois os mais apoiados/urgentes): com zoom de rua sai
+        tudo; afastando, cada célula cobre mais chão e o total visível fica
+        estável. A célula é uma potência de 2 em graus, alinhada ao globo —
+        arrastar o mapa no mesmo zoom não embaralha quais pinos aparecem.
+
+        `celulas` (para todos, logado ou não) traz a contagem real de cada
+        célula (centro de massa), para o mapa de calor não perder a densidade
+        que o corte escondeu. ?lat=&lng= (posição do usuário) libera os
+        restritos que estão perto.
         """
         import math
         from django.db import connection
@@ -596,6 +704,16 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             lng = float(request.query_params['lng'])
         except (KeyError, ValueError):
             lat = lng = None
+        situacao = request.query_params.get('situacao') or 'abertos'
+        if situacao not in AREA_SITUACOES:
+            return Response(
+                {'detail': 'situacao deve ser abertos, resolvidos ou todos.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        categorias, erro = _ids_inteiros(request.query_params.get('categorias'))
+        if erro:
+            return Response({'detail': 'categorias deve ser uma lista de ids: 1,2,3.'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         vao = max(max_lat - min_lat, max_lng - min_lng, 1e-6)
         celula = 2 ** round(math.log2(vao / AREA_GRADE))
@@ -605,17 +723,30 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             'min_lat': min_lat, 'max_lat': max_lat, 'min_lng': min_lng, 'max_lng': max_lng,
             'celula': celula, 'por_celula': AREA_POR_CELULA, 'limite': AREA_LIMITE,
             'fechados': tuple(STATUS_FECHADOS),
+            'resolvidos_desde': timezone.now() - timedelta(days=AREA_RESOLVIDOS_DIAS),
+            'categorias': categorias,
             'admin': permissoes.eh_equipe(user),
             'uid': str(user.id) if autenticado else None,
             'lat': lat, 'lng': lng, 'raio': regras.RAIO_VISIBILIDADE_RESTRITA_M,
         }
-        base = """
-            SELECT d.id, d.latitude, d.longitude, d.criado_em, d.prioridade,
+        abertos = 'd.status NOT IN %(fechados)s'
+        resolvidos = "(d.status = 'concluido' AND d.resolvido_em >= %(resolvidos_desde)s)"
+        filtro_situacao = {
+            'abertos': abertos,
+            'resolvidos': resolvidos,
+            'todos': f'({abertos} OR {resolvidos})',
+        }[situacao]
+        filtro_categoria = 'AND d.categoria_id = ANY(%(categorias)s)' if categorias else ''
+        base = f"""
+            SELECT d.id, d.latitude, d.longitude, d.prioridade,
+                   (d.status = 'concluido') AS resolvido,
+                   CASE WHEN d.status = 'concluido' THEN d.resolvido_em ELSE d.criado_em END AS data_ref,
                    floor(d.latitude / %(celula)s) AS cy, floor(d.longitude / %(celula)s) AS cx
             FROM defeitos d
             WHERE d.latitude BETWEEN %(min_lat)s AND %(max_lat)s
               AND d.longitude BETWEEN %(min_lng)s AND %(max_lng)s
-              AND d.status NOT IN %(fechados)s
+              AND {filtro_situacao}
+              {filtro_categoria}
               AND d.removido_em IS NULL
               AND (d.visibilidade = 'publica' OR %(admin)s OR d.usuario = %(uid)s::uuid
                    OR (%(lat)s::float8 IS NOT NULL AND ST_DWithin(
@@ -627,10 +758,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 SELECT id FROM (
                     SELECT b.id, row_number() OVER (
                         PARTITION BY b.cy, b.cx
-                        ORDER BY coalesce(a.total, 0) DESC,
+                        ORDER BY b.resolvido, coalesce(a.total, 0) DESC,
                                  CASE b.prioridade WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1
                                                    WHEN 'media' THEN 2 ELSE 3 END,
-                                 b.criado_em DESC, b.id
+                                 b.data_ref DESC, b.id
                     ) AS rn
                     FROM ({base}) b
                     LEFT JOIN (SELECT defeito_id, count(*) AS total FROM apoios GROUP BY 1) a
@@ -647,11 +778,215 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
         defeitos = self.queryset.defer('imagem_thumbnail', 'foto_resolucao').filter(id__in=ids)
         return Response({
+            'situacao': situacao,
             'celula_graus': celula,
             'total': sum(c['total'] for c in celulas),
             'celulas': celulas,
             'defeitos': self._lista(defeitos),
         })
+
+    @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
+    def proximos(self, request):
+        """
+        O que já foi reportado perto de um ponto (?lat=&lng=), do mais perto ao
+        mais longe — o app mostra antes de abrir um chamado novo, para o
+        cidadão apoiar o existente em vez de duplicar. Entram os abertos no
+        raio e os resolvidos há até `PROXIMOS_RESOLVIDOS_DIAS` dias ("isso já
+        foi consertado"). Raio: ?raio= (até `PROXIMOS_RAIO_MAX_M`), senão o
+        `raio_duplicado_m` da prefeitura do ponto, senão `PROXIMOS_RAIO_PADRAO_M`.
+        ?categoria= aceita o id ou o nome.
+        """
+        from django.db import connection
+        from gestao.models import MunicipioConfig
+        try:
+            lat = float(request.query_params.get('lat', ''))
+            lng = float(request.query_params.get('lng', ''))
+        except ValueError:
+            return Response({'detail': 'Informe lat e lng.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raio = None
+        if request.query_params.get('raio'):
+            try:
+                raio = float(request.query_params['raio'])
+            except ValueError:
+                return Response({'detail': 'raio deve ser um número em metros.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        if raio is None:
+            raio = PROXIMOS_RAIO_PADRAO_M
+            municipio = municipio_do_ponto(lat, lng)
+            if municipio:
+                configurado = (
+                    MunicipioConfig.objects.filter(municipio_id=municipio['codigo'])
+                    .values_list('raio_duplicado_m', flat=True).first()
+                )
+                if configurado:
+                    raio = configurado
+        raio = min(max(raio, 1), PROXIMOS_RAIO_MAX_M)
+
+        params = {
+            'lat': lat, 'lng': lng, 'raio': raio,
+            'abertos': tuple(fluxo.STATUS_ABERTOS),
+            'resolvidos_desde': timezone.now() - timedelta(days=PROXIMOS_RESOLVIDOS_DIAS),
+            'limite': PROXIMOS_LIMITE,
+        }
+        filtro_categoria = ''
+        categoria = (request.query_params.get('categoria') or '').strip()
+        if categoria.isdigit():
+            filtro_categoria = 'AND d.categoria_id = %(categoria_id)s'
+            params['categoria_id'] = int(categoria)
+        elif categoria:
+            filtro_categoria = 'AND lower(d.categoria) = lower(%(categoria)s)'
+            params['categoria'] = categoria
+        # O raio nunca passa de `RAIO_VISIBILIDADE_RESTRITA_M`, então os
+        # restritos que aparecem aqui são justamente os que quem está no
+        # ponto já poderia ver (ver `regras.visivel_para`).
+        with connection.cursor() as cur:
+            cur.execute(f"""
+                SELECT d.id, d.protocolo, d.titulo, d.categoria, d.categoria_id, d.status,
+                       d.latitude, d.longitude, d.criado_em, d.resolvido_em,
+                       ST_Distance(ST_MakePoint(d.longitude, d.latitude)::geography,
+                                   ST_MakePoint(%(lng)s, %(lat)s)::geography) AS distancia,
+                       (SELECT count(*) FROM apoios a WHERE a.defeito_id = d.id) AS apoios
+                FROM defeitos d
+                WHERE d.removido_em IS NULL
+                  AND d.latitude IS NOT NULL AND d.longitude IS NOT NULL
+                  AND ST_DWithin(ST_MakePoint(d.longitude, d.latitude)::geography,
+                                 ST_MakePoint(%(lng)s, %(lat)s)::geography, %(raio)s)
+                  AND (d.status IN %(abertos)s
+                       OR (d.status = 'concluido' AND d.resolvido_em >= %(resolvidos_desde)s))
+                  {filtro_categoria}
+                ORDER BY distancia, d.criado_em DESC
+                LIMIT %(limite)s
+            """, params)
+            linhas = cur.fetchall()
+        return Response([
+            {
+                'id': str(r[0]), 'protocolo': r[1], 'titulo': r[2], 'categoria': r[3],
+                'categoria_id': r[4], 'status': r[5],
+                'status_rotulo': fluxo.ROTULOS_CIDADAO.get(r[5], r[5]),
+                'latitude': r[6], 'longitude': r[7],
+                'criado_em': r[8], 'resolvido_em': r[9],
+                'distancia_m': round(r[10], 1), 'total_apoios': r[11],
+            }
+            for r in linhas
+        ])
+
+    @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,),
+            url_path=r'protocolo/(?P<numero>[^/]+)', url_name='protocolo')
+    def por_protocolo(self, request, numero=None):
+        """
+        Consulta pública pelo número de protocolo (`AAAA-NNNNNN`), como nas
+        centrais 156: quem tem o número acompanha o chamado sem login.
+        Restritos (autor em quarentena) só para o autor e a equipe.
+        """
+        numero = (numero or '').strip().upper()
+        defeito = self.queryset.filter(protocolo=numero).first()
+        if defeito is None or not regras.visivel_para(defeito, request.user):
+            return Response({'detail': 'Nenhum chamado encontrado com este protocolo.'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(self._detalhe(defeito))
+
+    @action(detail=True, methods=['post'])
+    def avaliar(self, request, pk=None):
+        """
+        O autor avalia o atendimento de um chamado resolvido: `nota` de 1 a 5
+        e `comentario` opcional. Pode corrigir por `AVALIACAO_EDITAVEL_DIAS`
+        dias depois da primeira avaliação; se o chamado for reaberto e
+        resolvido de novo, vale uma avaliação nova. Alimenta o CSAT do BI.
+        """
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
+        defeito = self.get_object()
+        if defeito.usuario_id != request.user.id:
+            return Response({'detail': 'Só quem abriu o chamado pode avaliar o atendimento.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if defeito.status != 'concluido':
+            return Response({'detail': 'Você poderá avaliar quando o chamado for resolvido.'},
+                            status=status.HTTP_409_CONFLICT)
+        nota = _inteiro_estrito(request.data.get('nota'))
+        if nota not in range(1, 6):
+            return Response({'detail': 'Dê uma nota de 1 a 5.'}, status=status.HTTP_400_BAD_REQUEST)
+        comentario = str(request.data.get('comentario') or '').strip()
+        if len(comentario) > AVALIACAO_COMENTARIO_MAX:
+            return Response(
+                {'detail': f'O comentário pode ter até {AVALIACAO_COMENTARIO_MAX} caracteres.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        agora = timezone.now()
+        # Primeira avaliação deste ciclo de resolução (depois de `resolvido_em`).
+        primeira = (
+            DefeitoEvento.objects.filter(defeito=defeito, tipo='avaliacao')
+            .filter(criado_em__gte=defeito.resolvido_em or defeito.criado_em)
+            .order_by('criado_em').values_list('criado_em', flat=True).first()
+        )
+        edicao = primeira is not None
+        if edicao and agora - primeira > timedelta(days=AVALIACAO_EDITAVEL_DIAS):
+            return Response(
+                {'detail': f'A avaliação só pode ser alterada até {AVALIACAO_EDITAVEL_DIAS} dias depois de feita.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        with transaction.atomic():
+            defeito.avaliacao_nota = nota
+            defeito.avaliacao_comentario = comentario
+            defeito.avaliado_em = agora
+            defeito.save(update_fields=['avaliacao_nota', 'avaliacao_comentario', 'avaliado_em'])
+            fluxo.registrar_evento(
+                defeito, 'avaliacao', request.user, texto=comentario,
+                dados={'nota': nota, 'edicao': edicao},
+            )
+        return Response(self._detalhe(self.queryset.get(pk=defeito.pk)))
+
+    @action(detail=True, methods=['post'])
+    def reabrir(self, request, pk=None):
+        """
+        Reabre um chamado fechado com um `motivo` ("o buraco voltou"). O autor
+        reabre o próprio chamado resolvido até `fluxo.REABERTURA_AUTOR_DIAS`
+        dias depois da solução; a gestão (gestor+) do município reabre
+        qualquer fechado, inclusive rejeitado. Conta em `reaberturas`.
+        """
+        suspenso = _suspenso(request.user)
+        if suspenso is not None:
+            return suspenso
+        defeito = self.get_object()
+        user = request.user
+        motivo = str(request.data.get('motivo') or '').strip()
+        if len(motivo) < REABERTURA_MOTIVO_MIN:
+            return Response(
+                {'detail': 'Conte em poucas palavras por que o problema continua (motivo obrigatório).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if defeito.status not in STATUS_FECHADOS:
+            return Response({'detail': 'Este chamado ainda está aberto.'}, status=status.HTTP_409_CONFLICT)
+
+        gestao = permissoes.pode_operar(user, defeito) and permissoes.nivel(user) >= permissoes.NIVEIS['gestor']
+        if not gestao:
+            if defeito.usuario_id != user.id:
+                return Response(
+                    {'detail': 'Só quem abriu o chamado ou a gestão da prefeitura pode reabri-lo.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if defeito.status == 'rejeitado':
+                return Response(
+                    {'detail': 'Chamado marcado como "não procede" só pode ser reaberto pela prefeitura. '
+                               'Se o problema existe, abra um novo chamado.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            resolvido = defeito.resolvido_em or defeito.fechado_em
+            if resolvido and timezone.now() - resolvido > timedelta(days=fluxo.REABERTURA_AUTOR_DIAS):
+                return Response(
+                    {'detail': f'O prazo para reabrir ({fluxo.REABERTURA_AUTOR_DIAS} dias após a solução) '
+                               'terminou. Abra um novo chamado.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        try:
+            fluxo.transicionar(defeito, 'pendente', user, texto=motivo, dados={'motivo': motivo})
+        except TransicaoNaoPermitida as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TransicaoInvalida as e:
+            return Response({'detail': str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response(self._detalhe(self.queryset.get(pk=defeito.pk)))
 
     @action(detail=False, methods=['get'])
     def progresso(self, request):
@@ -779,18 +1114,47 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def imagem(self, request):
-        from services.image_processor import process_image
+        """
+        Processa uma foto avulsa (desfoque de privacidade + WEBP). Só para
+        quem está logado, com teto de tamanho e de frequência: aberta, era
+        CPU de graça para qualquer um na internet.
+        """
         file = request.FILES.get('file')
         if not file:
             return Response(
                 {'error': 'No file provided'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        result = process_image(file.read())
+        result, erro = _processar(file)
+        if erro is not None:
+            return erro
         return Response({
             'image': result['webp_bytes'].hex(),
             'thumbnail': result['thumbnail_bytes'].hex(),
         })
+
+
+def _inteiro_estrito(valor):
+    """5, '5' ou 5.0 -> 5; 3.5, '3.5', True, None ou lixo -> None (sem arredondar nota)."""
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, float):
+        return int(valor) if valor.is_integer() else None
+    if isinstance(valor, str) and valor.strip().isdigit():
+        return int(valor.strip())
+    return None
+
+
+def _ids_inteiros(texto):
+    """'1, 4,7' -> ([1, 4, 7], False); vazio -> ([], False); lixo -> ([], True)."""
+    if not texto:
+        return [], False
+    try:
+        return [int(p) for p in texto.split(',') if p.strip()], False
+    except ValueError:
+        return [], True
 
 
 def _float_ou_none(valor):

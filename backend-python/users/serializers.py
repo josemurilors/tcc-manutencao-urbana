@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 from .models import User
 from services.cpf_validator import validar_digitos
@@ -9,10 +10,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True, min_length=6)
     cpf = serializers.CharField(write_only=True, required=False, allow_blank=True)
     municipio_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # Aceite dos Termos de Uso e da Política de Privacidade (LGPD) já no
+    # cadastro; quem cadastrou antes aceita depois por `auth/aceite-termos/`.
+    aceite_termos = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = User
-        fields = ('email', 'nome', 'password', 'confirm_password', 'cpf', 'municipio_id')
+        fields = ('email', 'nome', 'password', 'confirm_password', 'cpf', 'municipio_id', 'aceite_termos')
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -38,7 +42,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password')
         cpf = validated_data.pop('cpf', '')
         municipio_id = validated_data.pop('municipio_id', '')
+        aceite = validated_data.pop('aceite_termos', False)
         user = User(**validated_data)
+        if aceite:
+            user.aceite_termos_em = timezone.now()
         user.set_password(password)
         if cpf:
             user.cpf = encrypt_text(cpf)
@@ -67,6 +74,9 @@ class UserSerializer(serializers.ModelSerializer):
     Perfil do próprio usuário. Só `nome` é editável: e-mail exige nova
     verificação, CPF passa por cifra + hash (cadastro), e município/papel
     têm endpoints próprios com regra de quem pode mudar o quê.
+
+    `suspenso_ate` (moderação) vem para o app avisar antes de a pessoa tentar
+    reportar; `aceite_termos_em` nulo faz o app pedir o aceite (LGPD).
     """
     cpf = serializers.SerializerMethodField()
     super_admin = serializers.SerializerMethodField()
@@ -76,10 +86,11 @@ class UserSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'email', 'nome', 'cpf', 'admin', 'papel', 'super_admin', 'municipio_id',
             'secretaria_id', 'equipe_id', 'email_verified', 'criado_em',
+            'aceite_termos_em', 'suspenso_ate',
         )
         read_only_fields = (
             'id', 'email', 'admin', 'papel', 'municipio_id', 'secretaria_id', 'equipe_id',
-            'email_verified', 'criado_em',
+            'email_verified', 'criado_em', 'aceite_termos_em', 'suspenso_ate',
         )
 
     def get_cpf(self, obj):

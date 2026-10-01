@@ -283,9 +283,49 @@ Detalhes da implementação (`backend-python/operacao/`):
 | GET `<id>/eventos/` | — | `[{id, tipo, de_status, para_status, papel, texto, publico, criado_em}]` (internos só equipe) |
 | POST `<id>/avaliar/` | `{nota: 1..5, comentario?}` (autor; só `concluido`; editável por 7 dias) | detalhe |
 | POST `<id>/reabrir/` | `{motivo}` (autor até 30 dias após `resolvido_em`, ou gestor+) | detalhe |
-| GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios}]` (abertos no raio + fechados há ≤30 dias) |
+| GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios}]` (abertos no raio + resolvidos há ≤30 dias) |
 | GET `protocolo/<protocolo>/` (público) | — | detalhe público |
 | GET `area/` | + `situacao=abertos\|resolvidos\|todos` (padrão abertos), `categorias=<ids>` | como hoje, com `celulas` para todos os usuários |
+
+Detalhes de 7.2 (implementação):
+
+- `avaliar`: nota inteira 1–5 (3.5 é 400), `comentario` até 1000 caracteres.
+  403 para quem não é o autor, 409 se o chamado não está `concluido` ou se a
+  janela de edição (7 dias desde a 1ª avaliação **deste ciclo** de resolução)
+  fechou; reaberto e resolvido de novo, vale avaliação nova. Grava
+  `avaliacao_nota/_comentario/avaliado_em` e evento `avaliacao` público
+  (`texto` = comentário, `dados = {nota, edicao}`). Gamificação:
+  `XP_AVALIACAO` (5) uma vez por chamado avaliado; `progresso` e as linhas do
+  ranking ganham `avaliacoes`.
+- `reabrir`: `motivo` com ≥5 caracteres (400). 409 se o chamado está aberto.
+  Sem papel de gestão: 403 para terceiros, para o autor de chamado
+  `rejeitado` e depois de `fluxo.REABERTURA_AUTOR_DIAS`. Passa por
+  `fluxo.transicionar(…, 'pendente', texto=motivo)` (evento `reaberto`,
+  `reaberturas += 1`).
+- `proximos`: raio = `?raio=` (1–500 m), senão `municipio_config.raio_duplicado_m`
+  do município do ponto, senão 30 m. **Desvio:** entram os abertos e só os
+  `concluido` com `resolvido_em` ≤30 dias (rejeitados não ajudam quem vai
+  reportar). `categoria` aceita id (`categoria_id`) ou nome (sem caixa). Ordem
+  por distância, até 50 itens; cada item traz também `categoria_id`,
+  `status_rotulo`, `latitude`, `longitude`.
+- `protocolo/<protocolo>/`: sem diferenciar caixa; 404 para removido ou
+  restrito que o visitante não pode ver (`regras.visivel_para`). Nome da rota:
+  `defeitos-protocolo`.
+- `area`: `resolvidos` = `concluido` com `resolvido_em` nos últimos 90 dias
+  (`AREA_RESOLVIDOS_DIAS`); `todos` = abertos + esses resolvidos; rejeitados
+  nunca. Na célula, abertos vêm antes dos resolvidos e a data de desempate é
+  `resolvido_em` para resolvidos. `categorias=1,4` filtra por `categoria_id`
+  (lixo → 400). A resposta ecoa `situacao`.
+- Conta suspensa (`users.suspenso_ate` no futuro): criar, apoiar, sinalizar,
+  anexar, avaliar e reabrir devolvem 403
+  `{detail, codigo: 'conta_suspensa', suspenso_ate}`; ver e acompanhar segue
+  liberado.
+- Upload de foto (criar, `anexar`, `status` com `foto_resolucao`, `imagem`):
+  até 8 MB, `Content-Type` `image/*` (ou vazio/`octet-stream`, que o Pillow
+  decide); fora disso, 400 com mensagem. `imagem/` agora exige login.
+- Limites (429, `users/throttles.py`, sobreponíveis por
+  `settings.CIU_THROTTLE_TAXAS`): criar chamado 30/h por usuário, `imagem`
+  30/h por usuário; ver 7.7 para as rotas de conta.
 
 ### 7.3 Notificações — `api/v1/notificacoes/` (autenticado)
 
@@ -479,3 +519,23 @@ POST `senha/esqueci/` `{email}` (resposta sempre 200), POST `senha/redefinir/`
 `{email, codigo, nova_senha}`, POST `aceite-termos/`, GET `meus-dados/`
 (exportação JSON). O objeto `user` passa a trazer `papel, municipio_id,
 secretaria_id, equipe_id, aceite_termos_em, suspenso_ate`.
+
+Detalhes de 7.7 (implementação):
+
+- `senha/esqueci/`: e-mail malformado é 400; fora isso, sempre 200
+  `{message}` igual, exista a conta ou não. O código de 6 dígitos usa
+  `codigo_2fa`/`codigo_2fa_expira` (10 min, o mesmo da verificação de
+  e-mail) e no máximo 5 envios por conta por hora (`requestsCount`/
+  `requestsResetAt`).
+- `senha/redefinir/`: nova senha ≥6 caracteres; erro único 400 para conta
+  inexistente, código errado ou expirado. Sucesso: troca a senha, apaga o
+  código, marca o e-mail como verificado.
+- `register/` aceita `aceite_termos: true` (grava `aceite_termos_em`).
+  `aceite-termos/` (autenticado) grava agora e devolve `{user}`.
+- `meus-dados/` (autenticado): `{gerado_em, usuario, chamados (inclusive
+  removidos), apoios, sinalizacoes, avaliacoes, strikes, notificacoes}`, com
+  `Content-Disposition: attachment`; registra `lgpd.exportacao` na auditoria.
+- Limites (429): `login/` 10/min por IP e 20/h por e-mail; `existe/` 10/min
+  por IP; `verificar-email/` 5 a cada 10 min por usuário; `reenviar-codigo/`
+  5/h; `senha/esqueci/` 5/h por IP e por e-mail; `senha/redefinir/` 5 a cada
+  10 min por e-mail; `meus-dados/` 10/h. Cache Redis com fail-open.
