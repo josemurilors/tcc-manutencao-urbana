@@ -249,6 +249,20 @@ equipe_id, equipe_nome, total_apoios, total_resolvido, total_nao_existe,
 checklist: string[]`. `score` (0–100) pondera prioridade, SLA restante,
 apoios, idade e sinalizações; a fórmula fica documentada em `operacao/fila.py`.
 
+Como o app usa a 7.1 (aba Operação):
+
+- `fila/` sem `status` = só abertos. Para os contadores `vencem_24h` e
+  `sinalizados` do resumo, o app manda também `vencem_24h=1` e `sinalizados=1`
+  (opcionais: o backend pode ignorar, o app recorta a página no cliente).
+- Ações mutáveis (`transicao`, `atribuir`, `liberar`, `nota`, `resposta`,
+  `evidencia`, `lote`) levam o cabeçalho `Idempotency-Key: <uuid>`: a fila
+  offline reenvia a mesma chave, e o backend deve devolver o mesmo resultado
+  (ou tolerar a repetição). Sem suporte, o app confere `transicao` repetida
+  pelo detalhe (status já igual a `para` = feito).
+- `transicao/` multipart (com `foto`) manda `checklist` como string JSON.
+- Rejeitar como duplicado busca o original por `GET defeitos/protocolo/<p>/`
+  ou por `fila/?q=`.
+
 ### 7.2 Cidadão — `api/v1/defeitos/`
 
 | método e rota | corpo / query | resposta |
