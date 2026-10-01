@@ -14,6 +14,7 @@ urlpatterns = [
     path('produtividade/', views.ProdutividadeView.as_view(), name='bi-produtividade'),
     path('hotspots/', views.HotspotsView.as_view(), name='bi-hotspots'),
     path('satisfacao/', views.SatisfacaoView.as_view(), name='bi-satisfacao'),
+    path('chamados/', views.ChamadosView.as_view(), name='bi-chamados'),
     path('exportar/', views.ExportarView.as_view(), name='bi-exportar'),
     path('relatorio/', views.RelatorioView.as_view(), name='bi-relatorio'),
 ]

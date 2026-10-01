@@ -19,18 +19,22 @@ import type {
   BiProdutividadeLinha,
   BiSatisfacao,
   BiSeriePonto,
-  ChamadoFilaBi,
+  ChamadoBi,
   DimensaoBi,
   FormatoExportacao,
   Granularidade,
   OpcaoFiltro,
   PaginaBi,
+  RecorteLista,
 } from '@/types/bi';
 
 import { API_URL, paginated, request } from './api';
 import { getTokenSync } from './storage';
 
 const BASE = '/api/v1/bi';
+
+/** Chave do grupo sem valor na distribuição ("Sem equipe"); vale como filtro. */
+export const SEM_VALOR = 'nenhum';
 
 /** Filtros -> query (sem `?`). Campos vazios ficam de fora. */
 export function queryDosFiltros(filtros: BiFiltros, extra: Record<string, string> = {}) {
@@ -47,8 +51,19 @@ export function queryDosFiltros(filtros: BiFiltros, extra: Record<string, string
 
 /** Recorte do drill-down: os mesmos filtros do painel mais a fatia tocada. */
 export type RecorteDrill = {
-  dimensao: DimensaoBi | 'vencidos';
+  dimensao: DimensaoBi | 'vencidos' | 'todos';
   chave?: string | null;
+  /** Qual número a lista reproduz; padrão `abertos` (`vencidos` na dimensão homônima). */
+  recorte?: RecorteLista;
+};
+
+/** Campo de filtro que a chave de cada dimensão ocupa. */
+const CAMPO_DA_DIMENSAO: Partial<Record<RecorteDrill['dimensao'], string>> = {
+  categoria: 'categoria_id',
+  secretaria: 'secretaria_id',
+  equipe: 'equipe_id',
+  bairro: 'bairro',
+  status: 'status',
 };
 
 export const apiBi = {
@@ -101,42 +116,35 @@ export const apiBi = {
     }
   },
 
+  opcoesEquipe: async (f: BiFiltros): Promise<OpcaoFiltro[]> => {
+    try {
+      const lista = await paginated<{ id: number; nome: string; secretaria_nome?: string | null; ativo?: boolean }>(
+        '/api/v1/gestao/equipes/',
+      );
+      return lista
+        .filter((e) => e.ativo !== false)
+        .map((e) => ({ value: String(e.id), label: e.nome }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    } catch {
+      return opcoesDaDistribuicao(f, 'equipe');
+    }
+  },
+
   /** Bairro não tem cadastro: os que tiveram chamado no período bastam. */
   opcoesBairro: (f: BiFiltros) => opcoesDaDistribuicao(f, 'bairro'),
 
   /**
-   * Lista do drill-down: a fila de operação (7.1) filtrada pela fatia. A fila
-   * não recorta por data de abertura — o que interessa ao gestor ali é o que
-   * está aberto agora naquela categoria/bairro/secretaria.
+   * Lista do drill-down (`bi/chamados/`): os chamados por trás do número
+   * tocado, com os mesmos filtros e a mesma regra de contagem do painel — o
+   * total da lista bate com a barra ou o cartão. A chave da fatia ocupa o
+   * filtro da sua dimensão (e vence o filtro da barra, se houver).
    */
-  chamados: (f: BiFiltros, recorte: RecorteDrill, page = 1) => {
-    const q = new URLSearchParams({ atribuicao: 'todos', ordenar: 'prazo', page: String(page) });
-    if (f.categoria_id) q.set('categoria_id', f.categoria_id);
-    if (f.secretaria_id) q.set('secretaria_id', f.secretaria_id);
-    if (f.equipe_id) q.set('equipe_id', f.equipe_id);
-    if (f.bairro) q.set('bairro', f.bairro);
-    const chave = recorte.chave ?? '';
-    switch (recorte.dimensao) {
-      case 'categoria':
-        if (chave) q.set('categoria_id', chave);
-        break;
-      case 'secretaria':
-        if (chave) q.set('secretaria_id', chave);
-        break;
-      case 'equipe':
-        if (chave) q.set('equipe_id', chave);
-        break;
-      case 'bairro':
-        if (chave) q.set('bairro', chave);
-        break;
-      case 'status':
-        if (chave) q.set('status', chave);
-        break;
-      case 'vencidos':
-        q.set('vencidos', '1');
-        break;
-    }
-    return request<PaginaBi<ChamadoFilaBi>>(`/api/v1/operacao/fila/?${q.toString()}`);
+  chamados: (f: BiFiltros, drill: RecorteDrill, page = 1) => {
+    const recorte = drill.recorte ?? (drill.dimensao === 'vencidos' ? 'vencidos' : 'abertos');
+    const extra: Record<string, string> = { recorte, page: String(page) };
+    const campo = CAMPO_DA_DIMENSAO[drill.dimensao];
+    if (campo && drill.chave) extra[campo] = drill.chave;
+    return request<PaginaBi<ChamadoBi>>(`${BASE}/chamados/?${queryDosFiltros(f, extra)}`);
   },
 
   exportar: (f: BiFiltros, formato: FormatoExportacao) =>
@@ -178,7 +186,10 @@ async function opcoesDaDistribuicao(f: BiFiltros, dimensao: DimensaoBi): Promise
   return linhas
     .filter((l) => String(l.chave ?? '').trim() !== '')
     .map((l) => ({ value: String(l.chave), label: l.rotulo || String(l.chave) }))
-    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    // O grupo "Sem bairro/secretaria" (chave `nenhum`) também filtra, mas vai para o fim.
+    .sort((a, b) =>
+      a.value === SEM_VALOR ? 1 : b.value === SEM_VALOR ? -1 : a.label.localeCompare(b.label, 'pt-BR'),
+    );
 }
 
 type Download = { nome: string; mimeType: string; uti: string; titulo: string };

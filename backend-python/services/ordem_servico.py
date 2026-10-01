@@ -7,6 +7,9 @@ from django.utils import timezone
 from xhtml2pdf import pisa
 
 
+ROTULOS_PRIORIDADE = {'urgente': 'Urgente', 'alta': 'Alta', 'media': 'Média', 'baixa': 'Baixa'}
+
+
 def _thumbnail_data_url(defeito):
     if not defeito.imagem_thumbnail:
         return None
@@ -60,7 +63,7 @@ def gerar_ordem_servico(defeito):
 
     titulo = _e(defeito.titulo)
     categoria = _e(defeito.categoria)
-    prioridade = _e(defeito.prioridade)
+    prioridade = _e(ROTULOS_PRIORIDADE.get(defeito.prioridade or '', defeito.prioridade) or 'Não definida')
     status = _e(ROTULOS_OPERACAO.get(defeito.status, defeito.status))
     rua = _e(defeito.rua)
     bairro = _e(defeito.bairro)

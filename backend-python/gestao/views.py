@@ -120,21 +120,30 @@ class _GestaoView(APIView):
             dados=dados, municipio_id=self.municipio_id,
         )
 
-    # Secretaria/equipe referenciadas no corpo precisam ser deste município.
-    def secretaria_valida(self, secretaria_id):
+    # Secretaria/equipe referenciadas no corpo precisam ser deste município e
+    # estar ativas. A exceção é manter o vínculo que já existe (`atual`): quem
+    # salva outro campo de uma equipe cuja secretaria foi desativada não pode
+    # tomar 400 por reenviar o valor que já estava lá.
+    def secretaria_valida(self, secretaria_id, atual=None):
         if secretaria_id is None:
             return None
-        sec = Secretaria.objects.filter(pk=secretaria_id, municipio_id=self.municipio_id, ativo=True).first()
+        qs = Secretaria.objects.filter(pk=secretaria_id, municipio_id=self.municipio_id)
+        if secretaria_id != atual:
+            qs = qs.filter(ativo=True)
+        sec = qs.first()
         if sec is None:
-            raise ParseError('Secretaria não encontrada neste município.')
+            raise ParseError('Secretaria não encontrada (ou desativada) neste município.')
         return sec
 
-    def equipe_valida(self, equipe_id):
+    def equipe_valida(self, equipe_id, atual=None):
         if equipe_id is None:
             return None
-        eq = Equipe.objects.filter(pk=equipe_id, municipio_id=self.municipio_id, ativo=True).first()
+        qs = Equipe.objects.filter(pk=equipe_id, municipio_id=self.municipio_id)
+        if equipe_id != atual:
+            qs = qs.filter(ativo=True)
+        eq = qs.first()
         if eq is None:
-            raise ParseError('Equipe não encontrada neste município.')
+            raise ParseError('Equipe não encontrada (ou desativada) neste município.')
         return eq
 
 
@@ -321,7 +330,7 @@ class EquipeDetalheView(_GestaoView):
             raise Conflito('Já existe uma equipe com este nome.')
         antes = EquipeSerializer(eq).data
         if 'secretaria_id' in dados:
-            eq.secretaria = self.secretaria_valida(dados.pop('secretaria_id'))
+            eq.secretaria = self.secretaria_valida(dados.pop('secretaria_id'), atual=eq.secretaria_id)
         for campo, valor in dados.items():
             setattr(eq, campo, valor)
         eq.save()
@@ -384,10 +393,10 @@ class _MembrosBase(_GestaoView):
         sec_id = alvo.secretaria_id if alvo else None
         eq_id = alvo.equipe_id if alvo else None
         if 'secretaria_id' in dados:
-            sec = self.secretaria_valida(dados['secretaria_id'])
+            sec = self.secretaria_valida(dados['secretaria_id'], atual=sec_id)
             sec_id = sec.pk if sec else None
         if 'equipe_id' in dados:
-            eq = self.equipe_valida(dados['equipe_id'])
+            eq = self.equipe_valida(dados['equipe_id'], atual=eq_id)
             eq_id = eq.pk if eq else None
             if eq is not None and eq.secretaria_id:
                 if 'secretaria_id' in dados and sec_id is not None and sec_id != eq.secretaria_id:
@@ -454,7 +463,7 @@ class MembrosView(_MembrosBase):
         alvo.equipe_id = eq_id
         alvo.save(update_fields=['papel', 'municipio_id', 'secretaria_id', 'equipe_id'])
         self.auditar('membro.vincular', 'usuario', alvo.pk, {
-            'email': alvo.email, 'antes': antes,
+            'nome': alvo.nome, 'email': alvo.email, 'antes': antes,
             'depois': {'papel': alvo.papel, 'municipio_id': alvo.municipio_id,
                        'secretaria_id': sec_id, 'equipe_id': eq_id},
         })
@@ -495,7 +504,9 @@ class MembroDetalheView(_MembrosBase):
         alvo.save(update_fields=['papel', 'secretaria_id', 'equipe_id'])
         depois = {'papel': alvo.papel, 'secretaria_id': sec_id, 'equipe_id': eq_id}
         if antes != depois:
-            self.auditar('membro.alterar', 'usuario', alvo.pk, {'email': alvo.email, 'antes': antes, 'depois': depois})
+            self.auditar('membro.alterar', 'usuario', alvo.pk, {
+                'nome': alvo.nome, 'email': alvo.email, 'antes': antes, 'depois': depois,
+            })
         return Response(self.payload(alvo))
 
     def delete(self, request, pk):
@@ -515,7 +526,7 @@ class MembroDetalheView(_MembrosBase):
             alvo.equipe_id = None
             alvo.save(update_fields=['papel', 'secretaria_id', 'equipe_id'])
             self.auditar('membro.revogar', 'usuario', alvo.pk, {
-                'email': alvo.email, 'antes': antes, 'chamados_liberados': liberados,
+                'nome': alvo.nome, 'email': alvo.email, 'antes': antes, 'chamados_liberados': liberados,
             })
         return Response({'id': str(alvo.pk), 'papel': alvo.papel, 'chamados_liberados': liberados})
 
@@ -553,7 +564,7 @@ class CategoriaDetalheView(_GestaoView):
             antes = servicos.regra_categoria(self.municipio_id, cat.id)
             regra, _ = CategoriaMunicipio.objects.get_or_create(municipio_id=self.municipio_id, categoria=cat)
             if 'secretaria_id' in dados:
-                regra.secretaria = self.secretaria_valida(dados.pop('secretaria_id'))
+                regra.secretaria = self.secretaria_valida(dados.pop('secretaria_id'), atual=antes['secretaria_id'])
             for campo, valor in dados.items():
                 setattr(regra, campo, valor)
             regra.save()
@@ -589,6 +600,19 @@ def _defeito_moderacao(d):
     }
 
 
+def _textos_remocao(ids):
+    """Texto do último evento `removido` de cada chamado (o motivo escrito por quem removeu)."""
+    from defeitos.models import DefeitoEvento
+
+    textos = {}
+    for defeito_id, texto in (
+        DefeitoEvento.objects.filter(defeito_id__in=ids, tipo='removido')
+        .order_by('defeito_id', '-criado_em').values_list('defeito_id', 'texto')
+    ):
+        textos.setdefault(defeito_id, texto or '')
+    return textos
+
+
 class ModeracaoView(_GestaoView):
     leitura = 'gestor'
 
@@ -620,9 +644,12 @@ class ModeracaoView(_GestaoView):
             Defeito.objects.filter(municipio_id=mun, removido_em__isnull=False)
             .select_related('usuario').order_by('-removido_em')
         )
+        removidos_lista = list(removidos_qs[:LIMITE_REMOVIDOS])
+        textos = _textos_remocao([d.pk for d in removidos_lista])
         removidos = [
-            {**_defeito_moderacao(d), 'removido_em': d.removido_em, 'removido_motivo': d.removido_motivo}
-            for d in removidos_qs[:LIMITE_REMOVIDOS]
+            {**_defeito_moderacao(d), 'removido_em': d.removido_em, 'removido_motivo': d.removido_motivo,
+             'removido_texto': textos.get(d.pk, '')}
+            for d in removidos_lista
         ]
 
         agora = timezone.now()
@@ -690,9 +717,14 @@ class RemoverDefeitoView(_ModeracaoDefeitoView):
         if d.removido_em is not None:
             raise Conflito('Este chamado já foi removido.')
         with transaction.atomic():
-            regras.remover(d, request.user, dados['motivo'], texto='Removido pela moderação da prefeitura.')
-            self.auditar('moderacao.remover', 'defeito', d.pk, {'protocolo': d.protocolo, 'motivo': dados['motivo']})
-        return Response(_resposta_defeito(d))
+            # `removido_motivo` é a origem ('moderacao', 'comunidade', 'autor'):
+            # é por ela que o aviso ao autor e a restauração decidem o que
+            # fazer. O texto livre do gestor vai no evento (e no aviso).
+            regras.remover(d, request.user, 'moderacao', texto=dados['motivo'])
+            self.auditar('moderacao.remover', 'defeito', d.pk, {
+                'protocolo': d.protocolo, 'titulo': d.titulo, 'motivo': dados['motivo'],
+            })
+        return Response({**_resposta_defeito(d), 'removido_texto': dados['motivo']})
 
 
 class RestaurarDefeitoView(_ModeracaoDefeitoView):
@@ -706,7 +738,7 @@ class RestaurarDefeitoView(_ModeracaoDefeitoView):
         with transaction.atomic():
             strike = servicos.restaurar(d, request.user, motivo=dados.get('motivo', ''))
             self.auditar('moderacao.restaurar', 'defeito', d.pk, {
-                'protocolo': d.protocolo, 'motivo_anterior': motivo_anterior,
+                'protocolo': d.protocolo, 'titulo': d.titulo, 'motivo_anterior': motivo_anterior,
                 'motivo': dados.get('motivo', ''), 'strike_retirado': strike,
             })
         return Response({**_resposta_defeito(d), 'strike_retirado': strike})
@@ -744,7 +776,7 @@ class SuspenderUsuarioView(_ModeracaoUsuarioView):
         with transaction.atomic():
             servicos.suspender(alvo, dados['dias'], dados['motivo'])
             self.auditar('usuario.suspender', 'usuario', alvo.pk, {
-                'dias': dados['dias'], 'motivo': dados['motivo'],
+                'nome': alvo.nome, 'dias': dados['dias'], 'motivo': dados['motivo'],
                 'antes': antes, 'suspenso_ate': alvo.suspenso_ate,
             })
         return Response(_resposta_usuario(alvo))
@@ -759,7 +791,7 @@ class ReativarUsuarioView(_ModeracaoUsuarioView):
         antes = alvo.suspenso_ate
         with transaction.atomic():
             servicos.reativar(alvo)
-            self.auditar('usuario.reativar', 'usuario', alvo.pk, {'suspenso_ate_anterior': antes})
+            self.auditar('usuario.reativar', 'usuario', alvo.pk, {'nome': alvo.nome, 'suspenso_ate_anterior': antes})
         return Response(_resposta_usuario(alvo))
 
 

@@ -48,6 +48,22 @@ export function rotaDoChamado(id: string | number): Href {
   return `/chamado/${id}` as Href;
 }
 
+/**
+ * Para onde leva um aviso (da central ou do push): o chamado, quando há um;
+ * o painel, no resumo semanal do gestor; `null` quando o aviso se explica
+ * sozinho (moderação, conta).
+ */
+export function destinoDaNotificacao(n: {
+  tipo?: string | null;
+  defeito_id?: string | number | null;
+}): Href | null {
+  if (n.defeito_id !== undefined && n.defeito_id !== null && n.defeito_id !== '') {
+    return rotaDoChamado(n.defeito_id);
+  }
+  if (n.tipo === 'resumo') return '/(tabs)/painel' as Href;
+  return null;
+}
+
 export function pushSuportado(): boolean {
   if (Platform.OS === 'web') return false;
   if (!Device.isDevice) return false;
@@ -157,6 +173,10 @@ export async function sincronizarPush(): Promise<void> {
  * o mesmo aparelho na conta nova (o backend troca o dono — `token` é UNIQUE).
  */
 export async function removerPushDoAparelho(): Promise<void> {
+  // O selo do ícone era da conta que está saindo.
+  if (Platform.OS !== 'web') {
+    Notifications.setBadgeCountAsync(0).catch(() => undefined);
+  }
   const token = await tokenGuardado();
   if (token) await notificacoesApi.removerPushToken(token);
 }
@@ -241,10 +261,10 @@ export function usePush() {
   return { estado, ocupado, ativar, desativar, abrirAjustesDoAparelho };
 }
 
-function idDoChamado(resposta: Notifications.NotificationResponse): string | null {
-  const dados = resposta.notification.request.content.data as DadosPush | undefined;
-  const id = dados?.defeito_id;
-  return id === undefined || id === null || id === '' ? null : String(id);
+/** Destino do toque: o chamado, o painel (resumo) ou, sem nada disso, a central. */
+function destinoDoPush(resposta: Notifications.NotificationResponse): Href {
+  const dados = (resposta.notification.request.content.data ?? {}) as DadosPush;
+  return destinoDaNotificacao(dados) ?? ('/notificacoes' as Href);
 }
 
 /**
@@ -253,7 +273,7 @@ function idDoChamado(resposta: Notifications.NotificationResponse): string | nul
  * router); o toque que abriu o app a frio é tratado assim que fica pronto.
  */
 export function useAbrirChamadoDaNotificacao(pronto: boolean) {
-  const pendente = useRef<string | null>(null);
+  const pendente = useRef<Href | null>(null);
   // A resposta que abriu o app pode chegar pelo listener e pela "última
   // resposta" ao mesmo tempo; sem isto o chamado abriria duas vezes.
   const tratadas = useRef(new Set<string>());
@@ -263,17 +283,14 @@ export function useAbrirChamadoDaNotificacao(pronto: boolean) {
       const chave = resposta.notification.request.identifier;
       if (tratadas.current.has(chave)) return;
       tratadas.current.add(chave);
-      const id = idDoChamado(resposta);
-      if (!id) {
-        // Aviso sem chamado (moderação, conta): a central explica o resto.
-        if (pronto) router.push('/notificacoes' as Href);
-        return;
-      }
+      // Aviso sem chamado (moderação, conta) cai na central, que explica o
+      // resto. Com o app abrindo a frio, guarda até a pilha existir.
+      const destino = destinoDoPush(resposta);
       if (!pronto) {
-        pendente.current = id;
+        pendente.current = destino;
         return;
       }
-      router.push(rotaDoChamado(id));
+      router.push(destino);
     },
     [pronto],
   );
@@ -305,9 +322,9 @@ export function useAbrirChamadoDaNotificacao(pronto: boolean) {
 
   useEffect(() => {
     if (pronto && pendente.current) {
-      const id = pendente.current;
+      const destino = pendente.current;
       pendente.current = null;
-      router.push(rotaDoChamado(id));
+      router.push(destino);
     }
   }, [pronto]);
 }

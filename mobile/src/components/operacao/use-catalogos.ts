@@ -13,6 +13,39 @@ import { api } from '@/services/api';
 import { apiOperacao } from '@/services/api-operacao';
 import type { CategoriaOperacao, EquipeOperacao, RespostaPadrao } from '@/types/operacao';
 
+/**
+ * Respostas prontas de partida, enquanto a prefeitura não cadastra as suas
+ * (`respostas-padrao/`, escrita de gestor+). Ids negativos: nunca colidem com
+ * os do servidor e deixam claro que são do app.
+ */
+export const RESPOSTAS_SUGERIDAS: RespostaPadrao[] = [
+  {
+    id: -1,
+    titulo: 'Recebido e em análise',
+    texto: 'Recebemos seu chamado e a equipe responsável já está analisando. Você será avisado a cada novidade.',
+  },
+  {
+    id: -2,
+    titulo: 'Serviço programado',
+    texto: 'O serviço foi programado e a equipe irá ao local nos próximos dias. Obrigado por avisar.',
+  },
+  {
+    id: -3,
+    titulo: 'Equipe a caminho',
+    texto: 'Nossa equipe está a caminho do local para executar o serviço.',
+  },
+  {
+    id: -4,
+    titulo: 'Serviço concluído',
+    texto: 'O serviço foi concluído. Se o problema continuar, você pode reabrir o chamado pelo aplicativo.',
+  },
+  {
+    id: -5,
+    titulo: 'Aguardando material',
+    texto: 'O serviço depende de material que já foi solicitado. Assim que chegar, a equipe executa e você será avisado.',
+  },
+];
+
 export type Catalogos = {
   categorias: CategoriaOperacao[];
   equipes: EquipeOperacao[];
@@ -49,7 +82,8 @@ export function useCatalogos(): Catalogos {
       if (!vivo) return;
       setCategorias(Array.isArray(cats) ? cats : []);
       setEquipes(Array.isArray(eqs) ? eqs : []);
-      setRespostas(Array.isArray(resps) ? resps.filter((r) => r && r.texto) : []);
+      const daPrefeitura = Array.isArray(resps) ? resps.filter((r) => r && r.texto) : [];
+      setRespostas(daPrefeitura.length > 0 ? daPrefeitura : RESPOSTAS_SUGERIDAS);
       const mapa = new Map<string, string>();
       for (const c of publicas ?? []) if (c.icone) mapa.set(c.nome, c.icone);
       for (const c of Array.isArray(cats) ? cats : []) if (c.icone) mapa.set(c.nome, c.icone);

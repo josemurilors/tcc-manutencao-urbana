@@ -48,6 +48,14 @@ class MunicipioConfigSerializer(serializers.ModelSerializer):
     def validate_parametros(self, valor):
         if not isinstance(valor, dict):
             raise serializers.ValidationError('Parâmetros devem ser um objeto.')
+        # Chaves que a operação lê (`operacao/views.py::PARAMETROS_PADRAO`):
+        # tipo errado aqui viraria 500 ou regra silenciosamente desligada lá.
+        if 'exigir_foto_conclusao' in valor and not isinstance(valor['exigir_foto_conclusao'], bool):
+            raise serializers.ValidationError('"exigir_foto_conclusao" deve ser verdadeiro ou falso.')
+        if 'raio_evidencia_m' in valor:
+            raio = valor['raio_evidencia_m']
+            if isinstance(raio, bool) or not isinstance(raio, int) or not 20 <= raio <= 2000:
+                raise serializers.ValidationError('"raio_evidencia_m" deve ser um inteiro de 20 a 2000 metros.')
         return valor
 
 
@@ -109,10 +117,19 @@ class EquipeSerializer(serializers.ModelSerializer):
 # ----------------------------------------------------------------- membros
 
 class MembroCriarSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    # Não é EmailField: a conta já existe (o vínculo é por busca exata) e o
+    # validador do Django recusa domínios sem ponto que o cadastro aceitou.
+    email = serializers.CharField(max_length=254)
     papel = serializers.ChoiceField(choices=servicos.PAPEIS_VINCULAVEIS)
     secretaria_id = serializers.IntegerField(required=False, allow_null=True)
     equipe_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+    def validate_email(self, valor):
+        valor = valor.strip()
+        if '@' not in valor or ' ' in valor:
+            raise serializers.ValidationError('Informe um e-mail válido.')
+        return valor
 
 
 class MembroAlterarSerializer(serializers.Serializer):

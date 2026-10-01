@@ -32,8 +32,13 @@ import type { ConfigMunicipio, ConfigMunicipioAlteracao } from '@/types/gestao';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const COR_RE = /^#[0-9a-fA-F]{6}$/;
 const URL_RE = /^https?:\/\/\S+\.\S+/;
-const RAIO_MIN = 10;
-const RAIO_MAX = 200;
+// Limites do backend (`MunicipioConfigSerializer`).
+const RAIO_MIN = 5;
+const RAIO_MAX = 500;
+// Foto de evidência: até onde a foto pode ter sido tirada do ponto do chamado.
+const RAIO_EVIDENCIA_PADRAO = 150;
+const RAIO_EVIDENCIA_MIN = 20;
+const RAIO_EVIDENCIA_MAX = 2000;
 
 type Form = {
   nome_exibicao: string;
@@ -43,6 +48,7 @@ type Form = {
   site: string;
   raio_duplicado_m: string;
   exigir_foto_conclusao: boolean;
+  raio_evidencia_m: string;
 };
 
 function paraForm(c: ConfigMunicipio): Form {
@@ -53,7 +59,13 @@ function paraForm(c: ConfigMunicipio): Form {
     telefone: c.telefone ?? '',
     site: c.site ?? '',
     raio_duplicado_m: String(c.raio_duplicado_m ?? 30),
-    exigir_foto_conclusao: !!c.parametros?.exigir_foto_conclusao,
+    // Ausente = exigida: é o padrão que a operação aplica (operacao/views.py).
+    exigir_foto_conclusao: c.parametros?.exigir_foto_conclusao !== false,
+    raio_evidencia_m: String(
+      typeof c.parametros?.raio_evidencia_m === 'number'
+        ? c.parametros.raio_evidencia_m
+        : RAIO_EVIDENCIA_PADRAO,
+    ),
   };
 }
 
@@ -65,6 +77,9 @@ function validar(f: Form) {
   const raio = Number.parseInt(f.raio_duplicado_m, 10);
   if (!Number.isFinite(raio) || raio < RAIO_MIN || raio > RAIO_MAX)
     erros.raio_duplicado_m = `De ${RAIO_MIN} a ${RAIO_MAX} metros.`;
+  const evidencia = Number.parseInt(f.raio_evidencia_m, 10);
+  if (!Number.isFinite(evidencia) || evidencia < RAIO_EVIDENCIA_MIN || evidencia > RAIO_EVIDENCIA_MAX)
+    erros.raio_evidencia_m = `De ${RAIO_EVIDENCIA_MIN} a ${RAIO_EVIDENCIA_MAX} metros.`;
   return erros;
 }
 
@@ -126,8 +141,17 @@ export default function MunicipioScreen() {
     if (form.site !== original.site) corpo.site = form.site.trim();
     if (form.raio_duplicado_m !== original.raio_duplicado_m)
       corpo.raio_duplicado_m = Number.parseInt(form.raio_duplicado_m, 10);
-    if (form.exigir_foto_conclusao !== original.exigir_foto_conclusao) {
-      corpo.parametros = { ...config.parametros, exigir_foto_conclusao: form.exigir_foto_conclusao };
+    // `parametros` vai inteiro (o backend substitui o objeto), mesclado com o
+    // que veio do servidor para não apagar chaves que o app não conhece.
+    if (
+      form.exigir_foto_conclusao !== original.exigir_foto_conclusao ||
+      form.raio_evidencia_m !== original.raio_evidencia_m
+    ) {
+      corpo.parametros = {
+        ...config.parametros,
+        exigir_foto_conclusao: form.exigir_foto_conclusao,
+        raio_evidencia_m: Number.parseInt(form.raio_evidencia_m, 10),
+      };
     }
 
     const ok = await confirmar({
@@ -274,6 +298,19 @@ export default function MunicipioScreen() {
             valor={form.exigir_foto_conclusao}
             onChange={campo('exigir_foto_conclusao')}
             disabled={so}
+          />
+          <TextField
+            label="Distância máxima da foto de evidência (metros)"
+            value={form.raio_evidencia_m}
+            onChangeText={(t) => campo('raio_evidencia_m')(t.replace(/\D/g, ''))}
+            keyboardType="number-pad"
+            maxLength={4}
+            editable={!so}
+            invalid={!!erroDe('raio_evidencia_m')}
+            hint={
+              erroDe('raio_evidencia_m') ??
+              'A foto do serviço feito precisa ter sido tirada a até esta distância do ponto do chamado.'
+            }
           />
         </Card>
 

@@ -43,12 +43,26 @@ export const contaApi = {
    * antes de abrir a sessão no app (o fluxo de entrada só "entra" depois do
    * aceite); sem ele, vale o token da sessão atual.
    */
-  aceitarTermos: (accessToken?: string) =>
-    request<Partial<Usuario> & { aceite_termos_em?: string }>(`${BASE}/aceite-termos/`, {
-      method: 'POST',
-      body: { versao: VERSAO_TERMOS },
-      ...(accessToken && { headers: { Authorization: `Bearer ${accessToken}` } }),
-    }),
+  aceitarTermos: async (
+    accessToken?: string,
+  ): Promise<Partial<Usuario> & { aceite_termos_em: string }> => {
+    // O backend responde `{user}`; o contrato também admite `{aceite_termos_em}`.
+    // Normaliza para o usuário atualizado com a data sempre preenchida.
+    const r = await request<{ user?: Usuario; aceite_termos_em?: string | null }>(
+      `${BASE}/aceite-termos/`,
+      {
+        method: 'POST',
+        body: { versao: VERSAO_TERMOS },
+        ...(accessToken && { headers: { Authorization: `Bearer ${accessToken}` } }),
+      },
+    );
+    const usuario: Partial<Usuario> = r.user ?? {};
+    return {
+      ...usuario,
+      aceite_termos_em:
+        usuario.aceite_termos_em ?? r.aceite_termos_em ?? new Date().toISOString(),
+    };
+  },
 
   meusDados: () => request<MeusDados>(`${BASE}/meus-dados/`),
 };

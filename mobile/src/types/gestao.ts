@@ -1,9 +1,9 @@
 /**
  * Tipos da gestão municipal (contrato v3, seção 7.6 — `api/v1/gestao/`).
  *
- * O contrato fixa rotas e alguns campos; o resto do formato foi inferido das
- * tabelas (seção 2). Por isso quase tudo que não é chave é opcional: o app
- * precisa continuar de pé se o backend devolver um campo a menos.
+ * Formatos conferidos contra o backend (`gestao/views.py`) e descritos no
+ * contrato, 7.6. Campos auxiliares seguem opcionais para o app continuar de
+ * pé se o backend devolver um a menos.
  */
 
 /** Papéis canônicos (`users.papel`). */
@@ -33,8 +33,18 @@ export type Membro = {
   equipe_id?: number | null;
   equipe_nome?: string | null;
   suspenso_ate?: string | null;
+  /** Nível do papel (operador 1 … super_admin 4). */
+  nivel?: number;
+  /** Chamados abertos em que a pessoa é a atendente (voltam à fila se revogar). */
+  chamados_abertos?: number;
   criado_em?: string | null;
-  ultimo_acesso?: string | null;
+};
+
+/** Resposta do DELETE `membros/<id>/`. */
+export type RevogacaoMembro = {
+  id: string;
+  papel: Papel;
+  chamados_liberados: number;
 };
 
 export type ConviteMembro = {
@@ -57,6 +67,8 @@ export type Secretaria = {
   email?: string;
   ativo: boolean;
   criado_em?: string;
+  /** Equipes ativas ligadas a ela. */
+  total_equipes?: number;
 };
 
 export type SecretariaEntrada = Pick<Secretaria, 'nome'> &
@@ -86,8 +98,15 @@ export type CategoriaGestao = {
   secretaria_nome?: string | null;
   ativo: boolean;
   checklist: string[];
+  /** O município sobrepôs alguma regra da plataforma. */
+  personalizado?: boolean;
+  /** Padrão da plataforma (o que volta ao mandar `null`). */
+  base?: { prazo_sla_dias: number | null; prioridade: Prioridade | null };
+  /** Só no PATCH: chamados abertos que ganharam o prazo novo. */
+  chamados_recalculados?: number;
 };
 
+/** PATCH de categoria: `null` em prazo/prioridade/secretaria volta ao padrão. */
 export type CategoriaAlteracao = Partial<
   Pick<CategoriaGestao, 'prazo_sla_dias' | 'prioridade' | 'secretaria_id' | 'ativo' | 'checklist'>
 >;
@@ -97,8 +116,13 @@ export type CategoriaAlteracao = Partial<
  * app edita estão tipados; o resto é preservado no PATCH.
  */
 export type ParametrosMunicipio = {
-  /** A operação só conclui um chamado com foto de evidência ("depois"). */
+  /**
+   * A operação só conclui um chamado com foto de evidência ("depois").
+   * Ausente = ligado (padrão do backend, `operacao/views.py`).
+   */
   exigir_foto_conclusao?: boolean;
+  /** Distância máxima (m) entre a foto de evidência e o chamado. Padrão 150. */
+  raio_evidencia_m?: number;
   [chave: string]: unknown;
 };
 
@@ -131,6 +155,9 @@ export type ConfigMunicipioAlteracao = Partial<
   >
 >;
 
+/** Origem da remoção (`defeitos.removido_motivo`). */
+export type OrigemRemocao = 'moderacao' | 'comunidade' | 'autor' | string;
+
 /** Chamado na fila de moderação (sinalizado pela comunidade ou removido). */
 export type ChamadoModeracao = {
   id: string;
@@ -138,28 +165,57 @@ export type ChamadoModeracao = {
   titulo: string;
   categoria?: string | null;
   bairro?: string | null;
+  rua?: string | null;
   status?: string;
+  visibilidade?: string;
   criado_em?: string;
+  autor_id?: string | null;
   autor_nome?: string | null;
-  sinalizacoes?: { resolvido: number; nao_existe: number };
+  /** Só em `sinalizados`. */
+  total_resolvido?: number;
+  total_nao_existe?: number;
+  total_apoios?: number;
+  /** Só em `removidos`. */
   removido_em?: string | null;
-  removido_motivo?: string | null;
+  removido_motivo?: OrigemRemocao | null;
+  /** Motivo escrito por quem removeu (texto do evento `removido`). */
+  removido_texto?: string | null;
 };
 
-/** Cidadão com strikes ou suspenso. */
+/** Cidadão com strike ativo ou suspenso. */
 export type UsuarioModeracao = {
   id: string;
   nome: string;
-  email?: string | null;
-  strikes: number;
   suspenso_ate?: string | null;
-  ultimo_strike_em?: string | null;
+  suspenso?: boolean;
+  /** Strikes dentro da validade (os antigos caducam). */
+  strikes_ativos: number;
+  /** Passou do limite tolerado: chamados novos dele entram em revisão. */
+  em_quarentena?: boolean;
+  chamados_removidos?: number;
+};
+
+export type ContagensModeracao = {
+  sinalizados: number;
+  removidos: number;
+  suspensos: number;
+  em_quarentena: number;
 };
 
 export type FilaModeracao = {
   sinalizados: ChamadoModeracao[];
   removidos: ChamadoModeracao[];
   usuarios: UsuarioModeracao[];
+  /** Totais reais (as listas têm teto: 100/50/100). */
+  contagens: ContagensModeracao;
+};
+
+/** Resposta de suspender/reativar. */
+export type UsuarioModerado = {
+  id: string;
+  nome: string;
+  suspenso_ate: string | null;
+  suspenso: boolean;
 };
 
 /** Linha de `audit_log` (GET `auditoria/`). */
@@ -171,6 +227,7 @@ export type RegistroAuditoria = {
   dados?: Record<string, unknown> | null;
   ip?: string;
   criado_em: string;
+  municipio_id?: string | null;
   usuario_id?: string | null;
   usuario_nome?: string | null;
   /** Frase pronta, se o backend já mandar; senão o app monta. */
@@ -178,6 +235,10 @@ export type RegistroAuditoria = {
 };
 
 export type FiltrosAuditoria = {
+  /** Ação exata (`membro.revogar`) ou família (`membro`). */
   acao?: string;
   usuario_id?: string;
+  /** AAAA-MM-DD, inclusivo. */
+  inicio?: string;
+  fim?: string;
 };

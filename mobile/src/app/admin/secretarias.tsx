@@ -4,9 +4,9 @@
  * e na OS; a equipe é quem vai à rua. Categorias apontam para secretarias e
  * a fila da operação filtra por equipe.
  *
- * Gestor consulta; o administrador cria, edita, desativa e exclui. Desativar
- * é o caminho preferido: excluir uma secretaria com chamados no histórico
- * pode ser recusado pelo backend (409).
+ * Gestor consulta; o administrador cria, edita, desativa e exclui. Excluir
+ * algo que tem histórico (chamados, equipes, categorias, servidores) vira
+ * desativar no backend — a tela confere depois e diz qual dos dois aconteceu.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -114,12 +114,14 @@ export default function SecretariasScreen() {
             />
           }
           renderItem={({ item }) => {
-            const qtd = equipes.filter((e) => e.secretaria_id === item.id).length;
+            const qtd =
+              item.total_equipes ??
+              equipes.filter((e) => e.ativo && e.secretaria_id === item.id).length;
             return (
               <ListItem
                 title={item.sigla ? `${item.nome} (${item.sigla})` : item.nome}
                 subtitle={item.email || 'Sem e-mail de contato'}
-                meta={qtd === 1 ? '1 equipe' : `${qtd} equipes`}
+                meta={qtd === 1 ? '1 equipe ativa' : `${qtd} equipes ativas`}
                 leading="business"
                 onPress={ehAdmin ? () => setEditSecretaria(item) : undefined}
                 trailing={<SeloAtivo ativo={item.ativo} />}
@@ -187,6 +189,27 @@ export default function SecretariasScreen() {
       ) : null}
     </GestaoShell>
   );
+}
+
+/** Só os campos que mudaram (PATCH parcial). */
+function diferencas<T extends Record<string, unknown>>(novo: T, atual: Partial<T>): Partial<T> {
+  const saida: Partial<T> = {};
+  for (const k of Object.keys(novo) as (keyof T)[]) {
+    if ((novo[k] ?? null) !== (atual[k] ?? null)) saida[k] = novo[k];
+  }
+  return saida;
+}
+
+/**
+ * O DELETE responde 204 nos dois casos (apagou ou só desativou, se havia
+ * histórico). Confere na lista para dizer a verdade a quem excluiu.
+ */
+async function foiSoDesativada(buscar: () => Promise<{ id: number }[]>, id: number) {
+  try {
+    return (await buscar()).some((x) => x.id === id);
+  } catch {
+    return false;
+  }
 }
 
 function SeloAtivo({ ativo }: { ativo: boolean }) {
@@ -265,8 +288,12 @@ function SecretariaSheet({
     setSalvando(true);
     const corpo = { nome: nome.trim(), sigla: sigla.trim().toUpperCase(), email: email.trim(), ativo };
     try {
-      if (existente) await apiGestao.salvarSecretaria(existente.id, corpo);
-      else await apiGestao.criarSecretaria(corpo);
+      if (existente) {
+        const mudancas = diferencas(corpo, existente);
+        if (Object.keys(mudancas).length) await apiGestao.salvarSecretaria(existente.id, mudancas);
+      } else {
+        await apiGestao.criarSecretaria(corpo);
+      }
       toast.success(existente ? 'Secretaria atualizada' : 'Secretaria cadastrada');
       onSalvo();
       onFechar();
@@ -281,7 +308,7 @@ function SecretariaSheet({
     if (!existente) return;
     const ok = await confirmar({
       titulo: 'Excluir secretaria?',
-      mensagem: `"${existente.nome}" deixa de existir no app. Se ela já tem chamados ou categorias, prefira desativá-la para manter o histórico.`,
+      mensagem: `"${existente.nome}" deixa de existir no app. Se ela tem equipes, categorias, servidores ou chamados, é só desativada para manter o histórico.`,
       confirmar: 'Excluir',
       destrutivo: true,
     });
@@ -289,7 +316,9 @@ function SecretariaSheet({
     setExcluindo(true);
     try {
       await apiGestao.excluirSecretaria(existente.id);
-      toast.success('Secretaria excluída');
+      const desativada = await foiSoDesativada(apiGestao.secretarias, existente.id);
+      if (desativada) toast.info('A secretaria tem histórico, então foi desativada em vez de excluída');
+      else toast.success('Secretaria excluída');
       onSalvo();
       onFechar();
     } catch (err) {
@@ -395,8 +424,12 @@ function EquipeSheet({
       ativo,
     };
     try {
-      if (existente) await apiGestao.salvarEquipe(existente.id, corpo);
-      else await apiGestao.criarEquipe(corpo);
+      if (existente) {
+        const mudancas = diferencas(corpo, existente);
+        if (Object.keys(mudancas).length) await apiGestao.salvarEquipe(existente.id, mudancas);
+      } else {
+        await apiGestao.criarEquipe(corpo);
+      }
       toast.success(existente ? 'Equipe atualizada' : 'Equipe cadastrada');
       onSalvo();
       onFechar();
@@ -411,7 +444,7 @@ function EquipeSheet({
     if (!existente) return;
     const ok = await confirmar({
       titulo: 'Excluir equipe?',
-      mensagem: `"${existente.nome}" deixa de existir. Os membros continuam na equipe da prefeitura, só sem esta lotação.`,
+      mensagem: `"${existente.nome}" deixa de existir. Se ela tem membros ou chamados, é só desativada (não recebe novas atribuições) para manter o histórico.`,
       confirmar: 'Excluir',
       destrutivo: true,
     });
@@ -419,7 +452,9 @@ function EquipeSheet({
     setExcluindo(true);
     try {
       await apiGestao.excluirEquipe(existente.id);
-      toast.success('Equipe excluída');
+      const desativada = await foiSoDesativada(apiGestao.equipes, existente.id);
+      if (desativada) toast.info('A equipe tem membros ou chamados, então foi desativada em vez de excluída');
+      else toast.success('Equipe excluída');
       onSalvo();
       onFechar();
     } catch (err) {

@@ -3,8 +3,9 @@
  * sistema, para prestação de contas (TCE, ouvidoria, LAI).
  *
  * Cada linha vira uma frase ("Ana alterou o SLA de Buraco para 5 dias"),
- * montada em `components/gestao/auditoria-texto.ts`. Filtra por ação e por
- * pessoa — tocar num registro oferece "ver só as ações de Ana".
+ * montada em `components/gestao/auditoria-texto.ts`. Filtra por família de
+ * ação, período e pessoa — tocar num registro mostra o antes → depois e
+ * oferece "ver só as ações de Ana".
  * Só administrador do município.
  */
 
@@ -17,6 +18,8 @@ import {
   detalheDaAuditoria,
   fraseDaAuditoria,
   iconeDaAuditoria,
+  mudancasDaAuditoria,
+  rotuloDaAcao,
 } from '@/components/gestao/auditoria-texto';
 import { EstadoCarga } from '@/components/gestao/estado-carga';
 import { GestaoShell } from '@/components/gestao/gestao-shell';
@@ -24,6 +27,7 @@ import { useListaPaginada } from '@/components/gestao/use-lista-paginada';
 import { Badge } from '@/components/ui/badge';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/button';
+import { FilterChips } from '@/components/ui/chips';
 import { ListItem } from '@/components/ui/list-item';
 import { Select } from '@/components/ui/select';
 import { StateView } from '@/components/ui/state-view';
@@ -34,19 +38,41 @@ import { apiGestao } from '@/services/api-gestao';
 import type { RegistroAuditoria } from '@/types/gestao';
 import { formatarDataHora } from '@/utils/format';
 
+type Periodo = 'tudo' | '7' | '30' | '90';
+
+const PERIODOS: { value: Periodo; label: string }[] = [
+  { value: 'tudo', label: 'Tudo' },
+  { value: '7', label: '7 dias' },
+  { value: '30', label: '30 dias' },
+  { value: '90', label: '90 dias' },
+];
+
+/** AAAA-MM-DD local de `dias` atrás (o backend filtra por dia no fuso da prefeitura). */
+function inicioDoPeriodo(periodo: Periodo) {
+  if (periodo === 'tudo') return undefined;
+  const d = new Date();
+  d.setDate(d.getDate() - Number(periodo) + 1);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export default function AuditoriaScreen() {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const [acao, setAcao] = useState('');
+  const [periodo, setPeriodo] = useState<Periodo>('tudo');
   const [pessoa, setPessoa] = useState<{ id: string; nome: string } | null>(null);
   const [aberto, setAberto] = useState<RegistroAuditoria | null>(null);
 
+  const inicio = inicioDoPeriodo(periodo);
   const lista = useListaPaginada<RegistroAuditoria>(
-    (page) => apiGestao.auditoria({ acao: acao || undefined, usuario_id: pessoa?.id, page }),
-    `${acao}|${pessoa?.id ?? ''}`,
+    (page) =>
+      apiGestao.auditoria({ acao: acao || undefined, usuario_id: pessoa?.id, inicio, page }),
+    `${acao}|${pessoa?.id ?? ''}|${inicio ?? ''}`,
   );
 
-  const filtrando = !!acao || !!pessoa;
+  const filtrando = !!acao || !!pessoa || periodo !== 'tudo';
 
   return (
     <GestaoShell
@@ -61,6 +87,15 @@ export default function AuditoriaScreen() {
           value={acao}
           onChange={setAcao}
         />
+        {/* Os chips já têm o recuo lateral próprio: sangra até a borda. */}
+        <View style={styles.sangria}>
+          <FilterChips
+            options={PERIODOS}
+            value={periodo}
+            onChange={setPeriodo}
+            accessibilityLabel="Período"
+          />
+        </View>
         {pessoa ? (
           <View style={styles.pessoa}>
             <Badge label={`Só ações de ${pessoa.nome}`} tone="primary" icon="person" />
@@ -99,7 +134,7 @@ export default function AuditoriaScreen() {
               title={filtrando ? 'Nenhum registro com estes filtros' : 'Nenhum registro ainda'}
               description={
                 filtrando
-                  ? 'Tente outra ação ou remova o filtro de pessoa.'
+                  ? 'Tente outra ação, um período maior ou remova o filtro de pessoa.'
                   : 'Alterações de equipe, categorias, configuração e moderação aparecem aqui.'
               }
               action={
@@ -108,6 +143,7 @@ export default function AuditoriaScreen() {
                       label: 'Limpar filtros',
                       onPress: () => {
                         setAcao('');
+                        setPeriodo('tudo');
                         setPessoa(null);
                       },
                     }
@@ -163,13 +199,16 @@ function DetalheSheet({
 }) {
   if (!r) return null;
   const detalhe = detalheDaAuditoria(r);
-  const acaoRotulo = ACOES_AUDITORIA.find((a) => a.value === r.acao)?.label ?? r.acao;
+  const mudancas = mudancasDaAuditoria(r);
+  const acaoRotulo = rotuloDaAcao(r.acao);
   const linhas: [string, string][] = [
     ['Quando', formatarDataHora(r.criado_em)],
     ['Quem', r.usuario_nome || 'Sistema'],
     ['Ação', acaoRotulo],
   ];
-  if (r.alvo_tipo) linhas.push(['Alvo', `${r.alvo_tipo}${r.alvo_id ? ` #${r.alvo_id}` : ''}`]);
+  if (r.alvo_tipo && r.alvo_tipo !== 'municipio') {
+    linhas.push(['Alvo', `${r.alvo_tipo.replace(/_/g, ' ')}${r.alvo_id ? ` #${r.alvo_id}` : ''}`]);
+  }
   if (r.ip) linhas.push(['Endereço IP', r.ip]);
 
   return (
@@ -209,6 +248,27 @@ function DetalheSheet({
           </View>
         ))}
       </View>
+      {mudancas.length ? (
+        <View style={styles.tabela}>
+          <AppText variant="label" accessibilityRole="header">
+            O que mudou
+          </AppText>
+          {mudancas.map((m) => (
+            <View
+              key={m.campo}
+              style={styles.linha}
+              accessible
+              accessibilityLabel={`${m.campo}: de ${m.antes} para ${m.depois}`}>
+              <AppText variant="caption" tone="muted" style={styles.rotulo}>
+                {m.campo}
+              </AppText>
+              <AppText variant="bodySm" style={styles.flex}>
+                {m.antes} → {m.depois}
+              </AppText>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </BottomSheet>
   );
 }
@@ -218,6 +278,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Layout.gutter,
     paddingBottom: Spacing[3],
     gap: Spacing[2],
+  },
+  sangria: {
+    marginHorizontal: -Layout.gutter,
   },
   pessoa: {
     flexDirection: 'row',

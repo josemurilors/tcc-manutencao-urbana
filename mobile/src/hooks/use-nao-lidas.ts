@@ -5,6 +5,7 @@
  *
  * Polling leve: a cada 60 s, só com a tela em foco e o app em primeiro plano
  * — aba escondida ou app em segundo plano não gastam bateria nem servidor.
+ * Um push que chega com o app aberto atualiza o selo na hora.
  */
 
 import { useFocusEffect } from 'expo-router';
@@ -89,9 +90,13 @@ export function useNaoLidas() {
       const sub = AppState.addEventListener('change', (estado) => {
         if (estado === 'active') buscar();
       });
+      // Todo push vira também uma notificação na central: o selo sobe junto.
+      const subPush =
+        Platform.OS === 'web' ? null : Notifications.addNotificationReceivedListener(buscar);
       return () => {
         clearInterval(timer);
         sub.remove();
+        subPush?.remove();
       };
     }, [isAuthenticated]),
   );

@@ -8,9 +8,13 @@
 
 import { API_URL, request } from '@/services/api';
 import { getTokenSync } from '@/services/storage';
+import type { Defeito } from '@/types';
 import type { AnexoChamado, ChamadoDetalhe, ChamadoProximo, EventoChamado } from '@/types/cidadao';
 
 type Id = number | string;
+
+/** Teto de páginas de "Meus chamados" (20 por página): 500 chamados. */
+const MAX_PAGINAS_MEUS = 25;
 
 /**
  * Domínio público dos links compartilhados. Fixo de propósito: um link
@@ -77,6 +81,24 @@ function urlAbsoluta(url: string) {
 }
 
 export const apiCidadao = {
+  /**
+   * Todos os chamados do usuário. `/defeitos/meus/` é paginado (20 por
+   * página): pegar só a primeira escondia chamados de quem reporta muito —
+   * e as contagens de abertos/resolvidos saíam erradas.
+   */
+  meusChamados: async () => {
+    const todos: Defeito[] = [];
+    for (let pagina = 1; pagina <= MAX_PAGINAS_MEUS; pagina++) {
+      const dados = await request<{ results?: Defeito[]; next?: string | null } | Defeito[]>(
+        `/api/v1/defeitos/meus/?page=${pagina}`,
+      );
+      if (Array.isArray(dados)) return dados;
+      todos.push(...(dados.results ?? []));
+      if (!dados.next) break;
+    }
+    return todos;
+  },
+
   /**
    * Chamados perto do ponto, para o "já reportado aqui?" antes de enviar.
    * Público: um token velho no aparelho não pode derrubar a checagem.

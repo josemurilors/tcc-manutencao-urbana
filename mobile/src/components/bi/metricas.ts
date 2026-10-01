@@ -68,7 +68,7 @@ export const KPIS: Record<BiChaveKpi, DefinicaoKpi> = {
   primeira_resposta_p50_h: {
     titulo: 'Primeira resposta',
     ajuda:
-      'Mediana do tempo até a prefeitura fazer a triagem do chamado (primeira saída de "Recebido"). É quando o cidadão percebe que foi ouvido.',
+      'Mediana do tempo até a primeira resposta da prefeitura ao cidadão: a triagem ou a primeira mensagem pública da equipe, o que vier antes. É quando o cidadão percebe que foi ouvido.',
     polaridade: 'menor',
     formato: 'horas',
     icone: 'chatbubble-ellipses',
@@ -98,7 +98,8 @@ export const KPIS: Record<BiChaveKpi, DefinicaoKpi> = {
   },
   taxa_resolucao: {
     titulo: 'Taxa de resolução',
-    ajuda: 'Resolvidos no período divididos pelos recebidos no período. Acima de 100% a fila está diminuindo.',
+    ajuda:
+      'Dos chamados recebidos no período, quantos já estavam resolvidos ao fim dele. Mostra se a demanda nova está sendo atendida a tempo.',
     polaridade: 'maior',
     formato: 'pct',
     icone: 'trending-up',

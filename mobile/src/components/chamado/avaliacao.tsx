@@ -23,16 +23,31 @@ const NOMES = ['Muito ruim', 'Ruim', 'Regular', 'Bom', 'Excelente'];
 const JANELA_EDICAO_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_COMENTARIO = 500;
 
+/**
+ * A nota guardada é desta resolução? Um chamado reaberto e resolvido de novo
+ * mantém a nota antiga no banco (o BI não perde o histórico), mas o backend
+ * aceita uma avaliação nova a partir do novo `resolvido_em`.
+ */
+export function avaliadoNestaResolucao(d: ChamadoDetalhe) {
+  if (d.avaliacao_nota == null) return false;
+  // Listagem de backend antigo não traz `avaliado_em`: vale a nota.
+  if (!d.avaliado_em || !d.resolvido_em) return true;
+  return new Date(d.avaliado_em).getTime() >= new Date(d.resolvido_em).getTime();
+}
+
 /** O autor ainda pode avaliar (ou rever a nota) este chamado? */
 export function podeAvaliar(d: ChamadoDetalhe) {
   if (!d.eh_autor || normalizarStatus(d.status) !== 'concluido') return false;
-  if (!d.avaliado_em) return true;
+  if (!avaliadoNestaResolucao(d)) return true;
+  // O backend conta os 7 dias da primeira nota do ciclo; `avaliado_em` é a
+  // última edição, então isto pode liberar a mais — o 409 vira aviso.
+  if (!d.avaliado_em) return false;
   return Date.now() - new Date(d.avaliado_em).getTime() < JANELA_EDICAO_MS;
 }
 
-/** Selo "avaliar" da lista: resolvido, do autor, sem nota ainda. */
+/** Selo "avaliar" da lista: resolvido, do autor, sem nota nesta resolução. */
 export function aguardaAvaliacao(d: ChamadoDetalhe) {
-  return !!d.eh_autor && normalizarStatus(d.status) === 'concluido' && d.avaliacao_nota == null;
+  return !!d.eh_autor && normalizarStatus(d.status) === 'concluido' && !avaliadoNestaResolucao(d);
 }
 
 export function Estrelas({
@@ -84,10 +99,10 @@ export function AvaliacaoChamado({
 }) {
   const colors = useColors();
   const toast = useToast();
-  const jaAvaliado = defeito.avaliacao_nota != null;
+  const jaAvaliado = avaliadoNestaResolucao(defeito);
   const [editando, setEditando] = useState(!jaAvaliado);
-  const [nota, setNota] = useState(defeito.avaliacao_nota ?? 0);
-  const [comentario, setComentario] = useState(defeito.avaliacao_comentario ?? '');
+  const [nota, setNota] = useState(jaAvaliado ? (defeito.avaliacao_nota ?? 0) : 0);
+  const [comentario, setComentario] = useState(jaAvaliado ? (defeito.avaliacao_comentario ?? '') : '');
   const [enviando, setEnviando] = useState(false);
 
   if (!defeito.eh_autor || normalizarStatus(defeito.status) !== 'concluido') return null;

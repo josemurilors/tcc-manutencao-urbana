@@ -5,16 +5,17 @@
  * - `/painel/bairro` (sem `chave`): a tabela completa daquela dimensão, com
  *   todas as colunas da distribuição e ordenação escolhida. Tocar numa linha
  *   desce para a lista dela.
- * - `/painel/bairro?chave=Centro` ou `/painel/vencidos`: os chamados abertos
- *   daquela fatia, vindos da fila de operação (contrato 7.1), do mais
- *   atrasado para o menos. Tocar abre o chamado no mapa.
+ * - `/painel/bairro?chave=centro`, `/painel/vencidos` ou `/painel/todos`: os
+ *   chamados por trás do número tocado (`bi/chamados/`, mesma regra de
+ *   contagem do painel), com troca entre abertos, vencidos, recebidos,
+ *   resolvidos e rejeitados (`?recorte=`). Tocar abre o chamado no mapa.
  *
  * Os filtros do painel chegam pelos parâmetros (ver `components/bi/navegar`).
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,6 +26,7 @@ import {
   abrirDrill,
   DIMENSOES_DRILL,
   filtrosDosParams,
+  RECORTES_LISTA,
   ROTULO_DIMENSAO,
   type DimensaoDrill,
 } from '@/components/bi/navegar';
@@ -40,7 +42,7 @@ import { corDoStatus, Layout, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { apiBi } from '@/services/api-bi';
-import type { BiDistribuicaoLinha, ChamadoFilaBi } from '@/types/bi';
+import type { BiDistribuicaoLinha, ChamadoBi, RecorteLista } from '@/types/bi';
 
 type Ordem = 'abertos' | 'vencidos' | 'recebidos' | 'pct_no_prazo' | 'lead_time_p50_h';
 
@@ -51,6 +53,48 @@ const ORDENS: { value: Ordem; label: string }[] = [
   { value: 'pct_no_prazo', label: 'Pior % no prazo' },
   { value: 'lead_time_p50_h', label: 'Mais lentos' },
 ];
+
+const RECORTE_ROTULO: Record<RecorteLista, { chip: string; titulo: string; total: [string, string]; vazio: string }> = {
+  abertos: {
+    chip: 'Em aberto',
+    titulo: 'Chamados em aberto',
+    total: ['chamado em aberto ao fim do período', 'chamados em aberto ao fim do período'],
+    vazio: 'Nenhum chamado em aberto nesta fatia.',
+  },
+  vencidos: {
+    chip: 'Prazo vencido',
+    titulo: 'Chamados com prazo vencido',
+    total: ['chamado com prazo vencido', 'chamados com prazo vencido'],
+    vazio: 'Nenhum chamado com prazo vencido. Esta fatia está em dia.',
+  },
+  recebidos: {
+    chip: 'Recebidos',
+    titulo: 'Chamados recebidos',
+    total: ['chamado recebido no período', 'chamados recebidos no período'],
+    vazio: 'Nenhum chamado recebido no período.',
+  },
+  resolvidos: {
+    chip: 'Resolvidos',
+    titulo: 'Chamados resolvidos',
+    total: ['chamado resolvido no período', 'chamados resolvidos no período'],
+    vazio: 'Nenhum chamado resolvido no período.',
+  },
+  rejeitados: {
+    chip: 'Rejeitados',
+    titulo: 'Chamados rejeitados',
+    total: ['chamado rejeitado no período', 'chamados rejeitados no período'],
+    vazio: 'Nenhum chamado rejeitado no período.',
+  },
+};
+
+/** Recorte inicial: o da URL; numa situação fechada, o número que ela tem. */
+function recorteInicial(param: string | undefined, dimensao: DimensaoDrill | null, chave: string | null): RecorteLista {
+  if (param && (RECORTES_LISTA as string[]).includes(param)) return param as RecorteLista;
+  if (dimensao === 'vencidos') return 'vencidos';
+  if (dimensao === 'status' && chave === 'concluido') return 'resolvidos';
+  if (dimensao === 'status' && chave === 'rejeitado') return 'rejeitados';
+  return 'abertos';
+}
 
 export default function DrillDownScreen() {
   const { user, isAuthenticated } = useAuth();
@@ -67,23 +111,25 @@ export default function DrillDownScreen() {
   const filtros = useMemo(() => filtrosDosParams(JSON.parse(paramsJson)), [paramsJson]);
   const chave = params.chave || null;
   const rotulo = params.rotulo || chave;
+  const [recorte, setRecorte] = useState<RecorteLista>(() => recorteInicial(params.recorte, dimensao, chave));
 
   function voltar() {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/painel');
   }
 
+  const lista = !!dimensao && (!!chave || dimensao === 'vencidos' || dimensao === 'todos');
   const titulo = !dimensao
     ? 'Painel'
-    : dimensao === 'vencidos'
-      ? 'Chamados com prazo vencido'
+    : dimensao === 'vencidos' || dimensao === 'todos'
+      ? RECORTE_ROTULO[recorte].titulo
       : chave
         ? (dimensao === 'status' ? rotuloOperacao(chave) : rotulo) ?? ''
         : `Por ${ROTULO_DIMENSAO[dimensao].singular.toLowerCase()}`;
 
   const contexto = [
     descreverPeriodo(filtros.periodo, filtros.inicio, filtros.fim),
-    chave && dimensao && dimensao !== 'vencidos' ? ROTULO_DIMENSAO[dimensao].singular : null,
+    chave && dimensao && dimensao !== 'vencidos' && dimensao !== 'todos' ? ROTULO_DIMENSAO[dimensao].singular : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -108,10 +154,12 @@ export default function DrillDownScreen() {
         action={{ label: 'Voltar ao painel', onPress: () => router.replace('/(tabs)/painel') }}
       />
     );
-  } else if (chave || dimensao === 'vencidos') {
-    corpo = <ListaChamados filtros={filtros} dimensao={dimensao} chave={chave} />;
+  } else if (lista) {
+    corpo = (
+      <ListaChamados filtros={filtros} dimensao={dimensao} chave={chave} recorte={recorte} onRecorte={setRecorte} />
+    );
   } else {
-    corpo = <TabelaDimensao filtros={filtros} dimensao={dimensao} />;
+    corpo = <TabelaDimensao filtros={filtros} dimensao={dimensao as Exclude<DimensaoDrill, 'vencidos' | 'todos'>} />;
   }
 
   return (
@@ -141,7 +189,7 @@ function TabelaDimensao({
   dimensao,
 }: {
   filtros: ReturnType<typeof filtrosDosParams>;
-  dimensao: Exclude<DimensaoDrill, 'vencidos'>;
+  dimensao: Exclude<DimensaoDrill, 'vencidos' | 'todos'>;
 }) {
   const insets = useSafeAreaInsets();
   const [ordem, setOrdem] = useState<Ordem>('abertos');
@@ -173,10 +221,16 @@ function TabelaDimensao({
           posicao={index + 1}
           dimensao={dimensao}
           onPress={() =>
-            abrirDrill(filtros, dimensao, {
-              chave: String(item.chave),
-              rotulo: dimensao === 'status' ? rotuloOperacao(String(item.chave)) : item.rotulo || String(item.chave),
-            })
+            abrirDrill(
+              filtros,
+              dimensao,
+              {
+                chave: String(item.chave),
+                rotulo: dimensao === 'status' ? rotuloOperacao(String(item.chave)) : item.rotulo || String(item.chave),
+              },
+              // Fatia sem nada aberto: a lista útil é a do que entrou ou saiu no período.
+              item.abertos > 0 ? undefined : item.resolvidos > 0 ? 'resolvidos' : 'recebidos',
+            )
           }
         />
       )}
@@ -192,7 +246,7 @@ function LinhaDimensao({
 }: {
   linha: BiDistribuicaoLinha;
   posicao: number;
-  dimensao: Exclude<DimensaoDrill, 'vencidos'>;
+  dimensao: Exclude<DimensaoDrill, 'vencidos' | 'todos'>;
   onPress: () => void;
 }) {
   const colors = useColors();
@@ -210,7 +264,7 @@ function LinhaDimensao({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${posicao}º, ${nome}. ${metricas.map(([k, v]) => `${k}: ${v}`).join(', ')}`}
-      accessibilityHint="Abre os chamados abertos"
+      accessibilityHint="Abre os chamados desta linha"
       style={({ pressed }) => [
         styles.linha,
         { backgroundColor: pressed ? colors.surfacePressed : colors.surface, borderColor: colors.border },
@@ -262,35 +316,48 @@ function ListaChamados({
   filtros,
   dimensao,
   chave,
+  recorte,
+  onRecorte,
 }: {
   filtros: ReturnType<typeof filtrosDosParams>;
   dimensao: DimensaoDrill;
   chave: string | null;
+  recorte: RecorteLista;
+  onRecorte: (r: RecorteLista) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [itens, setItens] = useState<ChamadoFilaBi[]>([]);
+  const [itens, setItens] = useState<ChamadoBi[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [pagina, setPagina] = useState(1);
   const [temMais, setTemMais] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Troca de recorte no meio de um carregamento: a resposta antiga é descartada.
+  const geracao = useRef(0);
 
   // Só o que vem depois da resposta mexe no estado: o "carregando" é ligado
-  // por quem pede (estado inicial, "Carregar mais", "Tentar de novo").
+  // por quem pede (troca de recorte, "Carregar mais", "Tentar de novo").
   const buscarPagina = useCallback(
-    (p: number) =>
-      apiBi
-        .chamados(filtros, { dimensao, chave }, p)
+    (p: number) => {
+      const minha = ++geracao.current;
+      return apiBi
+        .chamados(filtros, { dimensao, chave, recorte }, p)
         .then((r) => {
+          if (minha !== geracao.current) return;
           setItens((atual) => (p === 1 ? r.results : [...atual, ...r.results]));
           setTotal(r.count);
           setTemMais(!!r.next);
           setPagina(p);
           setErro(null);
         })
-        .catch((e: unknown) => setErro(mensagemAmigavel(e, 'Falha ao carregar os chamados.')))
-        .finally(() => setCarregando(false)),
-    [filtros, dimensao, chave],
+        .catch((e: unknown) => {
+          if (minha === geracao.current) setErro(mensagemAmigavel(e, 'Falha ao carregar os chamados.'));
+        })
+        .finally(() => {
+          if (minha === geracao.current) setCarregando(false);
+        });
+    },
+    [filtros, dimensao, chave, recorte],
   );
 
   useEffect(() => {
@@ -303,35 +370,55 @@ function ListaChamados({
     buscarPagina(p);
   }
 
-  if (erro && itens.length === 0) {
-    return <StateView kind="error" description={erro} onRetry={() => carregar(1)} />;
+  function trocarRecorte(r: RecorteLista) {
+    if (r === recorte) return;
+    setItens([]);
+    setTotal(null);
+    setTemMais(false);
+    setErro(null);
+    setCarregando(true);
+    onRecorte(r);
   }
-  if (carregando && itens.length === 0) return <StateView kind="loading" skeleton={5} title="Carregando chamados" />;
+
+  const rot = RECORTE_ROTULO[recorte];
+  const cabecalho = (
+    <View style={styles.cabecalhoLista}>
+      <View style={styles.ordem}>
+        <FilterChips
+          options={RECORTES_LISTA.map((r) => ({ value: r, label: RECORTE_ROTULO[r].chip }))}
+          value={recorte}
+          onChange={trocarRecorte}
+          accessibilityLabel="Quais chamados mostrar"
+        />
+      </View>
+      {total != null ? (
+        <AppText variant="bodySm" tone="secondary" style={styles.total} accessibilityLiveRegion="polite">
+          {fmtNumero(total)} {total === 1 ? rot.total[0] : rot.total[1]}
+          {itens.length < total ? ` · mostrando ${fmtNumero(itens.length)}` : ''}
+        </AppText>
+      ) : null}
+    </View>
+  );
+
+  let vazio: React.ReactNode;
+  if (erro) {
+    vazio = <StateView kind="error" description={erro} onRetry={() => carregar(1)} />;
+  } else if (carregando) {
+    vazio = <StateView kind="loading" skeleton={5} title="Carregando chamados" />;
+  } else {
+    vazio = <StateView kind="empty" icon="checkmark-done-outline" title="Nada aqui" description={rot.vazio} />;
+  }
 
   return (
     <FlatList
       data={itens}
       keyExtractor={(c) => String(c.id)}
       contentContainerStyle={{ paddingBottom: insets.bottom + Spacing[10], gap: Spacing[2] }}
-      ListHeaderComponent={
-        total != null ? (
-          <AppText variant="bodySm" tone="secondary" style={styles.total} accessibilityLiveRegion="polite">
-            {fmtNumero(total)} {total === 1 ? 'chamado aberto' : 'chamados abertos'} agora
-            {itens.length < total ? ` · mostrando ${fmtNumero(itens.length)}` : ''}
-          </AppText>
-        ) : null
-      }
-      ListEmptyComponent={
-        <StateView
-          kind="empty"
-          icon="checkmark-done-outline"
-          title="Nenhum chamado aberto"
-          description="Esta fatia está em dia."
-        />
-      }
+      ListHeaderComponent={cabecalho}
+      ListEmptyComponent={vazio}
       renderItem={({ item }) => <LinhaChamado chamado={item} />}
       ListFooterComponent={
-        erro ? (
+        itens.length === 0 ? null : erro ? (
           <StateView kind="error" description={erro} onRetry={() => carregar(pagina + 1)} />
         ) : temMais ? (
           <Button variant="secondary" onPress={() => carregar(pagina + 1)} loading={carregando} block>
@@ -343,21 +430,26 @@ function ListaChamados({
   );
 }
 
-function LinhaChamado({ chamado }: { chamado: ChamadoFilaBi }) {
+function LinhaChamado({ chamado }: { chamado: ChamadoBi }) {
   const colors = useColors();
   const cor = corDoStatus(colors, chamado.status);
   const prazo = descreverPrazo(chamado);
   const local = [chamado.rua, chamado.bairro].filter(Boolean).join(', ');
-  const categoria = chamado.categoria_nome ?? chamado.categoria ?? '';
-  const meta = [chamado.protocolo, categoria, chamado.atendente_nome ? `com ${chamado.atendente_nome}` : 'sem responsável']
-    .filter(Boolean)
-    .join(' · ');
+  const situacao = chamado.status_rotulo || rotuloOperacao(chamado.status);
+  const quem = chamado.atendente_nome
+    ? `com ${chamado.atendente_nome}`
+    : chamado.equipe_nome
+      ? `com ${chamado.equipe_nome}`
+      : chamado.sla_restante_horas != null
+        ? 'sem responsável'
+        : null;
+  const meta = [chamado.protocolo, chamado.categoria_nome, quem].filter(Boolean).join(' · ');
 
   return (
     <Pressable
       onPress={() => abrirChamado(chamado.id)}
       accessibilityRole="button"
-      accessibilityLabel={`${chamado.titulo}. ${rotuloOperacao(chamado.status)}. ${prazo?.texto ?? ''}. ${local}. ${meta}`}
+      accessibilityLabel={`${chamado.titulo}. ${situacao}. ${prazo?.texto ?? ''}. ${local}. ${meta}`}
       accessibilityHint="Abre o chamado no mapa"
       style={({ pressed }) => [
         styles.linha,
@@ -370,7 +462,7 @@ function LinhaChamado({ chamado }: { chamado: ChamadoFilaBi }) {
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </View>
       <View style={styles.selos}>
-        <Badge label={rotuloOperacao(chamado.status)} color={cor} size="sm" icon="ellipse" />
+        <Badge label={situacao} color={cor} size="sm" icon="ellipse" />
         {prazo ? <Badge label={prazo.texto} tone={prazo.tom} icon={prazo.icone} size="sm" /> : null}
       </View>
       {local ? (
@@ -385,7 +477,13 @@ function LinhaChamado({ chamado }: { chamado: ChamadoFilaBi }) {
   );
 }
 
-function descreverPrazo(c: ChamadoFilaBi) {
+function descreverPrazo(c: ChamadoBi) {
+  // Fechado: o que importa é se cumpriu o prazo.
+  if (c.no_prazo != null) {
+    return c.no_prazo
+      ? { texto: 'Resolvido no prazo', tom: 'success' as const, icone: 'checkmark-circle' as const }
+      : { texto: 'Resolvido fora do prazo', tom: 'warning' as const, icone: 'alert-circle' as const };
+  }
   const h = c.sla_restante_horas;
   if (h == null) return c.sla_vencido ? { texto: 'Prazo vencido', tom: 'danger' as const, icone: 'alarm' as const } : null;
   if (h < 0 || c.sla_vencido) {
@@ -424,6 +522,9 @@ const styles = StyleSheet.create({
   },
   total: {
     paddingBottom: Spacing[1],
+  },
+  cabecalhoLista: {
+    gap: Spacing[1],
   },
   linha: {
     borderWidth: 1,

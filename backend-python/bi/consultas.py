@@ -69,15 +69,43 @@ def inicio_do_dia(dia):
     return datetime.combine(dia, time.min, tzinfo=fuso())
 
 
+# Valor de recorte para "sem categoria/secretaria/equipe/bairro" — a chave que
+# `distribuicao/` devolve para o grupo sem valor, aceita de volta nos filtros.
+SEM = 'nenhum'
+# Prefixo das chaves de chamados antigos agrupados pelo nome em texto.
+PREFIXO_NOME = 'nome:'
+
+
+def secretaria_efetiva(alias='d'):
+    """
+    Secretaria responsável pelo chamado: a gravada nele ou, sem ela (chamados
+    anteriores ao roteamento), a que o município configurou para a categoria
+    em `categoria_municipio`. Sem isso o filtro por secretaria do painel
+    zerava toda a base legada.
+    """
+    return (
+        f'COALESCE({alias}.secretaria_id, (SELECT cm.secretaria_id FROM categoria_municipio cm '
+        f'WHERE cm.municipio_id = {alias}.municipio_id AND cm.categoria_id = {alias}.categoria_id))'
+    )
+
+
+def _nome_categoria_texto(alias='d'):
+    return f"COALESCE(NULLIF(btrim({alias}.categoria), ''), 'Sem categoria')"
+
+
 @dataclass(frozen=True)
 class Escopo:
-    """Município + período (datas locais, `fim` inclusivo) + filtros do painel."""
+    """
+    Município + período (datas locais, `fim` inclusivo) + filtros do painel.
+    `categoria_id`/`secretaria_id`/`equipe_id` são o id (int), `SEM` (o grupo
+    sem valor) ou, para categoria e secretaria, `nome:<texto>` (legado sem id).
+    """
     municipio_id: str
     inicio: date
     fim: date
-    categoria_id: int | None = None
-    secretaria_id: int | None = None
-    equipe_id: int | None = None
+    categoria_id: int | str | None = None
+    secretaria_id: int | str | None = None
+    equipe_id: int | str | None = None
     bairro: str | None = None
 
     @property
@@ -109,8 +137,16 @@ class Escopo:
 
 # --- montagem do SQL ---------------------------------------------------------
 
+def _sem_prefixo(valor):
+    if isinstance(valor, str) and valor.startswith(PREFIXO_NOME):
+        return valor[len(PREFIXO_NOME):]
+    return None
+
+
 def _params(escopo, **extra):
     p = {
+        'categoria_nome_f': _sem_prefixo(escopo.categoria_id),
+        'secretaria_nome_f': _sem_prefixo(escopo.secretaria_id),
         'mun': str(escopo.municipio_id),
         'ini': escopo.ini_dt,
         'fim': escopo.fim_dt,
@@ -127,15 +163,32 @@ def _params(escopo, **extra):
 
 
 def _filtro(escopo, alias='d'):
-    partes = [f'{alias}.municipio_id = %(mun)s', f'{alias}.removido_em IS NULL']
-    if escopo.categoria_id is not None:
-        partes.append(f'{alias}.categoria_id = %(categoria_id)s')
-    if escopo.secretaria_id is not None:
-        partes.append(f'{alias}.secretaria_id = %(secretaria_id)s')
-    if escopo.equipe_id is not None:
-        partes.append(f'{alias}.equipe_id = %(equipe_id)s')
-    if (escopo.bairro or '').strip():
-        partes.append(f'lower(btrim({alias}.bairro)) = lower(%(bairro)s)')
+    a = alias
+    partes = [f'{a}.municipio_id = %(mun)s', f'{a}.removido_em IS NULL']
+    cat = escopo.categoria_id
+    if cat == SEM:
+        partes.append(f"{a}.categoria_id IS NULL AND NULLIF(btrim({a}.categoria), '') IS NULL")
+    elif _sem_prefixo(cat) is not None:
+        partes.append(f'{a}.categoria_id IS NULL AND lower({_nome_categoria_texto(a)}) = %(categoria_nome_f)s')
+    elif cat is not None:
+        partes.append(f'{a}.categoria_id = %(categoria_id)s')
+    sec = escopo.secretaria_id
+    sec_ef = secretaria_efetiva(a)
+    if sec == SEM:
+        partes.append(f"{sec_ef} IS NULL AND NULLIF(btrim({a}.secretaria_responsavel), '') IS NULL")
+    elif _sem_prefixo(sec) is not None:
+        partes.append(f'{sec_ef} IS NULL AND lower(btrim({a}.secretaria_responsavel)) = %(secretaria_nome_f)s')
+    elif sec is not None:
+        partes.append(f'{sec_ef} = %(secretaria_id)s')
+    if escopo.equipe_id == SEM:
+        partes.append(f'{a}.equipe_id IS NULL')
+    elif escopo.equipe_id is not None:
+        partes.append(f'{a}.equipe_id = %(equipe_id)s')
+    bairro = (escopo.bairro or '').strip()
+    if bairro == SEM:
+        partes.append(f"NULLIF(btrim({a}.bairro), '') IS NULL")
+    elif bairro:
+        partes.append(f'lower(btrim({a}.bairro)) = lower(%(bairro)s)')
     return ' AND '.join(partes)
 
 
@@ -157,6 +210,7 @@ def _cte_base(escopo):
                d.prazo_em, d.triado_em, d.reaberturas, d.avaliacao_nota,
                d.avaliacao_comentario, d.avaliado_em, d.atendente_id, d.latitude,
                d.longitude, d.bairro, d.rua, d.secretaria_id, d.equipe_id,
+               {secretaria_efetiva('d')} AS secretaria_ef,
                d.secretaria_responsavel, d.prioridade, d.motivo_rejeicao, d.titulo,
                d.categoria_id, d.iniciado_em, d.atribuido_em, d.visibilidade,
                COALESCE(c.nome, NULLIF(btrim(d.categoria), ''), 'Sem categoria') AS categoria_nome,
@@ -305,7 +359,8 @@ def serie(escopo, granularidade='dia'):
 # --- distribuição por dimensão ----------------------------------------------
 
 # (expressão da chave, expressão do rótulo, join extra). Chamados antigos sem
-# `categoria_id`/`secretaria_id` agrupam pelo nome em texto.
+# `categoria_id`/`secretaria_id` agrupam pelo nome em texto (`nome:<texto>`);
+# o grupo sem valor vem com a chave `SEM`. Toda chave volta como filtro.
 DIMENSOES = {
     'categoria': (
         "COALESCE(m.categoria_id::text, 'nome:' || lower(m.categoria_nome))",
@@ -313,17 +368,18 @@ DIMENSOES = {
         '',
     ),
     'bairro': (
-        'lower(btrim(m.bairro))',
+        f"COALESCE(NULLIF(lower(btrim(m.bairro)), ''), '{SEM}')",
         "COALESCE(NULLIF(btrim(m.bairro), ''), 'Sem bairro')",
         '',
     ),
     'secretaria': (
-        "COALESCE(m.secretaria_id::text, 'nome:' || lower(btrim(m.secretaria_responsavel)))",
+        "COALESCE(m.secretaria_ef::text, 'nome:' || NULLIF(lower(btrim(m.secretaria_responsavel)), ''),"
+        f" '{SEM}')",
         "COALESCE(s.nome, NULLIF(btrim(m.secretaria_responsavel), ''), 'Sem secretaria')",
-        'LEFT JOIN secretarias s ON s.id = m.secretaria_id',
+        'LEFT JOIN secretarias s ON s.id = m.secretaria_ef',
     ),
     'equipe': (
-        "COALESCE(m.equipe_id::text, '')",
+        f"COALESCE(m.equipe_id::text, '{SEM}')",
         "COALESCE(e.nome, 'Sem equipe')",
         'LEFT JOIN equipes e ON e.id = m.equipe_id',
     ),
@@ -365,6 +421,133 @@ def distribuicao(escopo, dimensao='categoria'):
             'lead_time_p50_h': _r(linha['lead_p50']),
         })
     return resultado
+
+
+# --- lista de chamados (drill-down) -----------------------------------------
+
+# Recorte da lista -> condição sobre as flags do CTE `m`. É a mesma flag que
+# alimenta o número tocado, então a lista bate com o número do painel.
+RECORTES_LISTA = {
+    'abertos': 'm.aberto_fim',
+    'vencidos': 'm.aberto_fim AND m.prazo_em < %(corte)s',
+    'recebidos': 'm.recebido',
+    'resolvidos': 'm.resolvido',
+    'rejeitados': 'm.rejeitado',
+}
+_ORDEM_LISTA = {
+    'abertos': 'm.prazo_em ASC NULLS LAST, m.criado_em ASC',
+    'vencidos': 'm.prazo_em ASC NULLS LAST, m.criado_em ASC',
+    'recebidos': 'm.criado_em DESC',
+    'resolvidos': 'm.resolvido_em DESC',
+    'rejeitados': 'm.fechado_ref DESC',
+}
+
+
+def chamados(escopo, recorte='abertos', status=None, limite=20, deslocamento=0):
+    """
+    (total, itens) dos chamados do escopo que compõem um número do painel.
+    O prazo (`sla_*`) é o de agora, para o gestor agir: um chamado da fila do
+    fim do período que já foi fechado aparece com a situação atual.
+    """
+    condicao = RECORTES_LISTA[recorte]
+    if status:
+        condicao += ' AND m.status = %(status)s'
+    params = _params(escopo, status=status, limite=limite, deslocamento=deslocamento)
+    total = _executar(f"""
+    WITH {_cte_base(escopo)}
+    SELECT COUNT(*) AS total FROM m WHERE {condicao}
+    """, params)[0]['total']
+    linhas = _executar(f"""
+    WITH {_cte_base(escopo)}
+    SELECT m.id, m.protocolo, m.titulo, m.status, m.categoria_id, m.categoria_nome,
+           m.bairro, m.rua, m.prioridade, m.criado_em, m.resolvido_em, m.prazo_em,
+           m.latitude, m.longitude, m.equipe_id, m.secretaria_ef AS secretaria_id,
+           COALESCE(s.nome, NULLIF(btrim(m.secretaria_responsavel), '')) AS secretaria_nome,
+           e.nome AS equipe_nome, u.nome AS atendente_nome
+      FROM m
+      LEFT JOIN secretarias s ON s.id = m.secretaria_ef
+      LEFT JOIN equipes e ON e.id = m.equipe_id
+      LEFT JOIN users u ON u.id = m.atendente_id
+     WHERE {condicao}
+     ORDER BY {_ORDEM_LISTA[recorte]}, m.id
+     LIMIT %(limite)s OFFSET %(deslocamento)s
+    """, params)
+    agora = timezone.now()
+    tz = fuso()
+
+    def iso(valor):
+        return timezone.localtime(valor, tz).isoformat() if valor else None
+
+    itens = []
+    for linha in linhas:
+        aberto = linha['status'] in STATUS_ABERTOS
+        prazo = linha['prazo_em']
+        resolvido = linha['status'] == 'concluido' and linha['resolvido_em'] is not None
+        itens.append({
+            'id': str(linha['id']),
+            'protocolo': linha['protocolo'],
+            'titulo': linha['titulo'],
+            'status': linha['status'],
+            'status_rotulo': ROTULOS_OPERACAO.get(linha['status'], linha['status']),
+            'categoria_id': linha['categoria_id'],
+            'categoria_nome': linha['categoria_nome'],
+            'bairro': linha['bairro'] or '',
+            'rua': linha['rua'] or '',
+            'prioridade': linha['prioridade'],
+            'latitude': linha['latitude'],
+            'longitude': linha['longitude'],
+            'secretaria_id': linha['secretaria_id'],
+            'secretaria_nome': linha['secretaria_nome'],
+            'equipe_id': linha['equipe_id'],
+            'equipe_nome': linha['equipe_nome'],
+            'atendente_nome': linha['atendente_nome'],
+            'criado_em': iso(linha['criado_em']),
+            'resolvido_em': iso(linha['resolvido_em']) if resolvido else None,
+            'prazo_em': iso(prazo),
+            'sla_vencido': bool(aberto and prazo is not None and prazo < agora),
+            'sla_restante_horas': (
+                round((prazo - agora).total_seconds() / 3600, 1) if aberto and prazo is not None else None
+            ),
+            'no_prazo': (linha['resolvido_em'] <= prazo) if resolvido and prazo is not None else None,
+        })
+    return total, itens
+
+
+def rotulos_dos_filtros(escopo):
+    """Nomes legíveis dos recortes ativos ("Buraco", "Secretaria de Obras"...), para o PDF."""
+    partes = []
+
+    def nome(sql, valor, **extra):
+        linhas = _executar(sql, {'v': valor, **extra})
+        return linhas[0]['nome'] if linhas else None
+
+    for campo, rotulo, tabela in (
+        ('categoria_id', 'Categoria', 'categorias'),
+        ('secretaria_id', 'Secretaria', 'secretarias'),
+        ('equipe_id', 'Equipe', 'equipes'),
+    ):
+        valor = getattr(escopo, campo)
+        if valor is None:
+            continue
+        if valor == SEM:
+            texto = 'não informada'
+        elif _sem_prefixo(valor) is not None:
+            texto = _sem_prefixo(valor)
+        else:
+            texto = nome(f'SELECT nome FROM {tabela} WHERE id = %(v)s', valor) or f'#{valor}'
+        partes.append(f'{rotulo}: {texto}')
+    bairro = (escopo.bairro or '').strip()
+    if bairro == SEM:
+        partes.append('Bairro: não informado')
+    elif bairro:
+        # O filtro chega em minúsculas (chave da distribuição): volta à grafia cadastrada.
+        grafia = nome(
+            'SELECT MIN(btrim(bairro)) AS nome FROM defeitos '
+            'WHERE municipio_id = %(m)s AND lower(btrim(bairro)) = lower(%(v)s)',
+            bairro, m=str(escopo.municipio_id),
+        )
+        partes.append(f'Bairro: {grafia or bairro}')
+    return ', '.join(partes)
 
 
 # --- aging do backlog -------------------------------------------------------
@@ -447,7 +630,8 @@ def hotspots(escopo):
     SELECT ROUND(m.latitude / %(grade)s) * %(grade)s AS lat,
            ROUND(m.longitude / %(grade)s) * %(grade)s AS lng,
            COUNT(*) AS total,
-           mode() WITHIN GROUP (ORDER BY m.categoria_nome) AS categoria_top
+           mode() WITHIN GROUP (ORDER BY m.categoria_nome) AS categoria_top,
+           mode() WITHIN GROUP (ORDER BY NULLIF(btrim(m.bairro), '')) AS bairro_top
       FROM m
      WHERE m.recebido AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL
      GROUP BY 1, 2
@@ -457,7 +641,8 @@ def hotspots(escopo):
     sql_reinc = f"""
     WITH {_cte_base(escopo)}
     SELECT MIN(btrim(m.bairro)) AS bairro, MIN(btrim(m.rua)) AS rua,
-           m.categoria_nome AS categoria, COUNT(*) AS ocorrencias
+           m.categoria_nome AS categoria, MIN(m.categoria_id) AS categoria_id,
+           COUNT(*) AS ocorrencias
       FROM m
      WHERE m.recebido AND btrim(m.rua) <> ''
      GROUP BY lower(btrim(m.bairro)), lower(btrim(m.rua)), m.categoria_nome
@@ -467,7 +652,7 @@ def hotspots(escopo):
     """
     celulas = [
         {'lat': round(c['lat'], 6), 'lng': round(c['lng'], 6), 'total': c['total'],
-         'categoria_top': c['categoria_top']}
+         'categoria_top': c['categoria_top'], 'bairro_top': c['bairro_top']}
         for c in _executar(sql_celulas, params)
     ]
     return {'celulas': celulas, 'reincidencia': _executar(sql_reinc, params)}
@@ -539,7 +724,7 @@ def linhas_exportacao(escopo):
            m.lead_h, m.reaberturas, m.motivo_rejeicao, COALESCE(ap.total, 0) AS total_apoios,
            m.avaliacao_nota, u.nome AS atendente_nome
       FROM m
-      LEFT JOIN secretarias s ON s.id = m.secretaria_id
+      LEFT JOIN secretarias s ON s.id = m.secretaria_ef
       LEFT JOIN equipes e ON e.id = m.equipe_id
       LEFT JOIN users u ON u.id = m.atendente_id
       LEFT JOIN ap ON ap.defeito_id = m.id
@@ -631,7 +816,7 @@ def chamados_publicos(municipio_id, *, inicio=None, fim=None, protocolos=None,
            (SELECT COUNT(*) FROM apoios a WHERE a.defeito_id = d.id) AS total_apoios
       FROM defeitos d
       LEFT JOIN categorias c ON c.id = d.categoria_id
-      LEFT JOIN secretarias s ON s.id = d.secretaria_id
+      LEFT JOIN secretarias s ON s.id = {secretaria_efetiva('d')}
      WHERE {' AND '.join(partes)}
      ORDER BY d.criado_em DESC
      {limite_sql}

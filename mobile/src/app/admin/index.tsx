@@ -118,20 +118,26 @@ async function buscarContadores(nivel: number): Promise<Record<string, Contador>
     },
     moderacao: async () => {
       const m = await apiGestao.moderacao();
-      const pendentes = m.sinalizados.length;
+      const pendentes = m.contagens.sinalizados;
       return {
         valor: pendentes ? plural(pendentes, 'sinalizado', 'sinalizados') : 'Fila vazia',
-        detalhe: m.usuarios.length
-          ? plural(m.usuarios.length, 'cidadão com advertência', 'cidadãos com advertência')
-          : undefined,
+        detalhe: m.contagens.suspensos
+          ? plural(m.contagens.suspensos, 'cidadão suspenso', 'cidadãos suspensos')
+          : m.usuarios.length
+            ? plural(m.usuarios.length, 'cidadão com advertência', 'cidadãos com advertência')
+            : undefined,
         tom: pendentes ? 'warning' : 'success',
       };
     },
     municipio: async () => {
+      // O que falta configurar é o que interessa no hub: sem contato, o
+      // cidadão não tem a quem recorrer fora do app.
       const c = await apiGestao.municipio();
+      const semContato = !c.email_contato && !c.telefone;
       return {
-        valor: c.contratado ? 'Contrato ativo' : 'Sem contrato',
-        tom: c.contratado ? 'success' : 'neutral',
+        valor: semContato ? 'Falta o contato' : 'Configurado',
+        detalhe: c.parametros?.exigir_foto_conclusao === false ? 'Foto ao concluir opcional' : undefined,
+        tom: semContato ? 'warning' : 'success',
       };
     },
     auditoria: async () => {

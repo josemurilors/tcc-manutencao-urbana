@@ -17,7 +17,7 @@ import type { BiFiltros, PeriodoRapido } from '@/types/bi';
 
 import { intervaloDoPeriodo } from './formato';
 
-export type RotulosFiltro = { categoria?: string; secretaria?: string; bairro?: string };
+export type RotulosFiltro = { categoria?: string; secretaria?: string; equipe?: string; bairro?: string };
 
 type Salvo = { filtros: BiFiltros; rotulos: RotulosFiltro };
 
@@ -89,7 +89,7 @@ export function useFiltrosBi(usuarioId: string | number | undefined) {
     () =>
       aplicar(
         { categoria_id: null, secretaria_id: null, equipe_id: null, bairro: null },
-        { categoria: undefined, secretaria: undefined, bairro: undefined },
+        { categoria: undefined, secretaria: undefined, equipe: undefined, bairro: undefined },
       ),
     [aplicar],
   );

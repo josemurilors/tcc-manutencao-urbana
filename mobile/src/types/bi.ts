@@ -4,8 +4,6 @@
  * em horas (float), como fixa o contrato; a conversão para dias é do app.
  */
 
-import type { Defeito } from '@/types';
-
 /** Atalhos de período da barra de filtros; `personalizado` usa `inicio`/`fim`. */
 export type PeriodoRapido = '7d' | '30d' | '90d' | '12m' | 'personalizado';
 
@@ -61,7 +59,10 @@ export type BiSeriePonto = {
 
 export type DimensaoBi = 'categoria' | 'bairro' | 'secretaria' | 'equipe' | 'status';
 
-/** GET bi/distribuicao/?dimensao= */
+/**
+ * GET bi/distribuicao/?dimensao= — `chave` volta como filtro sem tradução: o id
+ * em texto, `nenhum` para o grupo "Sem ..." ou `nome:<texto>` (legado sem id).
+ */
 export type BiDistribuicaoLinha = {
   chave: string | number;
   rotulo: string;
@@ -90,8 +91,20 @@ export type BiProdutividadeLinha = {
 
 /** GET bi/hotspots/ */
 export type BiHotspots = {
-  celulas: { lat: number; lng: number; total: number; categoria_top: string | null }[];
-  reincidencia: { bairro: string; rua: string; categoria: string; ocorrencias: number }[];
+  celulas: {
+    lat: number;
+    lng: number;
+    total: number;
+    categoria_top: string | null;
+    bairro_top?: string | null;
+  }[];
+  reincidencia: {
+    bairro: string;
+    rua: string;
+    categoria: string;
+    categoria_id?: number | null;
+    ocorrencias: number;
+  }[];
 };
 
 /** GET bi/satisfacao/ — `distribuicao` vem como `{ "1": n, ..., "5": n }`. */
@@ -108,17 +121,37 @@ export type FormatoExportacao = 'csv' | 'xlsx';
 export type OpcaoFiltro = { value: string; label: string };
 
 /**
- * Item da fila de operação (contrato 7.1, `ChamadoFila`), usado no drill-down.
- * Só os campos que a lista do painel lê; o resto vem de `Defeito`.
+ * Qual número do painel a lista do drill-down reproduz (`bi/chamados/?recorte=`):
+ * mesma regra de contagem, então o total da lista é o número tocado.
  */
-export type ChamadoFilaBi = Omit<Defeito, 'id'> & {
-  id: string | number;
-  protocolo?: string | null;
-  sla_vencido?: boolean;
-  sla_restante_horas?: number | null;
-  atendente_nome?: string | null;
-  equipe_nome?: string | null;
+export type RecorteLista = 'abertos' | 'vencidos' | 'recebidos' | 'resolvidos' | 'rejeitados';
+
+/** Item de GET bi/chamados/ (drill-down). Prazo (`sla_*`) medido agora. */
+export type ChamadoBi = {
+  id: string;
+  protocolo: string | null;
+  titulo: string;
+  status: string;
+  status_rotulo: string;
+  categoria_id: number | null;
+  categoria_nome: string;
+  bairro: string;
+  rua: string;
+  prioridade: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  secretaria_id: number | null;
+  secretaria_nome: string | null;
+  equipe_id: number | null;
+  equipe_nome: string | null;
+  atendente_nome: string | null;
+  criado_em: string | null;
+  resolvido_em: string | null;
+  prazo_em: string | null;
+  sla_vencido: boolean;
+  sla_restante_horas: number | null;
+  no_prazo: boolean | null;
 };
 
-/** Página DRF devolvida pela fila. */
+/** Página DRF. */
 export type PaginaBi<T> = { count: number; next: string | null; previous: string | null; results: T[] };

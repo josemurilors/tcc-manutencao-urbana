@@ -26,11 +26,12 @@ import type { BiFiltros, OpcaoFiltro, PeriodoRapido } from '@/types/bi';
 import { dataDeIso, diasNoIntervalo, isoDeTextoBr, isoLocal, textoBrDeIso } from './formato';
 import type { RotulosFiltro } from './use-filtros-bi';
 
-type Recorte = 'categoria' | 'secretaria' | 'bairro';
+type Recorte = 'categoria' | 'secretaria' | 'equipe' | 'bairro';
 
 const TITULO_RECORTE: Record<Recorte, { titulo: string; todos: string }> = {
   categoria: { titulo: 'Categoria', todos: 'Todas as categorias' },
   secretaria: { titulo: 'Secretaria', todos: 'Todas as secretarias' },
+  equipe: { titulo: 'Equipe', todos: 'Todas as equipes' },
   bairro: { titulo: 'Bairro', todos: 'Todos os bairros' },
 };
 
@@ -58,7 +59,13 @@ export function BarraFiltros({ filtros, rotulos, onPeriodo, onAplicar, onLimpar 
   const [datasAbertas, setDatasAbertas] = useState(false);
 
   const valorDo = (r: Recorte) =>
-    r === 'categoria' ? filtros.categoria_id : r === 'secretaria' ? filtros.secretaria_id : filtros.bairro;
+    r === 'categoria'
+      ? filtros.categoria_id
+      : r === 'secretaria'
+        ? filtros.secretaria_id
+        : r === 'equipe'
+          ? filtros.equipe_id
+          : filtros.bairro;
   const algumRecorte = !!(filtros.categoria_id || filtros.secretaria_id || filtros.bairro || filtros.equipe_id);
   const personalizado = filtros.periodo === 'personalizado';
 
@@ -123,7 +130,7 @@ export function BarraFiltros({ filtros, rotulos, onPeriodo, onAplicar, onLimpar 
           <Pressable
             onPress={onLimpar}
             accessibilityRole="button"
-            accessibilityLabel="Limpar filtros de categoria, secretaria e bairro"
+            accessibilityLabel="Limpar filtros de categoria, secretaria, equipe e bairro"
             style={[styles.chip, { borderColor: 'transparent' }]}>
             <Ionicons name="close" size={14} color={colors.textSecondary} />
             <AppText variant="caption" tone="secondary" inControl>
@@ -187,7 +194,9 @@ function SeletorRecorte({
         ? apiBi.opcoesCategoria
         : recorte === 'secretaria'
           ? apiBi.opcoesSecretaria
-          : apiBi.opcoesBairro;
+          : recorte === 'equipe'
+            ? apiBi.opcoesEquipe
+            : apiBi.opcoesBairro;
     return fn(filtros)
       .then(setOpcoes)
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Falha ao carregar as opções.'));

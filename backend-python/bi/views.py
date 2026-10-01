@@ -10,10 +10,12 @@ from datetime import date, timedelta
 from django.http import HttpResponse, StreamingHttpResponse
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
+from rest_framework.utils.urls import replace_query_param
 from rest_framework.views import APIView
 
 from core import auditoria, permissoes
 from core.permissoes import EhGestor
+from defeitos import fluxo
 
 from . import consultas, planilha, relatorio
 
@@ -37,6 +39,24 @@ def _inteiro(valor, nome):
         return int(valor)
     except (TypeError, ValueError):
         raise ValidationError({'detail': f'"{nome}" deve ser um número inteiro.'})
+
+
+def _recorte(valor, nome, aceita_nome=False):
+    """
+    Filtro por id: o número, `nenhum` (o grupo "sem ...") ou, em categoria e
+    secretaria, `nome:<texto>` dos chamados antigos — as chaves que
+    `distribuicao/` devolve voltam como filtro sem tradução no app.
+    """
+    valor = (valor or '').strip()
+    if not valor:
+        return None
+    if valor == consultas.SEM:
+        return valor
+    if aceita_nome and valor.startswith(consultas.PREFIXO_NOME):
+        texto = valor[len(consultas.PREFIXO_NOME):].strip().lower()
+        if texto:
+            return consultas.PREFIXO_NOME + texto
+    return _inteiro(valor, nome)
 
 
 def municipio_do_pedido(request):
@@ -73,9 +93,9 @@ def escopo_do_pedido(request):
         municipio_id=municipio_do_pedido(request),
         inicio=inicio,
         fim=fim,
-        categoria_id=_inteiro(qp.get('categoria_id'), 'categoria_id'),
-        secretaria_id=_inteiro(qp.get('secretaria_id'), 'secretaria_id'),
-        equipe_id=_inteiro(qp.get('equipe_id'), 'equipe_id'),
+        categoria_id=_recorte(qp.get('categoria_id'), 'categoria_id', aceita_nome=True),
+        secretaria_id=_recorte(qp.get('secretaria_id'), 'secretaria_id', aceita_nome=True),
+        equipe_id=_recorte(qp.get('equipe_id'), 'equipe_id'),
         bairro=(qp.get('bairro') or '').strip() or None,
     )
 
@@ -146,6 +166,40 @@ class SatisfacaoView(BiView):
         return Response(consultas.satisfacao(escopo_do_pedido(request)))
 
 
+class ChamadosView(BiView):
+    """
+    Drill-down: os chamados por trás de um número do painel, com os mesmos
+    filtros e a mesma regra de contagem (`recorte`), paginados.
+    """
+    TAMANHO_PADRAO = 20
+    TAMANHO_MAX = 100
+
+    def get(self, request):
+        escopo = escopo_do_pedido(request)
+        qp = request.query_params
+        recorte = qp.get('recorte') or 'abertos'
+        if recorte not in consultas.RECORTES_LISTA:
+            raise ValidationError({'detail': 'recorte deve ser ' + ', '.join(consultas.RECORTES_LISTA) + '.'})
+        status = (qp.get('status') or '').strip() or None
+        if status and status not in fluxo.TRANSICOES:
+            raise ValidationError({'detail': f'Status desconhecido: {status}.'})
+        pagina = _inteiro(qp.get('page'), 'page')
+        pagina = 1 if pagina is None else pagina
+        tamanho = _inteiro(qp.get('page_size'), 'page_size')
+        tamanho = self.TAMANHO_PADRAO if tamanho is None else tamanho
+        if pagina < 1 or not 1 <= tamanho <= self.TAMANHO_MAX:
+            raise ValidationError({'detail': f'page deve ser >= 1 e page_size entre 1 e {self.TAMANHO_MAX}.'})
+        total, itens = consultas.chamados(
+            escopo, recorte, status, limite=tamanho, deslocamento=(pagina - 1) * tamanho)
+        url = request.build_absolute_uri()
+        return Response({
+            'count': total,
+            'next': replace_query_param(url, 'page', pagina + 1) if pagina * tamanho < total else None,
+            'previous': replace_query_param(url, 'page', pagina - 1) if pagina > 1 else None,
+            'results': itens,
+        })
+
+
 class ExportarView(BiView):
     """Uma linha por chamado recebido no período, sem dado pessoal de cidadão."""
 
@@ -190,16 +244,8 @@ class RelatorioView(BiView):
         else:
             ano, mes = relatorio.mes_anterior(consultas.hoje().year, consultas.hoje().month)
         municipio = consultas.municipio_publico(escopo.municipio_id) or {'codigo': escopo.municipio_id}
-        filtros = []
-        if escopo.categoria_id is not None:
-            filtros.append(f'categoria {escopo.categoria_id}')
-        if escopo.secretaria_id is not None:
-            filtros.append(f'secretaria {escopo.secretaria_id}')
-        if escopo.equipe_id is not None:
-            filtros.append(f'equipe {escopo.equipe_id}')
-        if escopo.bairro:
-            filtros.append(f'bairro {escopo.bairro}')
-        pdf = relatorio.gerar_relatorio_mensal(escopo, ano, mes, municipio, ', '.join(filtros))
+        pdf = relatorio.gerar_relatorio_mensal(
+            escopo, ano, mes, municipio, consultas.rotulos_dos_filtros(escopo))
         auditoria.registrar(request, 'bi.relatorio', 'municipio', escopo.municipio_id,
                             dados={'mes': f'{ano:04d}-{mes:02d}', **_filtros_para_auditoria(escopo)},
                             municipio_id=escopo.municipio_id)

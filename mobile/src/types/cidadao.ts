@@ -6,7 +6,7 @@
 
 import type { Defeito, DefeitoEvento } from '@/types';
 
-/** Linha de GET /defeitos/proximos/ — abertos no raio + fechados há até 30 dias. */
+/** Linha de GET /defeitos/proximos/ — abertos no raio + resolvidos há até 30 dias. */
 export type ChamadoProximo = {
   id: string;
   protocolo: string | null;
@@ -17,6 +17,10 @@ export type ChamadoProximo = {
   criado_em: string;
   resolvido_em: string | null;
   total_apoios: number;
+  categoria_id?: number | null;
+  status_rotulo?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 /** Foto do chamado (GET /operacao/chamados/<id>/anexos/). */

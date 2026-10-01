@@ -140,6 +140,19 @@ class TestReabrir:
         assert ev.texto == 'O buraco voltou depois da chuva'
         assert ev.de_status == 'concluido' and ev.para_status == 'pendente'
 
+    def test_reabertura_renova_o_prazo(self):
+        autor_cli, _, _, criado = _concluido()
+        # Resolvido muito depois do prazo original: reabrir não pode nascer atrasado.
+        Defeito.objects.filter(pk=criado['id']).update(
+            prazo_em=timezone.now() - timedelta(days=20),
+            resolvido_em=timezone.now() - timedelta(days=1),
+            fechado_em=timezone.now() - timedelta(days=1),
+        )
+        resp = _reabrir(autor_cli, criado['id'], motivo='O buraco voltou depois da chuva')
+        assert resp.status_code == 200, resp.data
+        assert resp.data['sla_vencido'] is False
+        assert resp.data['sla_restante_horas'] > 0
+
     def test_motivo_obrigatorio(self):
         autor_cli, _, _, criado = _concluido()
         assert _reabrir(autor_cli, criado['id']).status_code == 400

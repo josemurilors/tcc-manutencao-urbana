@@ -299,8 +299,10 @@ class TestAgingProdutividadeHotspotsSatisfacao:
         assert topo['total'] == 2 and topo['categoria_top'] == 'Buraco'
         assert abs(topo['lat'] - -23.5) < 0.002 and abs(topo['lng'] - -46.6) < 0.002
         assert sum(c['total'] for c in resp.data['celulas']) == 4
+        assert topo['bairro_top'] == 'Centro'
         assert resp.data['reincidencia'] == [
-            {'bairro': 'Centro', 'rua': 'Rua A', 'categoria': 'Buraco', 'ocorrencias': 2}]
+            {'bairro': 'Centro', 'rua': 'Rua A', 'categoria': 'Buraco', 'categoria_id': _cat('Buraco'),
+             'ocorrencias': 2}]
 
     def test_satisfacao(self, base):
         resp = _cliente(base['gestor']).get('/api/v1/bi/satisfacao/', MARCO)
@@ -310,6 +312,72 @@ class TestAgingProdutividadeHotspotsSatisfacao:
         assert len(resp.data['comentarios']) == 1
         assert resp.data['comentarios'][0]['protocolo'] == base['a'].protocolo
         assert resp.data['comentarios'][0]['nota'] == 5
+
+
+class TestRecortes:
+    """Chaves da distribuição voltam como filtro (secretaria pela regra da categoria, grupos vazios, legado)."""
+
+    def test_secretaria_pela_regra_da_categoria(self, base):
+        from gestao.models import CategoriaMunicipio, Secretaria
+        obras = Secretaria.objects.create(municipio_id=MUN, nome='Secretaria de Obras', sigla='SO')
+        CategoriaMunicipio.objects.create(municipio_id=MUN, categoria_id=_cat('Buraco'), secretaria=obras)
+        g = _cliente(base['gestor'])
+        linhas = g.get('/api/v1/bi/distribuicao/', {**MARCO, 'dimensao': 'secretaria'}).data
+        por = {l['chave']: l for l in linhas}
+        assert por[str(obras.id)]['rotulo'] == 'Secretaria de Obras'
+        assert por[str(obras.id)]['recebidos'] == 3
+        assert por['nenhum']['rotulo'] == 'Sem secretaria'
+        k = g.get('/api/v1/bi/kpis/', {**MARCO, 'secretaria_id': obras.id}).data['kpis']
+        assert (k['recebidos'], k['resolvidos']) == (3, 3)
+        k = g.get('/api/v1/bi/kpis/', {**MARCO, 'secretaria_id': 'nenhum'}).data['kpis']
+        assert k['recebidos'] == 1
+
+    def test_grupo_sem_valor_e_legado_por_nome(self, base):
+        g = _cliente(base['gestor'])
+        equipes = g.get('/api/v1/bi/distribuicao/', {**MARCO, 'dimensao': 'equipe'}).data
+        assert [l['chave'] for l in equipes] == ['nenhum']
+        k = g.get('/api/v1/bi/kpis/', {**MARCO, 'equipe_id': 'nenhum'}).data['kpis']
+        assert k['recebidos'] == 4
+        _chamado(_dt(3, 7), categoria='Buraco', categoria_id=None, secretaria_responsavel='Zeladoria Antiga')
+        linhas = g.get('/api/v1/bi/distribuicao/', {**MARCO, 'dimensao': 'secretaria'}).data
+        chave = next(l['chave'] for l in linhas if l['rotulo'] == 'Zeladoria Antiga')
+        assert chave == 'nome:zeladoria antiga'
+        assert g.get('/api/v1/bi/kpis/', {**MARCO, 'secretaria_id': chave}).data['kpis']['recebidos'] == 1
+        assert g.get('/api/v1/bi/kpis/', {**MARCO, 'categoria_id': 'nome:buraco'}).data['kpis']['recebidos'] == 1
+        assert g.get('/api/v1/bi/kpis/', {**MARCO, 'equipe_id': 'nome:x'}).status_code == 400
+
+
+class TestChamados:
+    def test_lista_bate_com_os_numeros(self, base):
+        g = _cliente(base['gestor'])
+        url = '/api/v1/bi/chamados/'
+        assert g.get(url, MARCO).data['count'] == 4
+        vencidos = g.get(url, {**MARCO, 'recorte': 'vencidos'}).data
+        assert vencidos['count'] == 2
+        assert {c['id'] for c in vencidos['results']} >= {str(base['c'].id)}
+        assert g.get(url, {**MARCO, 'recorte': 'recebidos'}).data['count'] == 4
+        assert g.get(url, {**MARCO, 'recorte': 'resolvidos'}).data['count'] == 3
+        assert g.get(url, {**MARCO, 'recorte': 'rejeitados'}).data['count'] == 1
+        r = g.get(url, {**MARCO, 'recorte': 'recebidos', 'status': 'em_andamento'}).data
+        assert [c['id'] for c in r['results']] == [str(base['d'].id)]
+        item = r['results'][0]
+        assert item['status_rotulo'] and item['atendente_nome'] == 'Olga Operadora'
+        assert item['categoria_nome'] == 'Buraco'
+        bairro = g.get(url, {**MARCO, 'recorte': 'recebidos', 'bairro': 'centro'}).data
+        assert bairro['count'] == 2
+
+    def test_paginacao_e_validacao(self, base):
+        g = _cliente(base['gestor'])
+        url = '/api/v1/bi/chamados/'
+        p1 = g.get(url, {**MARCO, 'page_size': 3}).data
+        assert len(p1['results']) == 3 and p1['next'] and p1['previous'] is None
+        p2 = g.get(url, {**MARCO, 'page_size': 3, 'page': 2}).data
+        assert len(p2['results']) == 1 and p2['next'] is None and p2['previous']
+        assert not {c['id'] for c in p1['results']} & {c['id'] for c in p2['results']}
+        assert g.get(url, {'recorte': 'todos'}).status_code == 400
+        assert g.get(url, {'status': 'xyz'}).status_code == 400
+        assert g.get(url, {'page': 0}).status_code == 400
+        assert _cliente(base['operador']).get(url).status_code == 403
 
 
 class TestExportacao:

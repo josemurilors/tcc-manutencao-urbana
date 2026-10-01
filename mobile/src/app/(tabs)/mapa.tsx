@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SinoNotificacoes } from '@/components/app-header';
 import { DefectSheet } from '@/components/defect-sheet';
 import { MapSurface } from '@/components/map-surface';
 import type {
@@ -136,7 +137,13 @@ export default function MapaScreen() {
   const { posicao, bussola, permitido, erro: erroGps, tentarNovamente } = useLocalizacao();
   // `?abrir=<id>`: o formulário de novo chamado manda para cá quando o backend
   // apontou um duplicado — abre o existente para a pessoa confirmar.
-  const { abrir } = useLocalSearchParams<{ abrir?: string }>();
+  // `?lat=&lng=`: enquadra um ponto (ex.: "Ver no mapa" dos focos do painel),
+  // com a camada de calor do jeito que a pessoa deixou.
+  const { abrir, lat: latParam, lng: lngParam } = useLocalSearchParams<{
+    abrir?: string;
+    lat?: string;
+    lng?: string;
+  }>();
 
   const mapRef = useRef<MapSurfaceHandle>(null);
   const [defeitos, setDefeitos] = useState<Defeito[]>([]);
@@ -372,26 +379,55 @@ export default function MapaScreen() {
     }
   }
 
+  // A busca não é cancelada quando o parâmetro some: limpar `?abrir=` (abaixo)
+  // re-renderiza na hora e, com um "cancelado" no cleanup, o detalhe que
+  // chegasse depois era descartado — "Ver no mapa" não abria nada. O pedido
+  // mais recente vence (`abrirSeqRef`).
+  const abrirSeqRef = useRef(0);
   useEffect(() => {
     if (!abrir) return;
-    let cancelado = false;
+    const seq = ++abrirSeqRef.current;
     // Vindo de fora (ex.: "Ver no mapa" em Meus chamados), centraliza no
     // ponto em vez de continuar seguindo o GPS.
     api
       .detalharDefeito(abrir as unknown as number)
       .then((d) => {
-        if (!cancelado) focarDefeito(d);
+        if (seq === abrirSeqRef.current) focarDefeito(d);
       })
       .catch((err: unknown) => {
-        if (!cancelado) {
+        if (seq === abrirSeqRef.current) {
           addToast.error(err instanceof Error ? err.message : 'Não foi possível abrir o chamado.');
         }
       });
     router.setParams({ abrir: undefined });
-    return () => {
-      cancelado = true;
-    };
   }, [abrir, focarDefeito, addToast]);
+
+  const pontoPedido =
+    latParam != null &&
+    lngParam != null &&
+    Number.isFinite(Number(latParam)) &&
+    Number.isFinite(Number(lngParam))
+      ? { latitude: Number(latParam), longitude: Number(lngParam) }
+      : null;
+  const chavePonto = pontoPedido ? `${pontoPedido.latitude},${pontoPedido.longitude}` : null;
+  // Sair do "seguir" no render (não no efeito): o GPS não pode puxar a câmera
+  // de volta antes de ela chegar ao ponto pedido.
+  const [pontoTratado, setPontoTratado] = useState<string | null>(null);
+  if (chavePonto !== pontoTratado) {
+    setPontoTratado(chavePonto);
+    if (chavePonto) {
+      setSeguindo(false);
+      setSelecionado(null);
+    }
+  }
+  useEffect(() => {
+    if (!chavePonto) return;
+    const [latitude, longitude] = chavePonto.split(',').map(Number);
+    const foco = { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
+    if (mapRef.current) mapRef.current.animarPara(foco);
+    else focoPendenteRef.current = foco;
+    router.setParams({ lat: undefined, lng: undefined });
+  }, [chavePonto]);
 
   // Câmera de navegação: acompanha cada atualização do GPS enquanto "seguindo".
   // A posição do usuário manda; o município é só o enquadramento de fallback.
@@ -719,7 +755,9 @@ export default function MapaScreen() {
   async function abrirDetalhe(defeito: Defeito) {
     setSelecionado(defeito);
     try {
-      setSelecionado(await api.detalharDefeito(defeito.id));
+      const completo = await api.detalharDefeito(defeito.id);
+      // Tocou em outro pino (ou fechou) antes de o detalhe chegar: não troca.
+      setSelecionado((atual) => (atual?.id === defeito.id ? completo : atual));
     } catch (err) {
       // Mantém os dados resumidos da listagem: dá para ver e agir, só sem
       // a foto e o histórico completos.
@@ -859,8 +897,10 @@ export default function MapaScreen() {
           ) : null}
         </View>
 
-        {/* Canto superior direito: visão do município, ranking e camadas. */}
+        {/* Canto superior direito: notificações (logado), visão do
+            município, ranking e camadas. */}
         <View style={styles.topoDireita}>
+          <SinoNotificacoes floating />
           <Pressable
             onPress={visao ? fecharVisaoMunicipio : abrirVisaoMunicipio}
             disabled={carregandoVisao}

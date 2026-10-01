@@ -10,6 +10,10 @@
  * offline reenviar algo que já tinha chegado (ver `operacao-offline.ts`).
  */
 
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
+
 import { API_URL, appendImage, paginated, request } from '@/services/api';
 import { getTokenSync } from '@/services/storage';
 import type { Defeito, DefeitoEvento, PickedImage } from '@/types';
@@ -34,8 +38,19 @@ import type {
 
 const BASE = '/api/v1/operacao';
 
+/**
+ * Cabeçalho de idempotência. No navegador ele iria num preflight de CORS que o
+ * backend não libera (a requisição cairia como "Failed to fetch" e a ação iria
+ * para a fila offline para sempre); lá a chave vai na query (`comChave`).
+ */
 function cabecalhos(idempotencia?: string) {
-  return idempotencia ? { 'Idempotency-Key': idempotencia } : undefined;
+  return idempotencia && Platform.OS !== 'web' ? { 'Idempotency-Key': idempotencia } : undefined;
+}
+
+/** Caminho da ação com a chave na query, no web (ver `cabecalhos`). */
+function comChave(caminho: string, idempotencia?: string) {
+  if (!idempotencia || Platform.OS !== 'web') return caminho;
+  return `${caminho}${caminho.includes('?') ? '&' : '?'}idempotency_key=${encodeURIComponent(idempotencia)}`;
 }
 
 /** Erro de transporte (sem resposta do servidor), o único que vai para a fila offline. */
@@ -108,7 +123,7 @@ export const apiOperacao = {
     opcoes: { foto?: PickedImage | null; local?: Coordenada | null; idempotencia?: string } = {},
   ) => {
     const corpo = opcoes.foto ? await formularioComFoto(dados, opcoes.foto, opcoes.local) : dados;
-    return request<ChamadoFila>(`${BASE}/chamados/${id}/transicao/`, {
+    return request<ChamadoFila>(comChave(`${BASE}/chamados/${id}/transicao/`, opcoes.idempotencia), {
       method: 'POST',
       body: corpo,
       headers: cabecalhos(opcoes.idempotencia),
@@ -116,27 +131,27 @@ export const apiOperacao = {
   },
 
   atribuir: (id: IdChamado, dados: DadosAtribuicao, idempotencia?: string) =>
-    request<ChamadoFila>(`${BASE}/chamados/${id}/atribuir/`, {
+    request<ChamadoFila>(comChave(`${BASE}/chamados/${id}/atribuir/`, idempotencia), {
       method: 'POST',
       body: dados,
       headers: cabecalhos(idempotencia),
     }),
 
   liberar: (id: IdChamado, idempotencia?: string) =>
-    request<ChamadoFila>(`${BASE}/chamados/${id}/liberar/`, {
+    request<ChamadoFila>(comChave(`${BASE}/chamados/${id}/liberar/`, idempotencia), {
       method: 'POST',
       headers: cabecalhos(idempotencia),
     }),
 
   nota: (id: IdChamado, texto: string, idempotencia?: string) =>
-    request<EventoOperacao>(`${BASE}/chamados/${id}/nota/`, {
+    request<EventoOperacao>(comChave(`${BASE}/chamados/${id}/nota/`, idempotencia), {
       method: 'POST',
       body: { texto },
       headers: cabecalhos(idempotencia),
     }),
 
   resposta: (id: IdChamado, texto: string, idempotencia?: string) =>
-    request<EventoOperacao>(`${BASE}/chamados/${id}/resposta/`, {
+    request<EventoOperacao>(comChave(`${BASE}/chamados/${id}/resposta/`, idempotencia), {
       method: 'POST',
       body: { texto },
       headers: cabecalhos(idempotencia),
@@ -149,7 +164,7 @@ export const apiOperacao = {
     local: Coordenada | null,
     idempotencia?: string,
   ) =>
-    request<AnexoChamado>(`${BASE}/chamados/${id}/evidencia/`, {
+    request<AnexoChamado>(comChave(`${BASE}/chamados/${id}/evidencia/`, idempotencia), {
       method: 'POST',
       body: await formularioComFoto({ tipo }, foto, local),
       headers: cabecalhos(idempotencia),
@@ -168,14 +183,14 @@ export const apiOperacao = {
   },
 
   sla: (id: IdChamado, prazoSlaDias: number, motivo: string, idempotencia?: string) =>
-    request<ChamadoFila>(`${BASE}/chamados/${id}/sla/`, {
+    request<ChamadoFila>(comChave(`${BASE}/chamados/${id}/sla/`, idempotencia), {
       method: 'POST',
       body: { prazo_sla_dias: prazoSlaDias, motivo },
       headers: cabecalhos(idempotencia),
     }),
 
   prioridade: (id: IdChamado, prioridade: Prioridade, idempotencia?: string) =>
-    request<ChamadoFila>(`${BASE}/chamados/${id}/prioridade/`, {
+    request<ChamadoFila>(comChave(`${BASE}/chamados/${id}/prioridade/`, idempotencia), {
       method: 'POST',
       body: { prioridade },
       headers: cabecalhos(idempotencia),
@@ -187,7 +202,7 @@ export const apiOperacao = {
     campos: Partial<DadosTransicao> & DadosAtribuicao,
     idempotencia?: string,
   ) =>
-    request<ResultadoLote>(`${BASE}/lote/`, {
+    request<ResultadoLote>(comChave(`${BASE}/lote/`, idempotencia), {
       method: 'POST',
       body: { ids, acao, ...campos },
       headers: cabecalhos(idempotencia),
@@ -206,6 +221,54 @@ export const apiOperacao = {
   /** Busca exata por protocolo (`AAAA-NNNNNN`), aberto ou fechado. */
   porProtocolo: (protocolo: string) =>
     request<ChamadoFila>(`/api/v1/defeitos/protocolo/${encodeURIComponent(protocolo)}/`),
+
+  /**
+   * Ordem de Serviço em PDF (`chamados/<id>/ordem-servico/`): no nativo grava no
+   * cache e abre o compartilhar (imprimir, WhatsApp, e-mail); no web baixa.
+   * Usa `fetch` para ler o `{detail}` do erro em vez de salvar a página de erro.
+   */
+  ordemServico: async (id: IdChamado, protocolo?: string | null) => {
+    const nome = `OS-${protocolo || String(id).slice(0, 8)}.pdf`;
+    const buscar = () => {
+      const token = getTokenSync();
+      return fetch(`${API_URL}${BASE}/chamados/${id}/ordem-servico/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    };
+    let res = await buscar();
+    if (res.status === 401) {
+      // Token vencido: `request` renova pelo refresh; depois tenta de novo.
+      await request(`${BASE}/resumo/`).catch(() => undefined);
+      res = await buscar();
+    }
+    if (!res.ok) {
+      const corpo = await res.json().catch(() => null);
+      throw new Error(corpo?.detail ? String(corpo.detail) : `Falha ao gerar a Ordem de Serviço (erro ${res.status}).`);
+    }
+    if (Platform.OS === 'web') {
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      return nome;
+    }
+    const destino = new File(Paths.cache, nome);
+    destino.create({ overwrite: true });
+    destino.write(new Uint8Array(await res.arrayBuffer()));
+    if (!(await Sharing.isAvailableAsync())) {
+      throw new Error('Este aparelho não permite compartilhar arquivos.');
+    }
+    await Sharing.shareAsync(destino.uri, {
+      mimeType: 'application/pdf',
+      dialogTitle: `Ordem de Serviço ${protocolo ?? ''}`.trim(),
+      UTI: 'com.adobe.pdf',
+    });
+    return destino.uri;
+  },
 
   /** Categorias do município com o id (o filtro da fila usa `categoria_id`). */
   categorias: () => paginated<CategoriaOperacao>('/api/v1/gestao/categorias/'),

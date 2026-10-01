@@ -5,7 +5,9 @@
  * operador cumpre ao concluir.
  *
  * O catálogo de categorias é global; aqui o município só sobrepõe as regras
- * (`categoria_municipio`). Gestor consulta; o administrador altera.
+ * (`categoria_municipio`) e pode voltar ao padrão da plataforma. Mudar o
+ * prazo recalcula os chamados abertos que ainda seguiam o prazo antigo.
+ * Gestor consulta; o administrador altera.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -33,7 +35,7 @@ import { Layout, Spacing, type Tom } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { apiGestao } from '@/services/api-gestao';
-import type { CategoriaGestao, Prioridade, Secretaria } from '@/types/gestao';
+import type { CategoriaAlteracao, CategoriaGestao, Prioridade, Secretaria } from '@/types/gestao';
 
 const PRIORIDADES: { value: Prioridade; label: string; tom: Tom }[] = [
   { value: 'baixa', label: 'Baixa', tom: 'neutral' },
@@ -47,7 +49,9 @@ const ROTULO_PRIORIDADE = Object.fromEntries(PRIORIDADES.map((p) => [p.value, p]
   (typeof PRIORIDADES)[number]
 >;
 
-const MAX_ITENS_CHECKLIST = 15;
+// Limites do backend (`gestao/servicos.py`).
+const MAX_ITENS_CHECKLIST = 20;
+const MAX_CHARS_ITEM = 120;
 
 function textoPrazo(dias: number | null) {
   if (!dias) return 'Sem prazo';
@@ -174,7 +178,8 @@ function LinhaCategoria({
         <AppText variant="label" style={styles.flex} numberOfLines={2}>
           {c.nome}
         </AppText>
-        {c.ativo ? null : <Badge label="Desativada" tone="neutral" icon="pause-circle" />}
+        {c.ativo ? null : <Badge label="Não atendida" tone="neutral" icon="pause-circle" />}
+        {c.personalizado ? <Badge label="Ajustada" tone="info" icon="create" /> : null}
       </View>
       <View style={styles.selos}>
         <Badge
@@ -256,18 +261,59 @@ function CategoriaSheet({
     });
   }
 
+  /** Envia o PATCH e conta o efeito ("3 chamados abertos com prazo novo"). */
+  async function enviar(corpo: CategoriaAlteracao, sucesso: string) {
+    setSalvando(true);
+    try {
+      const nova = await apiGestao.salvarCategoria(categoria.categoria_id, corpo);
+      onSalvo(
+        nova && typeof nova === 'object' && 'categoria_id' in nova
+          ? nova
+          : { ...categoria, ...(corpo as Partial<CategoriaGestao>) },
+      );
+      const n = nova?.chamados_recalculados ?? 0;
+      toast.success(
+        n
+          ? `${sucesso}. ${n === 1 ? '1 chamado aberto ganhou' : `${n} chamados abertos ganharam`} o prazo novo.`
+          : sucesso,
+      );
+      onFechar();
+    } catch (err) {
+      toast.error(`Não foi possível salvar: ${mensagemDeErro(err)}`);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function salvar() {
     setTentou(true);
     if (!prazoOk) return;
+    // Só o que mudou: mandar o prazo igual "congelaria" o padrão da
+    // plataforma como regra do município, e reenviar uma secretaria que foi
+    // desativada seria recusado.
+    const corpo: CategoriaAlteracao = {};
     const mudancas: string[] = [];
-    if (prazoNum !== categoria.prazo_sla_dias) mudancas.push(`prazo: ${textoPrazo(prazoNum)}`);
-    if (prioridade !== categoria.prioridade)
+    if (prazoNum !== categoria.prazo_sla_dias) {
+      corpo.prazo_sla_dias = prazoNum;
+      mudancas.push(`prazo: ${textoPrazo(prazoNum)}`);
+    }
+    if (prioridade !== (categoria.prioridade ?? 'media')) {
+      corpo.prioridade = prioridade;
       mudancas.push(`prioridade: ${ROTULO_PRIORIDADE[prioridade].label}`);
-    if (ativo !== categoria.ativo) mudancas.push(ativo ? 'volta a ser atendida' : 'deixa de ser atendida');
-    if ((secretariaId ? Number(secretariaId) : null) !== (categoria.secretaria_id ?? null))
+    }
+    if (ativo !== categoria.ativo) {
+      corpo.ativo = ativo;
+      mudancas.push(ativo ? 'volta a ser atendida' : 'deixa de ser atendida');
+    }
+    const secretaria = secretariaId ? Number(secretariaId) : null;
+    if (secretaria !== (categoria.secretaria_id ?? null)) {
+      corpo.secretaria_id = secretaria;
       mudancas.push('secretaria responsável');
-    if (JSON.stringify(checklist) !== JSON.stringify(categoria.checklist ?? []))
-      mudancas.push(`checklist com ${checklist.length} itens`);
+    }
+    if (JSON.stringify(checklist) !== JSON.stringify(categoria.checklist ?? [])) {
+      corpo.checklist = checklist;
+      mudancas.push(`checklist com ${checklist.length} ${checklist.length === 1 ? 'item' : 'itens'}`);
+    }
     if (!mudancas.length) {
       onFechar();
       return;
@@ -278,30 +324,34 @@ function CategoriaSheet({
         !ativo && categoria.ativo
           ? ' Cidadãos deixam de ver esta categoria ao reportar; chamados já abertos continuam.'
           : ''
+      }${
+        corpo.prazo_sla_dias !== undefined
+          ? ' Os chamados abertos que seguiam o prazo antigo passam a usar o novo; prazos ajustados à mão continuam.'
+          : ''
       } A alteração fica registrada na auditoria.`,
       confirmar: 'Salvar',
     });
     if (!ok) return;
-
-    setSalvando(true);
-    const corpo = {
-      ativo,
-      prazo_sla_dias: prazoNum,
-      prioridade,
-      secretaria_id: secretariaId ? Number(secretariaId) : null,
-      checklist,
-    };
-    try {
-      const nova = await apiGestao.salvarCategoria(categoria.categoria_id, corpo);
-      onSalvo(nova && typeof nova === 'object' && 'categoria_id' in nova ? nova : { ...categoria, ...corpo });
-      toast.success(`${categoria.nome} atualizada`);
-      onFechar();
-    } catch (err) {
-      toast.error(`Não foi possível salvar: ${mensagemDeErro(err)}`);
-    } finally {
-      setSalvando(false);
-    }
+    await enviar(corpo, `${categoria.nome} atualizada`);
   }
+
+  async function voltarAoPadrao() {
+    const base = categoria.base;
+    const ok = await confirmar({
+      titulo: 'Voltar ao padrão da plataforma?',
+      mensagem: `${categoria.nome} volta a usar o prazo de ${textoPrazo(base?.prazo_sla_dias ?? null)}${
+        base?.prioridade ? ` e a prioridade ${ROTULO_PRIORIDADE[base.prioridade]?.label ?? base.prioridade}` : ''
+      }. Secretaria, situação e checklist continuam como estão.`,
+      confirmar: 'Voltar ao padrão',
+    });
+    if (!ok) return;
+    await enviar({ prazo_sla_dias: null, prioridade: null }, `${categoria.nome} voltou ao padrão`);
+  }
+
+  const difereDoPadrao =
+    !!categoria.base &&
+    (categoria.prazo_sla_dias !== categoria.base.prazo_sla_dias ||
+      categoria.prioridade !== categoria.base.prioridade);
 
   const so = !podeEditar;
 
@@ -345,10 +395,24 @@ function CategoriaSheet({
         hint={
           tentou && !prazoOk
             ? 'Informe de 1 a 365 dias.'
-            : 'Conta a partir do registro do chamado. Vencido, ele sobe na fila da operação.'
+            : `Conta a partir do registro do chamado. Vencido, ele sobe na fila da operação.${
+                categoria.base?.prazo_sla_dias
+                  ? ` Padrão da plataforma: ${textoPrazo(categoria.base.prazo_sla_dias)}.`
+                  : ''
+              }`
         }
         accessibilityLabel="Prazo de atendimento em dias"
       />
+      {!so && difereDoPadrao ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onPress={voltarAoPadrao}
+          disabled={salvando}
+          accessibilityLabel="Voltar prazo e prioridade ao padrão da plataforma">
+          Voltar prazo e prioridade ao padrão
+        </Button>
+      ) : null}
       <View style={styles.campo}>
         <AppText variant="caption" tone="muted">
           PRIORIDADE INICIAL
@@ -407,6 +471,13 @@ function CategoriaSheet({
                     disabled={i === 0}
                   />
                   <IconButton
+                    icon="arrow-down"
+                    size="sm"
+                    accessibilityLabel={`Descer "${item}"`}
+                    onPress={() => moverItem(i, 1)}
+                    disabled={i === checklist.length - 1}
+                  />
+                  <IconButton
                     icon="trash-outline"
                     size="sm"
                     accessibilityLabel={`Remover "${item}"`}
@@ -426,7 +497,7 @@ function CategoriaSheet({
               accessibilityLabel="Novo item do checklist"
               onSubmitEditing={adicionarItem}
               returnKeyType="done"
-              maxLength={80}
+              maxLength={MAX_CHARS_ITEM}
               containerStyle={styles.flex}
             />
             <Button

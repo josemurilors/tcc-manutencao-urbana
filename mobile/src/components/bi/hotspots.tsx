@@ -20,18 +20,24 @@ import type { BiHotspots } from '@/types/bi';
 
 import { fmtNumero } from './formato';
 
+type Reincidencia = BiHotspots['reincidencia'][number];
+
 type Props = {
   dados: BiHotspots;
-  /** Reincidência -> lista de chamados abertos daquele bairro. */
-  onAbrirBairro: (bairro: string) => void;
+  /** Reincidência -> chamados daquele bairro e categoria no período. */
+  onAbrirReincidencia: (r: Reincidencia) => void;
   limite?: number;
 };
 
-export function ListaHotspots({ dados, onAbrirBairro, limite = 5 }: Props) {
+export function ListaHotspots({ dados, onAbrirReincidencia, limite = 5 }: Props) {
   const colors = useColors();
   const toast = useToast();
 
-  const celulas = [...(dados.celulas ?? [])].sort((a, b) => b.total - a.total).slice(0, limite);
+  // Célula com um chamado só não é concentração: é ruído no topo da lista.
+  const celulas = [...(dados.celulas ?? [])]
+    .filter((c) => c.total >= 2)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limite);
   const reincidencia = [...(dados.reincidencia ?? [])]
     .sort((a, b) => b.ocorrencias - a.ocorrencias)
     .slice(0, limite);
@@ -66,7 +72,9 @@ export function ListaHotspots({ dados, onAbrirBairro, limite = 5 }: Props) {
                   {c.categoria_top ? ` · mais comum: ${c.categoria_top}` : ''}
                 </AppText>
                 <AppText variant="caption" tone="muted">
-                  Área de cerca de 200 m em {c.lat.toFixed(4)}, {c.lng.toFixed(4)}
+                  {c.bairro_top
+                    ? `Área de cerca de 200 m em ${c.bairro_top}`
+                    : `Área de cerca de 200 m em ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`}
                 </AppText>
               </View>
               <Pressable
@@ -97,10 +105,10 @@ export function ListaHotspots({ dados, onAbrirBairro, limite = 5 }: Props) {
           reincidencia.map((r) => (
             <Pressable
               key={`${r.bairro}|${r.rua}|${r.categoria}`}
-              onPress={() => onAbrirBairro(r.bairro)}
+              onPress={() => onAbrirReincidencia(r)}
               accessibilityRole="button"
               accessibilityLabel={`${r.categoria} em ${r.rua || 'rua não informada'}, ${r.bairro}: ${r.ocorrencias} ocorrências`}
-              accessibilityHint="Abre os chamados abertos deste bairro"
+              accessibilityHint="Abre os chamados desta categoria neste bairro"
               style={({ pressed }) => [
                 styles.linha,
                 { borderBottomColor: colors.border },

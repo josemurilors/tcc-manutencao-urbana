@@ -60,11 +60,16 @@ export function useFila(posicao: Coordenada | null) {
   }, [posicao]);
   // Respostas de uma busca antiga (filtro trocado no meio) são descartadas.
   const geracao = useRef(0);
+  // A primeira carga costuma sair antes do GPS responder: a fila vem sem
+  // `distancia_m`. Quando a posição chega, recarrega uma vez para o cartão
+  // mostrar a distância e a ordenação "Mais perto" ficar disponível.
+  const carregouSemPosicao = useRef(false);
 
   // Nenhum setState antes do primeiro `await`: a carga roda dentro de efeito.
   const carregar = useCallback(
     async () => {
       const minha = ++geracao.current;
+      carregouSemPosicao.current = !posicaoRef.current;
       try {
         const [pagina, novoResumo] = await Promise.all([
           apiOperacao.fila(filtros, 1, posicaoRef.current),
@@ -113,7 +118,7 @@ export function useFila(posicao: Coordenada | null) {
         }
         setErro(mensagem);
         // 403 do backend para quem não tem município de operação.
-        setEstado(/munic[ií]pio|permiss/i.test(mensagem) ? 'bloqueado' : 'erro');
+        setEstado(/munic[ií]pio|permiss|equipe da prefeitura/i.test(mensagem) ? 'bloqueado' : 'erro');
       } finally {
         if (minha === geracao.current) {
           setAtualizando(false);
@@ -127,6 +132,11 @@ export function useFila(posicao: Coordenada | null) {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  const temPosicao = posicao != null;
+  useEffect(() => {
+    if (temPosicao && carregouSemPosicao.current) carregar();
+  }, [temPosicao, carregar]);
 
   /** Puxar para atualizar: mostra o indicador do RefreshControl. */
   const puxar = useCallback(() => {

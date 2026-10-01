@@ -54,6 +54,24 @@ import type { ChamadoFila } from '@/types/operacao';
 
 type Visao = 'lista' | 'mapa';
 
+/** No mapa a fila carrega mais páginas sozinha, até este total de pinos. */
+const LIMITE_MAPA = 100;
+
+/** Algum recorte além da ordenação? (o estado vazio oferece "Limpar filtros") */
+function temFiltro(f: typeof FILTROS_PADRAO) {
+  return !!(
+    f.status ||
+    f.categoria_id != null ||
+    f.equipe_id != null ||
+    (f.atribuicao && f.atribuicao !== 'todos') ||
+    f.vencidos ||
+    f.vencem_24h ||
+    f.sinalizados ||
+    f.bairro ||
+    f.q?.trim()
+  );
+}
+
 /**
  * Recalcula o progresso do roteiro: parada fechada ou pulada conta como
  * feita, e a atual é a primeira que sobrou.
@@ -79,13 +97,26 @@ export default function OperacaoScreen() {
 
   const fila = useFila(posicao);
   const catalogos = useCatalogos();
-  const { carregar: carregarFila, recarregarResumo, atualizarItem } = fila;
+  const { carregar: carregarFila, recarregarResumo, atualizarItem, carregarMais } = fila;
   const sync = useSyncOperacao(() => carregarFila());
 
   const [visao, setVisao] = useState<Visao>('lista');
   const [aberto, setAberto] = useState<ChamadoFila | null>(null);
   const [selecao, setSelecao] = useState<Set<string>>(new Set());
   const [roteiro, setRoteiro] = useState<Roteiro | null>(null);
+
+  // No mapa, a primeira página (20) não basta para montar um roteiro: busca
+  // mais páginas em sequência até `LIMITE_MAPA`, parando em erro ou no cache.
+  const precisaMaisNoMapa =
+    visao === 'mapa' &&
+    !!fila.next &&
+    !fila.carregandoMais &&
+    !fila.cacheDe &&
+    !fila.erro &&
+    fila.itens.length < LIMITE_MAPA;
+  useEffect(() => {
+    if (precisaMaisNoMapa) carregarMais();
+  }, [precisaMaisNoMapa, carregarMais, fila.itens.length]);
 
   // A fila já carrega ao montar; ao voltar para a aba, recarrega.
   const primeiroFoco = useRef(true);
@@ -252,6 +283,8 @@ export default function OperacaoScreen() {
         onEscolher={(a) => fila.setFiltros((f) => filtrosDoAtalho(f, a))}
       />
       <FiltrosFilaBar
+        // Remonta quando busca/bairro mudam por fora (ex.: "Limpar filtros"), para o campo não ficar com texto velho.
+        key={`${fila.filtros.q ?? ''}|${fila.filtros.bairro ?? ''}`}
         filtros={fila.filtros}
         onChange={fila.setFiltros}
         categorias={catalogos.categorias}
@@ -309,7 +342,7 @@ export default function OperacaoScreen() {
         />
       );
     }
-    const filtrando = JSON.stringify(fila.filtros) !== JSON.stringify(FILTROS_PADRAO);
+    const filtrando = temFiltro(fila.filtros);
     return (
       <StateView
         kind="empty"

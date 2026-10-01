@@ -13,7 +13,7 @@
  */
 
 import { useRootNavigationState } from 'expo-router';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   removerPushDoAparelho,
@@ -40,7 +40,11 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   loading: boolean;
   login: (response: AuthResponse) => Promise<void>;
-  logout: () => Promise<void>;
+  /**
+   * Encerra a sessão. `contaExcluida`: a conta já foi apagada no servidor
+   * (os tokens de push foram junto), então não há o que desvincular.
+   */
+  logout: (opcoes?: { contaExcluida?: boolean }) => Promise<void>;
   updateUser: (updates: Partial<Usuario>) => Promise<void>;
 };
 
@@ -107,13 +111,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navegacao = useRootNavigationState();
   useAbrirChamadoDaNotificacao(!loading && !!navegacao?.key);
 
-  const logout = useCallback(async () => {
-    // Desvincula o aparelho enquanto o token de sessão ainda vale; se falhar
-    // (sessão já expirada, sem rede), sair continua valendo.
-    await removerPushDoAparelho().catch(avisarFalhaPush('desvincular o aparelho'));
-    setTokenState(null);
-    setUser(null);
-    await clearSession();
+  // Um logout por vez: o DELETE do push com a sessão já morta dá 401, o
+  // refresh falha e o `onUnauthorized` chamaria o logout de novo, em cascata.
+  const saindo = useRef(false);
+
+  const logout = useCallback(async (opcoes?: { contaExcluida?: boolean }) => {
+    if (saindo.current) return;
+    saindo.current = true;
+    try {
+      // Desvincula o aparelho enquanto o token de sessão ainda vale; se falhar
+      // (sessão já expirada, sem rede), sair continua valendo.
+      if (!opcoes?.contaExcluida) {
+        await removerPushDoAparelho().catch(avisarFalhaPush('desvincular o aparelho'));
+      }
+      setTokenState(null);
+      setUser(null);
+      await clearSession();
+    } finally {
+      saindo.current = false;
+    }
   }, []);
 
   // Derruba a sessão quando o refresh token também expira.
@@ -177,7 +193,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const salvo = await getStoredUser();
       // O perfil não traz o polígono do município: preserva o já carregado,
       // a menos que a cidade tenha mudado.
-      const trocouMunicipio = (atual.municipio_id ?? null) !== (salvo?.municipio_id ?? null);
+      // Compara como texto: o código IBGE já veio salvo como número em versões antigas.
+      const trocouMunicipio = String(atual.municipio_id ?? '') !== String(salvo?.municipio_id ?? '');
       setUser((prev) =>
         prev ? { ...prev, ...atual, municipio: trocouMunicipio ? null : prev.municipio } : prev,
       );

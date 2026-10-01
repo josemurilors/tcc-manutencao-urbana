@@ -61,7 +61,7 @@ import { corDoTom, Layout, Radius, Spacing, type Tom } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { apiBi } from '@/services/api-bi';
-import type { BiChaveKpi, BiFiltros, BiKpisResposta, DimensaoBi } from '@/types/bi';
+import type { BiChaveKpi, BiFiltros, BiKpisResposta, DimensaoBi, RecorteLista } from '@/types/bi';
 
 /** Os quatro números do topo, na ordem de leitura. */
 const KPIS_TOPO: BiChaveKpi[] = ['backlog', 'backlog_vencido', 'pct_no_prazo', 'lead_time_p50_h'];
@@ -75,6 +75,13 @@ const KPIS_SECUNDARIOS: BiChaveKpi[] = [
   'rejeitados',
   'cidadaos_ativos',
 ];
+
+/** KPIs de contagem que abrem a lista dos chamados contados. */
+const RECORTE_DO_KPI: Partial<Record<BiChaveKpi, RecorteLista>> = {
+  recebidos: 'recebidos',
+  resolvidos: 'resolvidos',
+  rejeitados: 'rejeitados',
+};
 
 const DIMENSOES_RANKING: { value: Exclude<DimensaoBi, 'status'>; label: string }[] = [
   { value: 'categoria', label: 'Categoria' },
@@ -173,9 +180,13 @@ function PainelGestor() {
     }
   }
 
-  const recortes = [rotulos.categoria && filtros.categoria_id ? rotulos.categoria : null,
-    rotulos.secretaria && filtros.secretaria_id ? rotulos.secretaria : null,
-    filtros.bairro ? (rotulos.bairro ?? filtros.bairro) : null]
+  // Recorte ativo sem rótulo salvo (veio de versão antiga) ainda aparece, pelo valor.
+  const recortes = [
+    filtros.categoria_id ? (rotulos.categoria ?? `Categoria ${filtros.categoria_id}`) : null,
+    filtros.secretaria_id ? (rotulos.secretaria ?? `Secretaria ${filtros.secretaria_id}`) : null,
+    filtros.equipe_id ? (rotulos.equipe ?? `Equipe ${filtros.equipe_id}`) : null,
+    filtros.bairro ? (rotulos.bairro ?? filtros.bairro) : null,
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -492,7 +503,15 @@ function PainelGestor() {
                   subtitle="Onde os chamados se concentram e onde o mesmo problema volta.">
                   <ListaHotspots
                     dados={dados}
-                    onAbrirBairro={(bairro) => abrirDrill(filtros, 'bairro', { chave: bairro, rotulo: bairro })}
+                    onAbrirReincidencia={(r) =>
+                      // A reincidência conta os recebidos no período: a lista mostra esses, da mesma categoria.
+                      abrirDrill(
+                        r.categoria_id != null ? { ...filtros, categoria_id: String(r.categoria_id) } : filtros,
+                        'bairro',
+                        { chave: r.bairro, rotulo: `${r.categoria} · ${r.bairro}` },
+                        'recebidos',
+                      )
+                    }
                   />
                 </ChartCard>
               )}
@@ -504,9 +523,18 @@ function PainelGestor() {
             <SectionHeader title="Demanda e qualidade" subtitle="Toque em ⓘ para ver como cada número é calculado." />
             {kpis.dados ? (
               <View style={styles.gradeKpi}>
-                {KPIS_SECUNDARIOS.map((k) => (
-                  <CartaoKpi key={k} chave={k} dados={kpis.dados as BiKpisResposta} comparacao={comparacao?.curto} />
-                ))}
+                {KPIS_SECUNDARIOS.map((k) => {
+                  const recorte = RECORTE_DO_KPI[k];
+                  return (
+                    <CartaoKpi
+                      key={k}
+                      chave={k}
+                      dados={kpis.dados as BiKpisResposta}
+                      comparacao={comparacao?.curto}
+                      onPress={recorte ? () => abrirDrill(filtros, 'todos', null, recorte) : undefined}
+                    />
+                  );
+                })}
               </View>
             ) : kpis.erro ? null : (
               <EsqueletoKpis quantos={4} />
@@ -592,13 +620,16 @@ function PainelGestor() {
 
             <View style={[styles.coluna, largo && styles.colunaLarga]}>
               <SecaoGrafico secao={produtividade} titulo="Produtividade da equipe">
-                {(dados) => (
+                {(todos) => {
+                  // Gestor e admin sem nada atribuído só poluiriam o gráfico; a tabela mostra todos.
+                  const dados = todos.filter((p) => p.concluidos > 0 || p.em_andamento > 0);
+                  return (
                   <ChartCard
                     title="Produtividade da equipe"
                     subtitle="Chamados concluídos por servidor no período."
                     tabela={{
                       colunas: ['Servidor', 'Concluídos', 'Em andamento', 'Tempo típico', 'Equipe'],
-                      linhas: [...dados]
+                      linhas: [...todos]
                         .sort((a, b) => b.concluidos - a.concluidos)
                         .map((p) => [p.nome, p.concluidos, p.em_andamento, fmtHoras(p.lead_time_p50_h), p.equipe_nome ?? '—']),
                     }}>
@@ -620,10 +651,11 @@ function PainelGestor() {
                         }))}
                       formatarValor={fmtNumero}
                       cor={cg.resolvidos}
-                      vazio="Nenhum chamado concluído por servidor no período."
+                      vazio="Nenhum chamado com servidor responsável no período. Atribua os chamados na Operação para medir a produtividade."
                     />
                   </ChartCard>
-                )}
+                  );
+                }}
               </SecaoGrafico>
             </View>
           </View>
@@ -685,7 +717,9 @@ function Manchete({ dados }: { dados: BiKpisResposta }) {
   const partes: string[] = [];
   let tom: Tom = 'success';
 
-  const dBacklog = calcularDelta('backlog', kpis.backlog, valorKpi(ant, 'backlog'));
+  // Sem fila no período anterior (cidade começando a usar), "cresceu 97" não informa nada.
+  const backlogAnterior = valorKpi(ant, 'backlog');
+  const dBacklog = backlogAnterior ? calcularDelta('backlog', kpis.backlog, backlogAnterior) : null;
   if (dBacklog && dBacklog.direcao !== 'igual') {
     partes.push(
       `A fila ${dBacklog.direcao === 'subiu' ? 'cresceu' : 'diminuiu'} ${dBacklog.texto.replace(/^[+−]/, '')} e está em ${fmtNumero(kpis.backlog)} chamados abertos`,

@@ -193,6 +193,11 @@ class TestMunicipio:
         r = cli.patch(reverse('gestao-municipio'), {'cor_primaria': 'azul'}, format='json')
         assert r.status_code == 400 and 'detail' in r.data
         assert cli.patch(reverse('gestao-municipio'), {'raio_duplicado_m': 0}, format='json').status_code == 400
+        url = reverse('gestao-municipio')
+        assert cli.patch(url, {'parametros': {'exigir_foto_conclusao': 'nao'}}, format='json').status_code == 400
+        assert cli.patch(url, {'parametros': {'raio_evidencia_m': 5}}, format='json').status_code == 400
+        r = cli.patch(url, {'parametros': {'exigir_foto_conclusao': False, 'raio_evidencia_m': 300}}, format='json')
+        assert r.status_code == 200 and r.data['parametros']['raio_evidencia_m'] == 300
 
     def test_contratado_so_super_admin(self):
         cli, _ = _usuario('admin_municipal')
@@ -234,6 +239,20 @@ class TestEstrutura:
         acoes = set(AuditLog.objects.filter(municipio_id=CIDADE).values_list('acao', flat=True))
         assert {'secretaria.criar', 'equipe.criar', 'equipe.alterar', 'secretaria.desativar', 'equipe.excluir'} <= acoes
 
+    def test_salvar_equipe_mantem_secretaria_desativada(self):
+        # Reenviar a secretaria atual (desativada) não pode barrar a edição de
+        # outro campo; trocar PARA uma desativada continua proibido.
+        cli, _ = _usuario('admin_municipal')
+        sec = Secretaria.objects.create(municipio_id=CIDADE, nome='Antiga', ativo=False)
+        outra = Secretaria.objects.create(municipio_id=CIDADE, nome='Outra antiga', ativo=False)
+        eq = Equipe.objects.create(municipio_id=CIDADE, nome='Equipe X', secretaria=sec)
+        r = cli.patch(reverse('gestao-equipe', args=[eq.id]),
+                      {'nome': 'Equipe Y', 'secretaria_id': sec.id}, format='json')
+        assert r.status_code == 200, r.data
+        assert r.data['secretaria_id'] == sec.id
+        r = cli.patch(reverse('gestao-equipe', args=[eq.id]), {'secretaria_id': outra.id}, format='json')
+        assert r.status_code == 400
+
 
 # ------------------------------------------------------------------ membros
 
@@ -255,6 +274,18 @@ class TestMembros:
         assert r.data['equipe_nome'] == 'Equipe M'
         log = AuditLog.objects.get(acao='membro.vincular', alvo_id=str(pessoa.id))
         assert log.usuario_id == admin.id and log.dados['antes']['papel'] == 'cidadao'
+
+    def test_vincular_email_sem_ponto_no_dominio(self):
+        # Contas de teste/intranet (ex.: fulano@local) existem no cadastro e
+        # precisam poder ser vinculadas; o nome entra na auditoria.
+        cli, _ = _usuario('admin_municipal')
+        _, pessoa = _usuario('cidadao', email=f'pessoa-{uuid.uuid4().hex[:6]}@local')
+        r = cli.post(reverse('gestao-membros'), {'email': pessoa.email, 'papel': 'operador'}, format='json')
+        assert r.status_code == 201, r.data
+        log = AuditLog.objects.get(acao='membro.vincular', alvo_id=str(pessoa.id))
+        assert log.dados['nome'] == pessoa.nome
+        assert cli.post(reverse('gestao-membros'), {'email': 'sem-arroba', 'papel': 'operador'},
+                        format='json').status_code == 400
 
     def test_email_desconhecido_404(self):
         cli, _ = _usuario('admin_municipal')
@@ -432,10 +463,15 @@ class TestModeracao:
         r = cli.post(reverse('gestao-moderacao-remover', args=[d.id]), {'motivo': 'Conteúdo ofensivo'}, format='json')
         assert r.status_code == 200
         d.refresh_from_db()
-        assert d.removido_em is not None and d.removido_motivo == 'Conteúdo ofensivo'
-        assert DefeitoEvento.objects.filter(defeito=d, tipo='removido').exists()
+        assert d.removido_em is not None and d.removido_motivo == 'moderacao'
+        ev = DefeitoEvento.objects.get(defeito=d, tipo='removido')
+        assert ev.texto == 'Conteúdo ofensivo' and ev.dados['motivo'] == 'moderacao'
+        # O autor é avisado com o motivo escrito pelo gestor.
+        aviso = autor.notificacoes.get(tipo='moderacao')
+        assert 'Conteúdo ofensivo' in aviso.corpo
         assert cli.post(reverse('gestao-moderacao-remover', args=[d.id]), {'motivo': 'de novo'}, format='json').status_code == 409
-        assert str(d.id) in [x['id'] for x in cli.get(reverse('gestao-moderacao')).data['removidos']]
+        removido = next(x for x in cli.get(reverse('gestao-moderacao')).data['removidos'] if x['id'] == str(d.id))
+        assert removido['removido_motivo'] == 'moderacao' and removido['removido_texto'] == 'Conteúdo ofensivo'
 
         # Simula remoção comunitária, que deu strike ao autor.
         Defeito.objects.filter(pk=d.pk).update(removido_motivo='comunidade')
@@ -545,3 +581,16 @@ class TestSeed:
         from django.core.management.base import CommandError
         with pytest.raises(CommandError):
             call_command('seed_gestao_demo', '0000001', verbosity=0)
+
+
+def test_ip_da_auditoria_ignora_xff_forjado():
+    # O 1º item do X-Forwarded-For vem do cliente; o nginx grava o real em
+    # X-Real-IP e no fim do XFF.
+    from django.test import RequestFactory
+
+    from core.auditoria import _ip
+
+    rf = RequestFactory()
+    assert _ip(rf.get('/', HTTP_X_REAL_IP='200.1.1.1', HTTP_X_FORWARDED_FOR='6.6.6.6, 200.1.1.1')) == '200.1.1.1'
+    assert _ip(rf.get('/', HTTP_X_FORWARDED_FOR='6.6.6.6, 200.1.1.1')) == '200.1.1.1'
+    assert _ip(rf.get('/', REMOTE_ADDR='10.0.0.9')) == '10.0.0.9'

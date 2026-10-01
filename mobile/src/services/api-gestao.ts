@@ -20,8 +20,10 @@ import type {
   Membro,
   Pagina,
   RegistroAuditoria,
+  RevogacaoMembro,
   Secretaria,
   SecretariaEntrada,
+  UsuarioModerado,
 } from '@/types/gestao';
 
 import { request } from './api';
@@ -71,15 +73,19 @@ export const apiGestao = {
     request<ConfigMunicipio>(`${BASE}/municipio/`, { method: 'PATCH', body: dados }),
 
   // --- Equipe (membros) ---
+  /** Lista inteira (o backend não pagina membros); `page` é ignorado. */
   membros: (filtros: { q?: string; papel?: string; page?: number } = {}) =>
     pagina<Membro>(`${BASE}/membros/${query(filtros)}`),
   convidarMembro: (dados: ConviteMembro) =>
     request<Membro>(`${BASE}/membros/`, { method: 'POST', body: dados }),
   alterarMembro: (id: string, dados: AlteracaoMembro) =>
     request<Membro>(`${BASE}/membros/${id}/`, { method: 'PATCH', body: dados }),
-  /** Revoga o acesso: a pessoa volta a ser cidadã (a conta continua existindo). */
+  /**
+   * Revoga o acesso: a pessoa volta a ser cidadã (a conta continua existindo)
+   * e os chamados abertos dela voltam para a fila (`chamados_liberados`).
+   */
   revogarMembro: (id: string) =>
-    request<unknown>(`${BASE}/membros/${id}/`, { method: 'DELETE' }).catch(semCorpo),
+    request<RevogacaoMembro>(`${BASE}/membros/${id}/`, { method: 'DELETE' }),
 
   // --- Secretarias ---
   secretarias: () => lista<Secretaria>(`${BASE}/secretarias/`),
@@ -107,29 +113,42 @@ export const apiGestao = {
   // --- Moderação ---
   moderacao: async (): Promise<FilaModeracao> => {
     const data = await request<Partial<FilaModeracao>>(`${BASE}/moderacao/`);
+    const sinalizados = data?.sinalizados ?? [];
+    const removidos = data?.removidos ?? [];
+    const usuarios = data?.usuarios ?? [];
     return {
-      sinalizados: data?.sinalizados ?? [],
-      removidos: data?.removidos ?? [],
-      usuarios: data?.usuarios ?? [],
+      sinalizados,
+      removidos,
+      usuarios,
+      contagens: {
+        sinalizados: data?.contagens?.sinalizados ?? sinalizados.length,
+        removidos: data?.contagens?.removidos ?? removidos.length,
+        suspensos: data?.contagens?.suspensos ?? usuarios.filter((u) => u.suspenso).length,
+        em_quarentena:
+          data?.contagens?.em_quarentena ?? usuarios.filter((u) => u.em_quarentena).length,
+      },
     };
   },
   removerChamado: (id: string, motivo: string) =>
-    request<unknown>(`${BASE}/moderacao/defeitos/${id}/remover/`, {
-      method: 'POST',
-      body: { motivo },
-    }),
+    request<{ id: string; removido_em: string; removido_motivo: string; removido_texto?: string }>(
+      `${BASE}/moderacao/defeitos/${id}/remover/`,
+      { method: 'POST', body: { motivo } },
+    ),
   restaurarChamado: (id: string, motivo?: string) =>
-    request<unknown>(`${BASE}/moderacao/defeitos/${id}/restaurar/`, {
-      method: 'POST',
-      body: motivo ? { motivo } : {},
-    }),
+    request<{ id: string; strike_retirado?: boolean }>(
+      `${BASE}/moderacao/defeitos/${id}/restaurar/`,
+      { method: 'POST', body: motivo ? { motivo } : {} },
+    ),
   suspenderUsuario: (id: string, dias: number, motivo: string) =>
-    request<unknown>(`${BASE}/moderacao/usuarios/${id}/suspender/`, {
+    request<UsuarioModerado>(`${BASE}/moderacao/usuarios/${id}/suspender/`, {
       method: 'POST',
       body: { dias, motivo },
     }),
   reativarUsuario: (id: string) =>
-    request<unknown>(`${BASE}/moderacao/usuarios/${id}/reativar/`, { method: 'POST', body: {} }),
+    request<UsuarioModerado>(`${BASE}/moderacao/usuarios/${id}/reativar/`, {
+      method: 'POST',
+      body: {},
+    }),
 
   // --- Auditoria ---
   auditoria: (filtros: FiltrosAuditoria & { page?: number } = {}) =>

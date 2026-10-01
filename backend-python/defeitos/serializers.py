@@ -114,6 +114,9 @@ CAMPOS_LISTA = (
     'secretaria_id', 'secretaria_nome',
     'total_apoios', 'sinalizacoes', 'criado_em', 'atualizado_em', 'resolvido_em', 'imagem_url',
     'prazo_em', 'sla_vencido', 'sla_restante_horas', 'visibilidade', 'avaliacao_nota',
+    # Com `resolvido_em`, diz se a nota é desta resolução (reaberto e resolvido
+    # de novo pede avaliação nova) — o selo "Avaliar" de Meus chamados.
+    'avaliado_em',
 )
 
 
@@ -151,7 +154,7 @@ class DefeitoDetailSerializer(DefeitoListSerializer):
             'imagem_thumbnail', 'foto_resolucao_url', 'imagens_extra', 'atualizacoes',
             'municipio', 'triado_em', 'atribuido_em', 'iniciado_em', 'fechado_em',
             'reaberturas', 'resposta_publica', 'motivo_rejeicao', 'duplicado_de',
-            'avaliacao_comentario', 'avaliado_em',
+            'avaliacao_comentario',
         )
 
     def get_duplicado_de(self, obj):

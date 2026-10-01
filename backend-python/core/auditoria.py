@@ -8,9 +8,18 @@ com quem fez, de onde e os valores antes/depois em `dados`.
 
 
 def _ip(request):
+    """
+    IP de quem agiu. O nginx da frente grava `X-Real-IP` com o `$remote_addr`
+    (sobrescreve o que o cliente mandar) e ACRESCENTA esse mesmo endereço ao
+    fim do `X-Forwarded-For`. Por isso o primeiro item do XFF é forjável e não
+    serve para trilha de auditoria; o último é o que o proxy viu.
+    """
+    real = (request.META.get('HTTP_X_REAL_IP') or '').strip()
+    if real:
+        return real[:45]
     encaminhado = request.META.get('HTTP_X_FORWARDED_FOR', '')
     if encaminhado:
-        return encaminhado.split(',')[0].strip()
+        return encaminhado.split(',')[-1].strip()[:45]
     return request.META.get('REMOTE_ADDR', '') or ''
 
 

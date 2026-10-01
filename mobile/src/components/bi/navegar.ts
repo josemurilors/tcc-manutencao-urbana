@@ -8,13 +8,24 @@
 
 import { router, type Href } from 'expo-router';
 
-import type { BiFiltros, DimensaoBi, PeriodoRapido } from '@/types/bi';
+import type { BiFiltros, DimensaoBi, PeriodoRapido, RecorteLista } from '@/types/bi';
 
 import { filtrosPadrao } from './use-filtros-bi';
 
-export type DimensaoDrill = DimensaoBi | 'vencidos';
+/** `vencidos` e `todos` não têm tabela: abrem direto a lista (do cartão de KPI). */
+export type DimensaoDrill = DimensaoBi | 'vencidos' | 'todos';
 
-export const DIMENSOES_DRILL: DimensaoDrill[] = ['categoria', 'bairro', 'secretaria', 'equipe', 'status', 'vencidos'];
+export const DIMENSOES_DRILL: DimensaoDrill[] = [
+  'categoria',
+  'bairro',
+  'secretaria',
+  'equipe',
+  'status',
+  'vencidos',
+  'todos',
+];
+
+export const RECORTES_LISTA: RecorteLista[] = ['abertos', 'vencidos', 'recebidos', 'resolvidos', 'rejeitados'];
 
 export const ROTULO_DIMENSAO: Record<DimensaoDrill, { singular: string; plural: string }> = {
   categoria: { singular: 'Categoria', plural: 'Categorias' },
@@ -23,6 +34,7 @@ export const ROTULO_DIMENSAO: Record<DimensaoDrill, { singular: string; plural: 
   equipe: { singular: 'Equipe', plural: 'Equipes' },
   status: { singular: 'Situação', plural: 'Situações' },
   vencidos: { singular: 'Prazo vencido', plural: 'Prazo vencido' },
+  todos: { singular: 'Município', plural: 'Município' },
 };
 
 type ParamsDrill = Record<string, string | undefined>;
@@ -53,13 +65,19 @@ export function filtrosDosParams(p: ParamsDrill): BiFiltros {
   };
 }
 
-export function abrirDrill(f: BiFiltros, dimensao: DimensaoDrill, fatia?: { chave: string; rotulo: string }) {
+export function abrirDrill(
+  f: BiFiltros,
+  dimensao: DimensaoDrill,
+  fatia?: { chave: string; rotulo: string } | null,
+  recorte?: RecorteLista,
+) {
   router.push({
     pathname: '/painel/[dimensao]',
     params: {
       dimensao,
       ...paramsDosFiltros(f),
       ...(fatia ? { chave: fatia.chave, rotulo: fatia.rotulo } : null),
+      ...(recorte ? { recorte } : null),
     },
   } as unknown as Href);
 }

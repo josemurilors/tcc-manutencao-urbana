@@ -155,9 +155,9 @@ export function AuthFlow() {
 
   /** Grava o aceite com o token recém-emitido e devolve a resposta já com a data. */
   async function aceitarCom(res: AuthResponse): Promise<AuthResponse> {
-    const r = await contaApi.aceitarTermos(res.access);
-    const aceite_termos_em = r.aceite_termos_em ?? new Date().toISOString();
-    return res.user ? { ...res, user: { ...res.user, aceite_termos_em } as Usuario } : res;
+    const atualizado = await contaApi.aceitarTermos(res.access);
+    // O servidor devolve o usuário inteiro já com a data do aceite.
+    return res.user ? { ...res, user: { ...res.user, ...atualizado } as Usuario } : res;
   }
 
   async function continuar() {

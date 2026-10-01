@@ -29,10 +29,11 @@ from defeitos import fluxo, sla
 from defeitos.fluxo import TransicaoInvalida, TransicaoNaoPermitida
 from defeitos.models import Defeito, DefeitoAnexo, DefeitoEvento, RespostaPadrao, Sinalizacao
 from defeitos.serializers import PRIORIDADES, DefeitoEventoSerializer, _distancia_m
-from gestao.models import Equipe, MunicipioConfig
+from gestao.models import CategoriaMunicipio, Equipe, MunicipioConfig
 from users.models import User
 
 from . import fila
+from .idempotencia import idempotente
 from .imagens import ImagemInvalida, comprimir_jpeg, tipo_mime
 from .serializers import (
     AnexoSerializer, ChamadoFilaSerializer, ChamadoOperacaoSerializer, RespostaPadraoSerializer,
@@ -186,6 +187,16 @@ def _filtrar_fila(request):
     equipe_id = _int(p.get('equipe_id'), 'equipe_id')
     if equipe_id is not None:
         qs = qs.filter(equipe_id=equipe_id)
+    secretaria_id = _int(p.get('secretaria_id'), 'secretaria_id')
+    if secretaria_id is not None:
+        # Secretaria efetiva (a mesma regra do BI): a gravada no chamado ou,
+        # sem ela, a que o município configurou para a categoria.
+        categorias = CategoriaMunicipio.objects.filter(
+            municipio_id=str(user.municipio_id), secretaria_id=secretaria_id,
+        ).values('categoria_id')
+        qs = qs.filter(
+            Q(secretaria_id=secretaria_id) | Q(secretaria__isnull=True, categoria_id__in=categorias)
+        )
 
     atribuicao = p.get('atribuicao') or 'todos'
     if atribuicao not in ATRIBUICOES:
@@ -200,6 +211,11 @@ def _filtrar_fila(request):
 
     if p.get('vencidos') in ('1', 'true'):
         qs = qs.filter(fila.filtro_vencidos(agora))
+    if p.get('vencem_24h') in ('1', 'true'):
+        # O mesmo recorte do contador `vencem_24h` do resumo.
+        qs = qs.filter(prazo_em__gte=agora, prazo_em__lt=agora + timedelta(hours=24))
+    if p.get('sinalizados') in ('1', 'true'):
+        qs = qs.filter(Q(total_resolvido__gt=0) | Q(total_nao_existe__gt=0))
     if p.get('bairro'):
         qs = qs.filter(bairro__iexact=p['bairro'].strip())
     termo = (p.get('q') or '').strip()
@@ -356,6 +372,11 @@ def _aplicar_transicao(defeito, user, dados, foto=None, lat=None, lng=None):
     extras = {}
     if checklist is not None:
         extras['checklist'] = checklist
+    # `texto` é recado da equipe: vira nota interna, fora do evento de status
+    # (que é público e chega ao cidadão). Na reabertura ele é o motivo, que o
+    # cidadão deve ver ("Chamado reaberto — Motivo: ...").
+    texto = (dados.get('texto') or '').strip()[:TEXTO_MAX]
+    reabertura = para == 'pendente' and fluxo.normalizar_status(defeito.status) in fluxo.STATUS_FECHADOS
     with transaction.atomic():
         anexo = None
         if jpeg is not None:
@@ -364,12 +385,15 @@ def _aplicar_transicao(defeito, user, dados, foto=None, lat=None, lng=None):
             extras['anexo_id'] = anexo.id
         fluxo.transicionar(
             defeito, para, user,
-            texto=(dados.get('texto') or '').strip()[:TEXTO_MAX],
+            texto=texto if reabertura else '',
             resposta_publica=resposta,
             motivo=dados.get('motivo') or '',
             duplicado_de=dados.get('duplicado_de') or None,
             dados=extras,
         )
+        if texto and not reabertura:
+            fluxo.registrar_evento(defeito, 'nota_interna', user, publico=False, texto=texto,
+                                   dados={'status': para})
     return defeito
 
 
@@ -381,6 +405,7 @@ def _responder_erro_fluxo(e):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def transicao_view(request, pk):
     defeito, negado = _carregar(request, pk)
     if negado:
@@ -414,6 +439,7 @@ def _aplicar_atribuicao(defeito, user, dados):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def atribuir_view(request, pk):
     defeito, negado = _carregar(request, pk)
     if negado:
@@ -429,6 +455,7 @@ def atribuir_view(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def liberar_view(request, pk):
     """Devolve o chamado à fila: o próprio atendente ou gestor+. Sem atendente, não faz nada."""
     defeito, negado = _carregar(request, pk)
@@ -466,6 +493,7 @@ def _texto_obrigatorio(request, limite):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def nota_view(request, pk):
     """Nota interna: só a equipe do município vê (evento `publico=false`)."""
     defeito, negado = _carregar(request, pk)
@@ -484,6 +512,7 @@ def nota_view(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def resposta_view(request, pk):
     """Resposta pública: fica no chamado e vira aviso para autor e apoiadores (`ao_evento`)."""
     defeito, negado = _carregar(request, pk)
@@ -508,6 +537,7 @@ def resposta_view(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def evidencia_view(request, pk):
     defeito, negado = _carregar(request, pk)
     if negado:
@@ -651,6 +681,7 @@ def prioridade_view(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@idempotente
 def lote_view(request):
     """
     A mesma ação em vários chamados, um a um e cada um na sua transação: o que

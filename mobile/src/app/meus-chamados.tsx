@@ -24,7 +24,7 @@ import { normalizarStatus, statusAberto } from '@/constants/status';
 import { corDoTom, Layout, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
-import { api } from '@/services/api';
+import { apiCidadao } from '@/services/api-cidadao';
 import type { Defeito } from '@/types';
 import type { FiltroMeusChamados } from '@/types/cidadao';
 import { totalApoios } from '@/utils/format';
@@ -49,8 +49,8 @@ export default function MeusChamadosScreen() {
 
   const carregar = useCallback(() => {
     let cancelado = false;
-    api
-      .meusDefeitos()
+    apiCidadao
+      .meusChamados()
       .then((defeitos) => {
         if (cancelado) return;
         setEstado({ tipo: 'ok', defeitos });

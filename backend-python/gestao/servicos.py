@@ -206,28 +206,27 @@ def restaurar(defeito, autor, *, motivo=''):
 
 
 def suspender(alvo, dias, motivo):
-    from notificacoes.models import Notificacao
+    from notificacoes.servico import notificar
 
     alvo.suspenso_ate = timezone.now() + timedelta(days=dias)
     alvo.save(update_fields=['suspenso_ate'])
-    # Aviso in-app: o cidadão precisa saber por que não consegue mais reportar.
-    Notificacao.objects.create(
-        usuario=alvo, tipo='moderacao', titulo='Sua conta foi suspensa temporariamente',
-        corpo=(
-            f'Por {dias} dia(s) você não poderá abrir chamados nem apoiar. Motivo: {motivo}'
-        ),
+    # Aviso in-app + push: o cidadão precisa saber por que não consegue mais
+    # reportar. `notificar` registra e segue se o push falhar.
+    notificar(
+        [alvo.pk], 'moderacao', 'Sua conta foi suspensa temporariamente',
+        f'Por {dias} dia(s) você não poderá abrir chamados nem apoiar. Motivo: {motivo}',
     )
     return alvo
 
 
 def reativar(alvo):
-    from notificacoes.models import Notificacao
+    from notificacoes.servico import notificar
 
     alvo.suspenso_ate = None
     alvo.save(update_fields=['suspenso_ate'])
-    Notificacao.objects.create(
-        usuario=alvo, tipo='moderacao', titulo='Sua conta foi reativada',
-        corpo='Você já pode voltar a abrir chamados e apoiar os da sua região.',
+    notificar(
+        [alvo.pk], 'moderacao', 'Sua conta foi reativada',
+        'Você já pode voltar a abrir chamados e apoiar os da sua região.',
     )
     return alvo
 

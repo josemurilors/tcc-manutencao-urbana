@@ -36,7 +36,7 @@ import { identificador, MOTIVOS_REJEICAO, nomeCategoria, REGEX_PROTOCOLO, VERBO_
 /** Texto inicial ao cidadão por motivo de rejeição (editável). */
 const TEXTO_REJEICAO: Record<MotivoRejeicao, string> = {
   duplicado:
-    'Já existe um chamado aberto para este mesmo problema. Seu apoio foi somado a ele e você pode acompanhar por lá.',
+    'Este problema já tinha sido registrado em outro chamado, que segue em atendimento. Acompanhe o andamento por ele.',
   fora_da_competencia:
     'Este problema não é de responsabilidade da prefeitura. Encaminhe ao órgão ou empresa responsável.',
   nao_localizado:
@@ -209,6 +209,7 @@ function Formulario({ chamado, para, respostas, onClose, onFeito }: Props & { pa
           onChangeText={setTexto}
           multiline
           invalid={tentou && texto.trim().length < 5}
+          hint="Aparece no histórico público do chamado."
           placeholder="Ex.: o problema voltou; o serviço ficou incompleto"
         />
       ) : null}
@@ -232,7 +233,7 @@ function Formulario({ chamado, para, respostas, onClose, onFeito }: Props & { pa
           value={texto}
           onChangeText={setTexto}
           multiline
-          hint="Só a equipe da prefeitura vê."
+          hint="Fica no histórico como nota interna: só a equipe da prefeitura vê."
         />
       ) : null}
     </BottomSheet>
@@ -265,7 +266,8 @@ function BuscaOriginal({
       if (REGEX_PROTOCOLO.test(t)) {
         lista = [await apiOperacao.porProtocolo(t)];
       } else {
-        lista = (await apiOperacao.fila({ q: t, ordenar: 'score' })).results ?? [];
+        // O original pode estar aberto ou já fechado (contrato §1).
+        lista = (await apiOperacao.fila({ q: t, ordenar: 'score', status: 'todos' })).results ?? [];
       }
       setResultados(lista.filter((c) => String(c.id) !== String(chamado.id)));
     } catch (err) {

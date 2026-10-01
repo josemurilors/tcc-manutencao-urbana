@@ -1,5 +1,5 @@
 /**
- * Barra "Buscar endereço ou bairro" no topo do mapa.
+ * Barra "Buscar endereço ou protocolo" no topo do mapa.
  *
  * Digitar dispara a busca depois de uma pausa (`ESPERA_MS`) e cancela a
  * anterior ainda em voo — o Nominatim público aceita ~1 req/s. Escolher um
@@ -8,17 +8,32 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText } from '@/components/ui/text';
 import { Elevation, Layout, MaxFontScale, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
+import { normalizarProtocolo } from '@/services/api-cidadao';
 import { buscarEndereco } from '@/services/api-mapa';
 import type { ResultadoEndereco } from '@/types/mapa';
 
 const ESPERA_MS = 600;
 const MINIMO_LETRAS = 3;
+
+/**
+ * "2026-000123", "2026 123", "#2026/123": o que a pessoa digita quando quer
+ * achar um chamado pelo protocolo (recebido por mensagem ou no 156). Nesse
+ * caso a barra oferece abrir o chamado em vez de buscar endereço.
+ */
+// Ano começando em 20: um CEP só com números ("01310100") não vira protocolo.
+const PARECE_PROTOCOLO = /^#?\s*20\d{2}\s*[-/.\s]?\s*\d{1,6}$/;
+
+export function protocoloDigitado(texto: string): string | null {
+  const t = texto.trim();
+  return PARECE_PROTOCOLO.test(t) ? normalizarProtocolo(t) : null;
+}
 
 type Estado = 'ocioso' | 'buscando' | 'pronto' | 'erro';
 
@@ -52,7 +67,8 @@ export function BuscaEndereco({ perto, onEscolher }: Props) {
   }, [perto]);
 
   const termo = texto.trim();
-  const ativo = termo.length >= MINIMO_LETRAS && termo !== escolhido;
+  const protocolo = protocoloDigitado(termo);
+  const ativo = termo.length >= MINIMO_LETRAS && termo !== escolhido && !protocolo;
 
   useEffect(() => {
     if (!ativo) return;
@@ -88,12 +104,18 @@ export function BuscaEndereco({ perto, onEscolher }: Props) {
     onEscolher(r);
   }
 
+  function abrirProtocolo(p: string) {
+    Keyboard.dismiss();
+    setFocado(false);
+    router.push({ pathname: '/protocolo/[protocolo]', params: { protocolo: p } });
+  }
+
   function limpar() {
     setEscolhido(null);
     setTexto('');
   }
 
-  const mostrarLista = focado && estado !== 'ocioso';
+  const mostrarLista = focado && (estado !== 'ocioso' || !!protocolo);
 
   return (
     <View style={styles.raiz}>
@@ -115,9 +137,12 @@ export function BuscaEndereco({ perto, onEscolher }: Props) {
             // Espera o toque no resultado chegar antes de fechar a lista.
             setTimeout(() => setFocado(false), 200);
           }}
-          placeholder="Buscar endereço ou bairro"
+          placeholder="Buscar endereço ou protocolo"
           placeholderTextColor={colors.textMuted}
-          accessibilityLabel="Buscar endereço ou bairro"
+          accessibilityLabel="Buscar endereço, bairro ou número de protocolo"
+          onSubmitEditing={() => {
+            if (protocolo) abrirProtocolo(protocolo);
+          }}
           returnKeyType="search"
           autoCorrect={false}
           maxFontSizeMultiplier={MaxFontScale.control}
@@ -145,7 +170,28 @@ export function BuscaEndereco({ perto, onEscolher }: Props) {
             { backgroundColor: colors.surfaceRaised, borderColor: colors.border },
           ]}
           accessibilityLiveRegion="polite">
-          {estado === 'buscando' && resultados.length === 0 ? (
+          {protocolo ? (
+            <Pressable
+              onPress={() => abrirProtocolo(protocolo)}
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir o chamado de protocolo ${protocolo}`}
+              style={({ pressed }) => [
+                styles.resultado,
+                { borderColor: colors.borderSubtle },
+                pressed && { backgroundColor: colors.surfacePressed },
+              ]}>
+              <Ionicons name="document-text-outline" size={18} color={colors.primaryText} />
+              <View style={styles.flex}>
+                <AppText variant="bodySm" weight="600" numberOfLines={1}>
+                  Abrir protocolo {protocolo}
+                </AppText>
+                <AppText variant="caption" tone="muted" numberOfLines={1}>
+                  Acompanhar o andamento deste chamado
+                </AppText>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </Pressable>
+          ) : estado === 'buscando' && resultados.length === 0 ? (
             <AppText variant="bodySm" tone="muted" style={styles.aviso}>
               Buscando...
             </AppText>
@@ -192,9 +238,11 @@ export function BuscaEndereco({ perto, onEscolher }: Props) {
               </Pressable>
             ))
           )}
-          <AppText variant="caption" tone="muted" style={styles.creditos}>
-            Endereços: © OpenStreetMap
-          </AppText>
+          {protocolo ? null : (
+            <AppText variant="caption" tone="muted" style={styles.creditos}>
+              Endereços: © OpenStreetMap
+            </AppText>
+          )}
         </View>
       ) : null}
     </View>

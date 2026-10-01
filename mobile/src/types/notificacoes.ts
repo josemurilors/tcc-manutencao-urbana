@@ -8,7 +8,9 @@ export type TipoNotificacao =
   | 'apoio_marco'
   | 'sla_alerta'
   | 'atribuido'
-  | 'moderacao';
+  | 'moderacao'
+  /** Resumo semanal do gestor (sem chamado: abre o painel). */
+  | 'resumo';
 
 export type Notificacao = {
   id: number;
@@ -33,9 +35,10 @@ export type PaginaNotificacoes = {
 /** Plataforma informada ao registrar o token do Expo Push. */
 export type PlataformaPush = 'android' | 'ios' | 'web';
 
-/** Dados que o backend manda junto com o push (`enviar_push(..., dados)`). */
+/** Dados que o backend manda junto com o push (`{tipo, defeito_id?, protocolo?}`). */
 export type DadosPush = {
   defeito_id?: string | number | null;
   tipo?: string;
+  protocolo?: string;
   notificacao_id?: number;
 };

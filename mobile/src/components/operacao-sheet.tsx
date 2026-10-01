@@ -33,7 +33,7 @@ import {
   transicoesPermitidas,
   VERBO_TRANSICAO,
 } from '@/components/operacao/regras';
-import { EvidenciasChamado, HistoricoChamado } from '@/components/operacao/registros-chamado';
+import { EvidenciasChamado } from '@/components/operacao/registros-chamado';
 import { TextoSheet, type ModoTexto } from '@/components/operacao/texto-sheet';
 import { TransicaoSheet, type ResultadoTransicao } from '@/components/operacao/transicao-sheet';
 import type { Catalogos } from '@/components/operacao/use-catalogos';
@@ -46,7 +46,7 @@ import { corDoTom, Radius, Spacing, type Tom } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
-import { api, API_URL } from '@/services/api';
+import { API_URL } from '@/services/api';
 import { apiOperacao } from '@/services/api-operacao';
 import { executarOuEnfileirar, type AcaoOperacao } from '@/services/operacao-offline';
 import type { Defeito } from '@/types';
@@ -121,8 +121,21 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
 
   function aposServidor(resposta: unknown) {
     if (resposta && typeof resposta === 'object' && 'id' in resposta) {
-      onAtualizado(c.id, resposta as Partial<ChamadoFila>);
+      const patch = { ...(resposta as Partial<ChamadoFila>) };
+      // O detalhe das ações não sabe onde o servidor está: sem isso o cartão
+      // perderia a distância calculada pela fila.
+      if (patch.distancia_m == null) delete patch.distancia_m;
+      onAtualizado(c.id, patch);
     }
+  }
+
+  /**
+   * Registro que não muda o chamado no servidor (nota, foto): marca a
+   * atividade para o histórico do detalhe recarregar e mostrar o item novo.
+   */
+  function registrouAlgo() {
+    setVersao((v) => v + 1);
+    onAtualizado(c.id, { atualizado_em: new Date().toISOString() });
   }
 
   /** Executa uma ação simples (sem formulário) pela fila offline. */
@@ -138,7 +151,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
         if (r.resposta && typeof r.resposta === 'object' && 'id' in r.resposta) aposServidor(r.resposta);
         else onAtualizado(c.id, otimista);
       }
-      setVersao((v) => v + 1);
+      registrouAlgo();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Não foi possível concluir a ação.');
     } finally {
@@ -194,7 +207,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
       );
       if (r.offline) toast.warning('Sem conexão: a foto será enviada quando a rede voltar.');
       else toast.success(e.local ? 'Foto do antes registrada com o local.' : 'Foto registrada (sem GPS).');
-      setVersao((v) => v + 1);
+      registrouAlgo();
     } catch (err) {
       toast.error(
         err instanceof ImagemMuitoGrandeError
@@ -227,7 +240,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
   async function gerarOS() {
     setEmCurso('os');
     try {
-      await api.gerarOS(c.id);
+      await apiOperacao.ordemServico(c.id, c.protocolo);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Não foi possível gerar a Ordem de Serviço.');
     } finally {
@@ -238,7 +251,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
   function aposTransicao(r: ResultadoTransicao) {
     setPara(null);
     if (r.chamado) aposServidor(r.chamado);
-    else onAtualizado(c.id, { status: r.para });
+    else onAtualizado(c.id, { status: r.para, atualizado_em: new Date().toISOString() });
     setVersao((v) => v + 1);
   }
 
@@ -270,6 +283,59 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
         />
       ) : null}
       {erroDetalhe ? <Faixa tom="neutral" icone="information-circle" texto="Descrição e fotos indisponíveis agora." /> : null}
+      {/* As ações do dia a dia ficam no topo: no campo, ninguém rola o histórico para achar "Concluir". */}
+      {!fechado ? (
+        <Grupo titulo="Atendimento">
+          {/* Operador não toma chamado de outra pessoa (403 no backend); gestor reatribui. */}
+          {!comigo && (!temAtendente || gestor) ? (
+            <Button
+              size="sm"
+              variant={temAtendente ? 'secondary' : 'primary'}
+              onPress={assumir}
+              loading={emCurso === 'assumir'}
+              accessibilityHint={temAtendente ? 'Passa o chamado de outra pessoa para você' : undefined}
+              icon={
+                <Ionicons
+                  name="hand-left"
+                  size={16}
+                  color={temAtendente ? colors.textPrimary : colors.onPrimary}
+                />
+              }>
+              Assumir
+            </Button>
+          ) : null}
+          {temAtendente && (comigo || gestor) ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={liberar}
+              loading={emCurso === 'liberar'}
+              icon={<Ionicons name="arrow-undo" size={16} color={colors.textSecondary} />}>
+              Devolver à fila
+            </Button>
+          ) : null}
+          {fluxo.map((d) => {
+            const v = VERBO_TRANSICAO[d];
+            const principal = d === 'concluido';
+            return (
+              <Button
+                key={d}
+                size="sm"
+                variant={principal ? 'primary' : 'secondary'}
+                onPress={() => setPara(d)}
+                icon={
+                  <Ionicons
+                    name={v.icone as keyof typeof Ionicons.glyphMap}
+                    size={16}
+                    color={principal ? colors.onPrimary : colors.textPrimary}
+                  />
+                }>
+                {v.rotulo}
+              </Button>
+            );
+          })}
+        </Grupo>
+      ) : null}
     </View>
   );
 
@@ -278,60 +344,9 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
       defeito={{ ...c, imagem_thumbnail: fotoCidadao ?? null }}
       onClose={onClose}
       rotuloApoios="apoios"
+      visao="operacao"
       destaque={destaque}>
       <View style={styles.corpo}>
-        {!fechado ? (
-          <Grupo titulo="Atendimento">
-            {!comigo ? (
-              <Button
-                size="sm"
-                variant={temAtendente ? 'secondary' : 'primary'}
-                onPress={assumir}
-                loading={emCurso === 'assumir'}
-                accessibilityHint={temAtendente ? 'Passa o chamado de outra pessoa para você' : undefined}
-                icon={
-                  <Ionicons
-                    name="hand-left"
-                    size={16}
-                    color={temAtendente ? colors.textPrimary : colors.onPrimary}
-                  />
-                }>
-                Assumir
-              </Button>
-            ) : null}
-            {temAtendente && (comigo || gestor) ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onPress={liberar}
-                loading={emCurso === 'liberar'}
-                icon={<Ionicons name="arrow-undo" size={16} color={colors.textSecondary} />}>
-                Devolver à fila
-              </Button>
-            ) : null}
-            {fluxo.map((d) => {
-              const v = VERBO_TRANSICAO[d];
-              const principal = d === 'concluido';
-              return (
-                <Button
-                  key={d}
-                  size="sm"
-                  variant={principal ? 'primary' : 'secondary'}
-                  onPress={() => setPara(d)}
-                  icon={
-                    <Ionicons
-                      name={v.icone as keyof typeof Ionicons.glyphMap}
-                      size={16}
-                      color={principal ? colors.onPrimary : colors.textPrimary}
-                    />
-                  }>
-                  {v.rotulo}
-                </Button>
-              );
-            })}
-          </Grupo>
-        ) : null}
-
         <Grupo titulo="Registro">
           {!fechado ? (
             <Button
@@ -423,13 +438,10 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
           </Grupo>
         ) : null}
 
-        <Grupo titulo="Evidências" bloco>
+        <Grupo titulo="Evidências da equipe (com GPS)" bloco>
           <EvidenciasChamado id={c.id} versao={versao} />
         </Grupo>
 
-        <Grupo titulo="Histórico e notas internas" bloco>
-          <HistoricoChamado id={c.id} versao={versao} />
-        </Grupo>
       </View>
 
       <TransicaoSheet
@@ -446,7 +458,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
         onClose={() => setModoTexto(null)}
         onFeito={(modo, texto, offline) => {
           setModoTexto(null);
-          setVersao((v) => v + 1);
+          registrouAlgo();
           if (modo === 'resposta' && !offline) onAtualizado(c.id, { resposta_publica: texto });
         }}
       />

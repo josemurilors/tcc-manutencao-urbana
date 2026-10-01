@@ -31,8 +31,10 @@ import { TextField } from '@/components/ui/text-field';
 import { RAIO_DUPLICADO_M } from '@/constants/proximidade';
 import { statusAberto } from '@/constants/status';
 import { Layout, Radius, Spacing } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
+import { convidarParaPushAposReporte } from '@/hooks/use-push';
 import { api, DefeitoDuplicadoError } from '@/services/api';
 import { apiCidadao } from '@/services/api-cidadao';
 import { recarregarProgresso } from '@/services/progresso';
@@ -45,6 +47,7 @@ import { ImagemMuitoGrandeError, tirarFoto } from '@/utils/image';
 const CATEGORIAS_PADRAO: Categoria[] = [
   { nome: 'Buraco', icone: '🕳️' },
   { nome: 'Iluminação', icone: '💡' },
+  { nome: 'Semáforo', icone: '🚦' },
   { nome: 'Árvore Caída', icone: '🌳' },
   { nome: 'Entulho', icone: '🗑️' },
   { nome: 'Calçada Danificada', icone: '🚶' },
@@ -70,6 +73,7 @@ export default function NovoChamadoScreen() {
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const compartilhar = useCompartilharChamado();
+  const { isAuthenticated } = useAuth();
   const { lat, lng } = useLocalSearchParams<{ lat?: string; lng?: string }>();
 
   const latitude = Number(lat);
@@ -266,6 +270,9 @@ export default function NovoChamadoScreen() {
         toast.success('Chamado enviado! +10 XP');
         setResultado({ tipo: 'enviado', defeito: r });
       }
+      // Hora certa de pedir o push: a pessoa quer saber o que acontece com o
+      // que acabou de abrir. Pergunta uma vez por aparelho; falhar não importa.
+      convidarParaPushAposReporte().catch((err: unknown) => console.warn('[novo] push', err));
     } catch (err) {
       if (err instanceof DefeitoDuplicadoError && err.defeitoExistenteId) {
         // O backend achou um igual que a busca não pegou: leva para ele.
@@ -277,6 +284,22 @@ export default function NovoChamadoScreen() {
     } finally {
       setEnviando(false);
     }
+  }
+
+  // Link direto (ou sessão que caiu no meio): sem conta não há como enviar,
+  // e descobrir isso só no botão final, depois da foto, frustra.
+  if (!isAuthenticated && !resultado) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.bg }]}>
+        <StateView
+          kind="empty"
+          icon="person-circle-outline"
+          title="Entre para reportar"
+          description="Os chamados ficam ligados à sua conta para você acompanhar o andamento e receber a resposta da prefeitura."
+          action={{ label: 'Entrar', onPress: () => router.push('/login') }}
+        />
+      </View>
+    );
   }
 
   if (!coordenadaValida) {

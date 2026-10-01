@@ -36,6 +36,9 @@ const ROTULO_PAPEL: Record<string, string> = {
   super_admin: 'Administrador(a) da plataforma',
 };
 
+/** Mesmo mínimo do cadastro e da recuperação de senha. */
+const SENHA_MINIMA = 8;
+
 const TEXTO_PUSH: Record<EstadoPush, string> = {
   carregando: 'Verificando…',
   indisponivel:
@@ -71,25 +74,45 @@ export default function PerfilScreen() {
   }
 
   async function salvar() {
+    const nomeLimpo = nome.trim();
+    const mudouNome = nomeLimpo !== (user?.nome ?? '');
+    const mudaSenha = !!senhaAtual || !!novaSenha;
+    if (mudouNome && !nomeLimpo) {
+      addToast.error('O nome não pode ficar em branco.');
+      return;
+    }
+    // Antes, um campo de senha preenchido sozinho era ignorado em silêncio e
+    // a tela ainda dizia "salvo".
+    if (mudaSenha && (!senhaAtual || !novaSenha)) {
+      addToast.error('Para trocar a senha, preencha a senha atual e a nova.');
+      return;
+    }
+    if (mudaSenha && novaSenha.length < SENHA_MINIMA) {
+      addToast.error(`A nova senha precisa de pelo menos ${SENHA_MINIMA} caracteres.`);
+      return;
+    }
+    if (!mudouNome && !mudaSenha) {
+      addToast.info('Nada para salvar.');
+      return;
+    }
     setSalvando(true);
     try {
-      if (nome !== user?.nome) {
-        await api.updateProfile({ nome });
-        await updateUser({ nome });
+      if (mudouNome) {
+        await api.updateProfile({ nome: nomeLimpo });
+        await updateUser({ nome: nomeLimpo });
+        // Volta a espelhar o usuário salvo.
+        setNomeEditado(null);
       }
-      if (senhaAtual && novaSenha) {
+      if (mudaSenha) {
         await api.updatePassword(senhaAtual, novaSenha);
         setSenhaAtual('');
         setNovaSenha('');
       }
-      // Volta a espelhar o usuário salvo.
-      setNomeEditado(null);
-      addToast('Alterações salvas com sucesso!');
-    } catch (err) {
-      addToast(
-        'Erro ao salvar: ' + (err instanceof Error ? err.message : 'tente novamente'),
-        'error',
+      addToast.success(
+        mudouNome && mudaSenha ? 'Nome e senha atualizados.' : mudouNome ? 'Nome atualizado.' : 'Senha alterada.',
       );
+    } catch (err) {
+      addToast.error('Não foi possível salvar. ' + mensagemDeErro(err, 'Tente de novo.'));
     } finally {
       setSalvando(false);
     }
@@ -155,13 +178,13 @@ export default function PerfilScreen() {
     setExcluindo(true);
     try {
       await api.deleteAccount();
-      await logout();
+      await logout({ contaExcluida: true });
       limparProgresso();
       addToast('Sua conta foi excluída.');
       router.replace('/(tabs)/mapa');
     } catch (err) {
       addToast(
-        'Erro ao excluir: ' + (err instanceof Error ? err.message : 'tente novamente'),
+        'Não foi possível excluir a conta. ' + mensagemDeErro(err, 'Tente de novo.'),
         'error',
       );
     } finally {
@@ -259,6 +282,7 @@ ${mensagem}`)) excluirConta();
           label="Nova senha"
           value={novaSenha}
           onChangeText={setNovaSenha}
+          placeholder={`Mínimo ${SENHA_MINIMA} caracteres`}
           secureTextEntry
           autoComplete="new-password"
         />

@@ -7,6 +7,7 @@ confirmar que o id existe.
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -41,6 +42,15 @@ class NotificacaoViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             if params.get('tipo'):
                 qs = qs.filter(tipo=params['tipo'])
         return qs
+
+    def get_object(self):
+        # O 404 padrão do Django sai em inglês ("No Notificacao matches...") e
+        # chegaria assim na tela do app.
+        pk = str(self.kwargs.get('pk', ''))
+        notificacao = self.get_queryset().filter(pk=pk).first() if pk.isdigit() else None
+        if notificacao is None:
+            raise NotFound('Notificação não encontrada.')
+        return notificacao
 
     @action(detail=False, methods=['get'], url_path='nao-lidas')
     def nao_lidas(self, request):

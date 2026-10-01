@@ -4,29 +4,33 @@
  *
  * Não lidas vêm em destaque com fundo, selo "Nova" (texto + ícone, não só
  * cor) e são anunciadas como "Não lida" ao leitor de tela. Tocar marca como
- * lida e abre o chamado. Paginação infinita, puxar para atualizar e "Marcar
- * todas como lidas". O selo do sino é atualizado junto (`use-nao-lidas`).
+ * lida e abre o chamado (ou o painel, no resumo semanal do gestor).
+ * Filtro "Todas" × "Não lidas", paginação infinita, puxar para atualizar e
+ * "Marcar todas como lidas". O selo do sino é atualizado junto
+ * (`use-nao-lidas`), e um push que chega com a tela aberta já entra na lista.
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { Redirect, router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { ListItem } from '@/components/ui/list-item';
+import { SegmentedControl, type SegmentOption } from '@/components/ui/segmented-control';
 import { StateView } from '@/components/ui/state-view';
 import { AppText } from '@/components/ui/text';
 import { corDoTom, Layout, Radius, Spacing, type Tom } from '@/constants/theme';
-import { useAuth } from '@/context/auth-context';
+import { ehEquipe, useAuth } from '@/context/auth-context';
 import { useOfflineSyncContext } from '@/context/offline-sync-context';
 import { useColors } from '@/context/theme-context';
 import { useToast, useToastOffset } from '@/context/toast-context';
 import { decrementarNaoLidas, definirNaoLidas, recarregarNaoLidas } from '@/hooks/use-nao-lidas';
-import { rotaDoChamado } from '@/hooks/use-push';
+import { destinoDaNotificacao } from '@/hooks/use-push';
 import { notificacoesApi } from '@/services/api-notificacoes';
 import type { Notificacao, PaginaNotificacoes } from '@/types/notificacoes';
 import { mensagemDeErro } from '@/utils/erro';
@@ -42,7 +46,14 @@ const VISUAL_DO_TIPO: Record<string, { icone: IconName; tom: Tom }> = {
   sla_alerta: { icone: 'alarm', tom: 'danger' },
   atribuido: { icone: 'person-add', tom: 'info' },
   moderacao: { icone: 'shield-checkmark', tom: 'neutral' },
+  resumo: { icone: 'stats-chart', tom: 'primary' },
 };
+
+type Filtro = 'todas' | 'nao_lidas';
+const OPCOES_FILTRO: SegmentOption<Filtro>[] = [
+  { value: 'todas', label: 'Todas' },
+  { value: 'nao_lidas', label: 'Não lidas' },
+];
 const VISUAL_PADRAO = { icone: 'notifications' as IconName, tom: 'neutral' as Tom };
 
 /** "agora", "há 5 min", "há 2 h", "ontem", "há 3 dias" ou a data. */
@@ -66,7 +77,7 @@ export default function NotificacoesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { online } = useOfflineSyncContext();
   useToastOffset(Spacing[4]);
 
@@ -77,6 +88,7 @@ export default function NotificacoesScreen() {
   const [carregandoMais, setCarregandoMais] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [marcandoTodas, setMarcandoTodas] = useState(false);
+  const [filtro, setFiltro] = useState<Filtro>('todas');
   // Evita duas páginas iguais quando o onEndReached dispara em rajada.
   const buscandoPagina = useRef(false);
 
@@ -88,9 +100,16 @@ export default function NotificacoesScreen() {
     recarregarNaoLidas().catch((err) => console.warn('[notificações] contador', err));
   }, []);
 
+  // Filtro vigente: a resposta atrasada do filtro anterior não sobrescreve a lista.
+  const filtroAtual = useRef(filtro);
+  filtroAtual.current = filtro;
+
   const carregarPrimeira = useCallback(
-    () => notificacoesApi.listar(1).then(aplicarPrimeira),
-    [aplicarPrimeira],
+    () =>
+      notificacoesApi.listar(1, { naoLidas: filtro === 'nao_lidas' }).then((pagina) => {
+        if (filtroAtual.current === filtro) aplicarPrimeira(pagina);
+      }),
+    [aplicarPrimeira, filtro],
   );
 
   const falhou = useCallback((err: unknown) => {
@@ -106,10 +125,27 @@ export default function NotificacoesScreen() {
     carregarPrimeira().catch(falhou);
   }
 
-  // Primeira carga: o estado já nasce "carregando".
+  // Primeira carga (e a cada troca de filtro): o estado já nasce "carregando".
   useEffect(() => {
-    if (isAuthenticated) notificacoesApi.listar(1).then(aplicarPrimeira).catch(falhou);
-  }, [isAuthenticated, aplicarPrimeira, falhou]);
+    if (isAuthenticated) carregarPrimeira().catch(falhou);
+  }, [isAuthenticated, carregarPrimeira, falhou]);
+
+  // Push recebido com a central aberta: o aviso também já está no servidor.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isAuthenticated) return;
+    const sub = Notifications.addNotificationReceivedListener(() => {
+      carregarPrimeira().catch((err) => console.warn('[notificações] atualizar após push', err));
+    });
+    return () => sub.remove();
+  }, [isAuthenticated, carregarPrimeira]);
+
+  function trocarFiltro(novo: Filtro) {
+    if (novo === filtro) return;
+    setFiltro(novo);
+    setItens([]);
+    setProximaPagina(null);
+    setEstado('carregando');
+  }
 
   if (!isAuthenticated) {
     return <Redirect href="/(tabs)/conta" />;
@@ -133,7 +169,9 @@ export default function NotificacoesScreen() {
     buscandoPagina.current = true;
     setCarregandoMais(true);
     try {
-      const pagina = await notificacoesApi.listar(proximaPagina);
+      const pagina = await notificacoesApi.listar(proximaPagina, {
+        naoLidas: filtro === 'nao_lidas',
+      });
       setItens((prev) => {
         const vistos = new Set(prev.map((n) => n.id));
         return [...prev, ...pagina.results.filter((n) => !vistos.has(n.id))];
@@ -162,9 +200,8 @@ export default function NotificacoesScreen() {
         console.warn('[notificações] marcar lida', err);
       });
     }
-    if (n.defeito_id !== null && n.defeito_id !== undefined && n.defeito_id !== '') {
-      router.push(rotaDoChamado(n.defeito_id));
-    }
+    const destino = destinoDaNotificacao(n);
+    if (destino) router.push(destino);
   }
 
   async function marcarTodas() {
@@ -216,7 +253,8 @@ export default function NotificacoesScreen() {
     const cor = corDoTom(colors, visual.tom);
     const naoLida = !n.lida_em;
     const quando = tempoRelativo(n.criado_em);
-    const temChamado = n.defeito_id !== null && n.defeito_id !== undefined && n.defeito_id !== '';
+    const destino = destinoDaNotificacao(n);
+    const temDestino = destino !== null;
     return (
       <ListItem
         title={n.titulo}
@@ -230,7 +268,7 @@ export default function NotificacoesScreen() {
         trailing={
           naoLida ? (
             <Badge label="Nova" tone="primary" icon="ellipse" />
-          ) : temChamado ? (
+          ) : temDestino ? (
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           ) : (
             <View />
@@ -240,7 +278,9 @@ export default function NotificacoesScreen() {
         accessibilityLabel={[naoLida ? 'Não lida' : null, n.titulo, n.corpo, quando]
           .filter(Boolean)
           .join('. ')}
-        accessibilityHint={temChamado ? 'Abre o chamado' : 'Marca como lida'}
+        accessibilityHint={
+          n.tipo === 'resumo' ? 'Abre o painel' : temDestino ? 'Abre o chamado' : 'Marca como lida'
+        }
         style={[
           styles.item,
           naoLida && { backgroundColor: colors.primarySubtle, borderColor: colors.primary },
@@ -284,12 +324,26 @@ export default function NotificacoesScreen() {
           />
         }
         ListEmptyComponent={
-          <StateView
-            kind="empty"
-            icon="notifications-off-outline"
-            title="Tudo em dia"
-            description="Quando a prefeitura atualizar um chamado seu ou que você apoiou, o aviso aparece aqui."
-          />
+          filtro === 'nao_lidas' ? (
+            <StateView
+              kind="empty"
+              icon="checkmark-done-outline"
+              title="Nenhuma notificação nova"
+              description="Você já viu tudo o que chegou."
+              action={{ label: 'Ver todas', onPress: () => trocarFiltro('todas') }}
+            />
+          ) : (
+            <StateView
+              kind="empty"
+              icon="notifications-off-outline"
+              title="Tudo em dia"
+              description={
+                ehEquipe(user)
+                  ? 'Chamados atribuídos a você, prazos vencendo e o resumo da semana aparecem aqui.'
+                  : 'Quando a prefeitura atualizar um chamado seu ou que você apoiou, o aviso aparece aqui.'
+              }
+            />
+          )
         }
         ListFooterComponent={
           carregandoMais ? (
@@ -307,6 +361,13 @@ export default function NotificacoesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {cabecalho}
+      <SegmentedControl
+        accessibilityLabel="Filtrar notificações"
+        options={OPCOES_FILTRO}
+        value={filtro}
+        onChange={trocarFiltro}
+        style={styles.filtro}
+      />
       {corpo}
     </View>
   );
@@ -325,6 +386,10 @@ const styles = StyleSheet.create({
   },
   titulo: {
     flex: 1,
+  },
+  filtro: {
+    marginHorizontal: Layout.gutter,
+    marginBottom: Spacing[2],
   },
   lista: {
     paddingHorizontal: Layout.gutter,

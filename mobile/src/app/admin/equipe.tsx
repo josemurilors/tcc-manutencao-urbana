@@ -42,7 +42,7 @@ import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { apiGestao } from '@/services/api-gestao';
-import type { Equipe, Membro, PapelEquipe, Secretaria } from '@/types/gestao';
+import type { AlteracaoMembro, Equipe, Membro, PapelEquipe, Secretaria } from '@/types/gestao';
 
 type FiltroPapel = 'todos' | PapelEquipe;
 
@@ -59,7 +59,9 @@ const OPCOES_PAPEL = PAPEIS_EQUIPE.map((p) => ({
   descricao: DESCRICAO_PAPEL[p],
 }));
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Sem exigir ponto no domínio: o vínculo é com uma conta que já existe, e o
+// cadastro aceita domínios internos (ex.: servidor@intranet).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+$/;
 
 /** Valor do Select para "nenhuma" (o Select trabalha com string). */
 const NENHUMA = '';
@@ -218,20 +220,27 @@ function lotacaoDe(m: Membro) {
   return [m.secretaria_nome, m.equipe_nome].filter(Boolean).join(' · ');
 }
 
+function textoAbertos(n: number) {
+  return n === 1 ? '1 chamado aberto' : `${n} chamados abertos`;
+}
+
 function LinhaMembro({ membro, onPress }: { membro: Membro; onPress?: () => void }) {
   const papel = ehPapel(membro.papel) ? membro.papel : 'operador';
   const lotacao = lotacaoDe(membro);
   const suspenso = membro.suspenso_ate && new Date(membro.suspenso_ate) > new Date();
+  const abertos = membro.chamados_abertos ?? 0;
   return (
     <ListItem
       title={membro.nome || membro.email}
       subtitle={membro.email}
-      meta={lotacao || 'Sem secretaria definida'}
+      meta={[lotacao || 'Sem secretaria definida', abertos ? textoAbertos(abertos) : null]
+        .filter(Boolean)
+        .join(' · ')}
       leading="person-circle"
       onPress={onPress}
       accessibilityLabel={`${membro.nome}, ${ROTULO_PAPEL[papel]}, ${membro.email}${
         lotacao ? `, ${lotacao}` : ''
-      }${suspenso ? ', suspenso' : ''}`}
+      }${abertos ? `, ${textoAbertos(abertos)}` : ''}${suspenso ? ', suspenso' : ''}`}
       accessibilityHint={onPress ? 'Abre as opções de papel e acesso' : undefined}
       trailing={
         <View style={styles.selos}>
@@ -317,12 +326,14 @@ function MembroSheet({
       if (!ok) return;
     }
     setSalvando(true);
+    // Só o que mudou: reenviar uma lotação que foi desativada depois seria
+    // recusado e travaria a troca de papel.
+    const corpo: AlteracaoMembro = {};
+    if (trocaPapel) corpo.papel = papel;
+    if (paraId(secretariaId) !== (membro.secretaria_id ?? null)) corpo.secretaria_id = paraId(secretariaId);
+    if (paraId(equipeId) !== (membro.equipe_id ?? null)) corpo.equipe_id = paraId(equipeId);
     try {
-      const novo = await apiGestao.alterarMembro(membro.id, {
-        ...(trocaPapel ? { papel } : null),
-        secretaria_id: paraId(secretariaId),
-        equipe_id: paraId(equipeId),
-      });
+      const novo = await apiGestao.alterarMembro(membro.id, corpo);
       // Se o backend não devolver o membro, monta a partir do que foi enviado.
       const secretaria = secretarias.find((s) => s.id === paraId(secretariaId));
       const equipe = equipes.find((e) => e.id === paraId(equipeId));
@@ -348,18 +359,28 @@ function MembroSheet({
   }
 
   async function revogar() {
+    const abertos = membro.chamados_abertos ?? 0;
     const ok = await confirmar({
       titulo: 'Revogar acesso?',
-      mensagem: `${membro.nome} deixa a equipe e volta a usar o app como cidadão. A conta e os chamados continuam. Você pode convidar de novo depois.`,
+      mensagem: `${membro.nome} deixa a equipe e volta a usar o app como cidadão. ${
+        abertos
+          ? `${textoAbertos(abertos)} com esta pessoa ${abertos === 1 ? 'volta' : 'voltam'} para a fila sem atendente. `
+          : ''
+      }A conta continua e você pode convidar de novo depois.`,
       confirmar: 'Revogar',
       destrutivo: true,
     });
     if (!ok) return;
     setRevogando(true);
     try {
-      await apiGestao.revogarMembro(membro.id);
+      const r = await apiGestao.revogarMembro(membro.id);
       onAlterado(null);
-      toast.success(`Acesso de ${membro.nome} revogado`);
+      const liberados = r?.chamados_liberados ?? 0;
+      toast.success(
+        liberados
+          ? `Acesso de ${membro.nome} revogado. ${textoAbertos(liberados)} ${liberados === 1 ? 'voltou' : 'voltaram'} para a fila.`
+          : `Acesso de ${membro.nome} revogado`,
+      );
       onFechar();
     } catch (err) {
       toast.error(`Não foi possível revogar: ${mensagemDeErro(err)}`);

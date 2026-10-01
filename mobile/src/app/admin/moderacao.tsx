@@ -5,14 +5,14 @@
  * - Sinalizados: chamados com marcações de "não existe"/"já resolvido".
  *   Ações: abrir no mapa, remover (com motivo, vira soft delete).
  * - Removidos: o que saiu do ar; dá para restaurar.
- * - Cidadãos: quem acumulou advertências (strikes); suspender por N dias ou
- *   reativar.
+ * - Cidadãos: quem tem advertência (strike) válida ou está suspenso;
+ *   suspender por N dias ou reativar. O cidadão recebe aviso nos dois casos.
  *
  * Gestor ou mais. Toda ação pede confirmação e o motivo vai para a auditoria.
  */
 
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -44,17 +44,27 @@ type AcaoPendente =
 
 const DIAS_SUSPENSAO_PADRAO = 7;
 
-const MOTIVO_REMOCAO: Record<string, string> = {
+/** Origem da remoção (`removido_motivo`) → selo. */
+const ORIGEM_REMOCAO: Record<string, string> = {
   comunidade: 'Removido pela comunidade',
-  comunidade_nao_existe: 'Removido pela comunidade',
   autor: 'Excluído pelo autor',
   moderacao: 'Removido pela prefeitura',
-  operador: 'Removido pela prefeitura',
 };
 
 function suspensoAte(u: UsuarioModeracao) {
   return u.suspenso_ate && new Date(u.suspenso_ate) > new Date() ? u.suspenso_ate : null;
 }
+
+function plural(n: number, um: string, varios: string) {
+  return `${n} ${n === 1 ? um : varios}`;
+}
+
+const FILA_VAZIA: FilaModeracao = {
+  sinalizados: [],
+  removidos: [],
+  usuarios: [],
+  contagens: { sinalizados: 0, removidos: 0, suspensos: 0, em_quarentena: 0 },
+};
 
 export default function ModeracaoScreen() {
   const insets = useSafeAreaInsets();
@@ -63,24 +73,31 @@ export default function ModeracaoScreen() {
   const [acao, setAcao] = useState<AcaoPendente>(null);
   const [reativando, setReativando] = useState<string | null>(null);
   const dados = useDados(apiGestao.moderacao);
-  const fila: FilaModeracao = dados.dados ?? { sinalizados: [], removidos: [], usuarios: [] };
+  // O backend já ordena os sinalizados (mais "não existe" primeiro).
+  const fila: FilaModeracao = dados.dados ?? FILA_VAZIA;
 
-  // Mais sinalizado primeiro: é o que mais provavelmente precisa de decisão.
-  const sinalizados = useMemo(
-    () =>
-      [...fila.sinalizados].sort(
-        (a, b) =>
-          (b.sinalizacoes?.nao_existe ?? 0) +
-          (b.sinalizacoes?.resolvido ?? 0) -
-          ((a.sinalizacoes?.nao_existe ?? 0) + (a.sinalizacoes?.resolvido ?? 0)),
-      ),
-    [fila.sinalizados],
-  );
-
-  function tirarDaLista(chave: keyof FilaModeracao, id: string) {
+  function tirarDaLista(chave: 'sinalizados' | 'removidos', id: string) {
     dados.setDados((prev) =>
-      prev ? { ...prev, [chave]: (prev[chave] as { id: string }[]).filter((x) => x.id !== id) } : prev,
+      prev
+        ? {
+            ...prev,
+            [chave]: prev[chave].filter((x) => x.id !== id),
+            contagens: { ...prev.contagens, [chave]: Math.max(0, prev.contagens[chave] - 1) },
+          }
+        : prev,
     );
+  }
+
+  function trocarUsuario(id: string, mudanca: Partial<UsuarioModeracao>) {
+    dados.setDados((prev) => {
+      if (!prev) return prev;
+      const usuarios = prev.usuarios.map((x) => (x.id === id ? { ...x, ...mudanca } : x));
+      return {
+        ...prev,
+        usuarios,
+        contagens: { ...prev.contagens, suspensos: usuarios.filter((u) => suspensoAte(u)).length },
+      };
+    });
   }
 
   function abrirChamado(c: ChamadoModeracao) {
@@ -98,12 +115,8 @@ export default function ModeracaoScreen() {
     setReativando(u.id);
     try {
       await apiGestao.reativarUsuario(u.id);
-      dados.setDados((prev) =>
-        prev
-          ? { ...prev, usuarios: prev.usuarios.map((x) => (x.id === u.id ? { ...x, suspenso_ate: null } : x)) }
-          : prev,
-      );
-      toast.success(`${u.nome} reativado`);
+      trocarUsuario(u.id, { suspenso_ate: null, suspenso: false });
+      toast.success(`${u.nome} reativado e avisado`);
     } catch (err) {
       toast.error(`Não foi possível reativar: ${mensagemDeErro(err)}`);
     } finally {
@@ -115,38 +128,43 @@ export default function ModeracaoScreen() {
     if (!acao) return false;
     try {
       if (acao.tipo === 'remover') {
-        await apiGestao.removerChamado(acao.chamado.id, motivo);
+        const r = await apiGestao.removerChamado(acao.chamado.id, motivo);
         tirarDaLista('sinalizados', acao.chamado.id);
         dados.setDados((prev) =>
           prev
             ? {
                 ...prev,
                 removidos: [
-                  { ...acao.chamado, removido_em: new Date().toISOString(), removido_motivo: 'moderacao' },
+                  {
+                    ...acao.chamado,
+                    removido_em: r?.removido_em ?? new Date().toISOString(),
+                    removido_motivo: r?.removido_motivo ?? 'moderacao',
+                    removido_texto: r?.removido_texto ?? motivo,
+                  },
                   ...prev.removidos,
                 ],
+                contagens: { ...prev.contagens, removidos: prev.contagens.removidos + 1 },
               }
             : prev,
         );
-        toast.success('Chamado removido. Dá para restaurar na aba Removidos.');
+        toast.success('Chamado removido e autor avisado. Dá para restaurar na aba Removidos.');
       } else if (acao.tipo === 'restaurar') {
-        await apiGestao.restaurarChamado(acao.chamado.id, motivo);
+        const r = await apiGestao.restaurarChamado(acao.chamado.id, motivo);
         tirarDaLista('removidos', acao.chamado.id);
-        toast.success('Chamado restaurado e de volta ao mapa');
-      } else {
-        await apiGestao.suspenderUsuario(acao.usuario.id, dias, motivo);
-        const ate = new Date(Date.now() + dias * 86_400_000).toISOString();
-        dados.setDados((prev) =>
-          prev
-            ? {
-                ...prev,
-                usuarios: prev.usuarios.map((x) =>
-                  x.id === acao.usuario.id ? { ...x, suspenso_ate: ate } : x,
-                ),
-              }
-            : prev,
+        toast.success(
+          r?.strike_retirado
+            ? 'Chamado restaurado e advertência do autor retirada'
+            : 'Chamado restaurado e de volta ao mapa',
         );
-        toast.success(`${acao.usuario.nome} suspenso por ${dias === 1 ? '1 dia' : `${dias} dias`}`);
+      } else {
+        const r = await apiGestao.suspenderUsuario(acao.usuario.id, dias, motivo);
+        trocarUsuario(acao.usuario.id, {
+          suspenso_ate: r?.suspenso_ate ?? new Date(Date.now() + dias * 86_400_000).toISOString(),
+          suspenso: true,
+        });
+        toast.success(
+          `${acao.usuario.nome} suspenso por ${dias === 1 ? '1 dia' : `${dias} dias`} e avisado`,
+        );
       }
       return true;
     } catch (err) {
@@ -163,9 +181,15 @@ export default function ModeracaoScreen() {
       <View style={styles.abas}>
         <SegmentedControl
           options={[
-            { value: 'sinalizados', label: `Sinalizados${dados.dados ? ` (${fila.sinalizados.length})` : ''}` },
+            {
+              value: 'sinalizados',
+              label: `Sinalizados${dados.dados ? ` (${fila.contagens.sinalizados})` : ''}`,
+            },
             { value: 'removidos', label: 'Removidos' },
-            { value: 'usuarios', label: 'Cidadãos' },
+            {
+              value: 'usuarios',
+              label: `Cidadãos${dados.dados && fila.usuarios.length ? ` (${fila.usuarios.length})` : ''}`,
+            },
           ]}
           value={aba}
           onChange={setAba}
@@ -191,7 +215,7 @@ export default function ModeracaoScreen() {
               kind="empty"
               icon="happy-outline"
               title="Nenhum cidadão com advertência"
-              description="Quem tiver chamados removidos como inexistentes aparece aqui."
+              description="Quem teve chamado removido pela comunidade como inexistente, ou está suspenso, aparece aqui."
             />
           }
           renderItem={({ item }) => (
@@ -205,7 +229,19 @@ export default function ModeracaoScreen() {
         />
       ) : (
         <FlatList
-          data={aba === 'sinalizados' ? sinalizados : fila.removidos}
+          data={aba === 'sinalizados' ? fila.sinalizados : fila.removidos}
+          ListHeaderComponent={
+            aba === 'removidos' && fila.contagens.removidos > fila.removidos.length ? (
+              <AppText variant="caption" tone="muted">
+                Mostrando os {fila.removidos.length} mais recentes de {fila.contagens.removidos}.
+              </AppText>
+            ) : aba === 'sinalizados' && fila.contagens.sinalizados > fila.sinalizados.length ? (
+              <AppText variant="caption" tone="muted">
+                Mostrando {fila.sinalizados.length} de {fila.contagens.sinalizados}, os mais
+                sinalizados primeiro.
+              </AppText>
+            ) : null
+          }
           keyExtractor={(c) => String(c.id)}
           contentContainerStyle={conteudo}
           refreshControl={refresh}
@@ -282,9 +318,10 @@ function CartaoChamado({
   onRemover: () => void;
   onRestaurar: () => void;
 }) {
-  const naoExiste = c.sinalizacoes?.nao_existe ?? 0;
-  const resolvido = c.sinalizacoes?.resolvido ?? 0;
-  const local = [c.categoria, c.bairro].filter(Boolean).join(' · ');
+  const naoExiste = c.total_nao_existe ?? 0;
+  const resolvido = c.total_resolvido ?? 0;
+  const apoios = c.total_apoios ?? 0;
+  const local = [c.categoria, c.rua || c.bairro].filter(Boolean).join(' · ');
   return (
     <Card>
       <View style={styles.cabecalho}>
@@ -305,7 +342,7 @@ function CartaoChamado({
       <View style={styles.selos}>
         {removido ? (
           <Badge
-            label={MOTIVO_REMOCAO[c.removido_motivo ?? ''] ?? 'Removido'}
+            label={ORIGEM_REMOCAO[c.removido_motivo ?? ''] ?? 'Removido'}
             tone="neutral"
             icon="trash"
           />
@@ -325,10 +362,18 @@ function CartaoChamado({
                 icon="checkmark-circle"
               />
             ) : null}
+            {apoios ? (
+              <Badge label={plural(apoios, 'apoio', 'apoios')} tone="neutral" icon="people" />
+            ) : null}
             {c.status ? <Badge label={rotuloOperacao(c.status)} tone="info" icon="ellipse" /> : null}
           </>
         )}
       </View>
+      {removido && c.removido_texto && c.removido_texto !== c.removido_motivo ? (
+        <AppText variant="bodySm" tone="secondary">
+          Motivo: {c.removido_texto}
+        </AppText>
+      ) : null}
       <AppText variant="caption" tone="muted">
         {[
           c.autor_nome ? `Por ${c.autor_nome}` : null,
@@ -384,22 +429,29 @@ function CartaoUsuario({
         <AppText variant="label" style={styles.flex} numberOfLines={1}>
           {u.nome}
         </AppText>
-        <Badge
-          label={u.strikes === 1 ? '1 advertência' : `${u.strikes} advertências`}
-          tone={u.strikes >= 3 ? 'danger' : 'warning'}
-          icon="warning"
-        />
+        {u.strikes_ativos ? (
+          <Badge
+            label={plural(u.strikes_ativos, 'advertência', 'advertências')}
+            tone={u.em_quarentena ? 'danger' : 'warning'}
+            icon="warning"
+          />
+        ) : null}
       </View>
-      {u.email ? (
+      {u.chamados_removidos ? (
         <AppText variant="bodySm" tone="secondary">
-          {u.email}
+          {plural(u.chamados_removidos, 'chamado removido', 'chamados removidos')} neste município
         </AppText>
       ) : null}
-      {ate ? (
-        <Badge label={`Suspenso até ${formatarData(ate)}`} tone="danger" icon="ban" />
-      ) : (
-        <Badge label="Ativo" tone="success" />
-      )}
+      <View style={styles.selos}>
+        {ate ? (
+          <Badge label={`Suspenso até ${formatarData(ate)}`} tone="danger" icon="ban" />
+        ) : (
+          <Badge label="Ativo" tone="success" />
+        )}
+        {u.em_quarentena ? (
+          <Badge label="Em quarentena: novos chamados restritos" tone="warning" icon="hourglass" />
+        ) : null}
+      </View>
       <View style={styles.acoes}>
         {ate ? (
           <Button

@@ -579,3 +579,94 @@ class TestOrdemDeServico:
 
         d = _defeito(titulo='Buraco <b>grande</b> & fundo')
         assert gerar_ordem_servico(d).startswith(b'%PDF')
+
+
+class TestRevisaoOperacao:
+    """Ajustes da revisão de ponta a ponta com o app (fila, privacidade, idempotência)."""
+
+    def test_fila_vencem_24h_e_sinalizados(self):
+        op, _ = _usuario('operador')
+        agora = timezone.now()
+        vence = _defeito(idade_dias=1, prazo_dias=1)
+        vence.prazo_em = agora + timedelta(hours=5)
+        vence.save(update_fields=['prazo_em'])
+        folgado = _defeito(prazo_dias=7)
+        sinalizado = _defeito(prazo_dias=7)
+        _, cidadao = _usuario('cidadao')
+        Sinalizacao.objects.create(defeito=sinalizado, usuario=cidadao, tipo=Sinalizacao.RESOLVIDO,
+                                   criado_em=timezone.now())
+
+        ids = {r['id'] for r in _fila(op, vencem_24h=1)['results']}
+        assert str(vence.id) in ids and str(folgado.id) not in ids
+        ids = {r['id'] for r in _fila(op, sinalizados=1)['results']}
+        assert ids == {str(sinalizado.id)}
+
+    def test_fila_secretaria_efetiva_pela_categoria(self):
+        op, _ = _usuario('operador')
+        sec = Secretaria.objects.create(municipio_id=CIDADE, nome='Obras')
+        outra = Secretaria.objects.create(municipio_id=CIDADE, nome='Meio Ambiente')
+        gravada = _defeito(secretaria=sec)
+        pela_categoria = _defeito()
+        CategoriaMunicipio.objects.create(
+            municipio_id=CIDADE, categoria_id=pela_categoria.categoria_id, secretaria=sec,
+        )
+        de_outra = _defeito(secretaria=outra)
+        ids = {r['id'] for r in _fila(op, secretaria_id=sec.id)['results']}
+        assert str(gravada.id) in ids and str(pela_categoria.id) in ids
+        assert str(de_outra.id) not in ids
+
+    def test_texto_da_transicao_e_nota_interna(self):
+        op, _ = _usuario('operador')
+        d = _defeito()
+        resp = op.post(_url('transicao', d.id), {'para': 'em_analise', 'texto': 'Falta material'}, format='json')
+        assert resp.status_code == 200, resp.data
+        status_ev = DefeitoEvento.objects.get(defeito_id=d.id, tipo='status')
+        assert status_ev.texto == '' and status_ev.publico
+        nota = DefeitoEvento.objects.get(defeito_id=d.id, tipo='nota_interna')
+        assert nota.texto == 'Falta material' and not nota.publico
+        # O cidadão não vê o recado da equipe no histórico.
+        publico = APIClient().get(f'/api/v1/defeitos/{d.id}/eventos/')
+        assert publico.status_code == 200
+        assert 'Falta material' not in str(publico.data)
+
+    def test_reabertura_mantem_motivo_publico(self):
+        gestor, _ = _usuario('gestor')
+        d = _defeito(status='rejeitado', motivo_rejeicao='improcedente')
+        resp = gestor.post(_url('transicao', d.id), {'para': 'pendente', 'texto': 'O problema voltou'},
+                           format='json')
+        assert resp.status_code == 200, resp.data
+        ev = DefeitoEvento.objects.get(defeito_id=d.id, tipo='reaberto')
+        assert ev.texto == 'O problema voltou'
+        assert not DefeitoEvento.objects.filter(defeito_id=d.id, tipo='nota_interna').exists()
+
+    def test_idempotency_key_nao_duplica_nota(self):
+        op, _ = _usuario('operador')
+        d = _defeito()
+        chave = uuid.uuid4().hex
+        r1 = op.post(_url('nota', d.id), {'texto': 'Recado único'}, format='json', HTTP_IDEMPOTENCY_KEY=chave)
+        r2 = op.post(_url('nota', d.id), {'texto': 'Recado único'}, format='json', HTTP_IDEMPOTENCY_KEY=chave)
+        assert r1.status_code == r2.status_code == 201
+        assert r2['Idempotent-Replayed'] == 'true'
+        assert r2.json()['id'] == r1.data['id']
+        assert DefeitoEvento.objects.filter(defeito_id=d.id, tipo='nota_interna').count() == 1
+
+    def test_idempotency_key_na_query_e_por_usuario(self):
+        op, _ = _usuario('operador')
+        outro, _ = _usuario('operador')
+        d = _defeito()
+        chave = uuid.uuid4().hex
+        url = f"{_url('nota', d.id)}?idempotency_key={chave}"
+        assert op.post(url, {'texto': 'Um'}, format='json').status_code == 201
+        assert op.post(url, {'texto': 'Um'}, format='json').status_code == 201
+        # A mesma chave de outra pessoa não reaproveita a resposta alheia.
+        assert outro.post(url, {'texto': 'Dois'}, format='json').status_code == 201
+        assert DefeitoEvento.objects.filter(defeito_id=d.id, tipo='nota_interna').count() == 2
+
+    def test_erro_nao_fica_guardado_pela_chave(self):
+        op, _ = _usuario('operador')
+        d = _defeito()
+        chave = uuid.uuid4().hex
+        r1 = op.post(_url('nota', d.id), {'texto': ' '}, format='json', HTTP_IDEMPOTENCY_KEY=chave)
+        assert r1.status_code == 400
+        r2 = op.post(_url('nota', d.id), {'texto': 'Agora vai'}, format='json', HTTP_IDEMPOTENCY_KEY=chave)
+        assert r2.status_code == 201

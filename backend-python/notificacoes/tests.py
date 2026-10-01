@@ -221,7 +221,10 @@ class TestApi:
         cli, _ = _usuario()
         _, outro = _usuario()
         (alheio,) = self._criar(outro, 1)
-        assert cli.post(reverse('notificacoes-lida', args=[alheio.id])).status_code == 404
+        resp = cli.post(reverse('notificacoes-lida', args=[alheio.id]))
+        assert resp.status_code == 404
+        # A mensagem chega na tela do app: em português, sem o nome do modelo.
+        assert resp.data['detail'] == 'Notificação não encontrada.'
 
     def test_exige_login(self, client):
         assert client.get(reverse('notificacoes-list')).status_code == 401

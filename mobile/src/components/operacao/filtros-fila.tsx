@@ -62,6 +62,7 @@ type Props = {
 export function FiltrosFilaBar({ filtros, onChange, categorias, equipes, temPosicao, gestor }: Props) {
   const colors = useColors();
   const [busca, setBusca] = useState(filtros.q ?? '');
+  const [bairro, setBairro] = useState(filtros.bairro ?? '');
   const [folha, setFolha] = useState(false);
   const total = contarFiltros(filtros);
 
@@ -113,12 +114,13 @@ export function FiltrosFilaBar({ filtros, onChange, categorias, equipes, temPosi
         visible={folha}
         onClose={() => setFolha(false)}
         title="Filtrar a fila"
-        description="A fila mostra só chamados abertos da sua cidade."
+        description="Por padrão a fila mostra os chamados abertos da sua cidade; em Situação dá para ver os encerrados."
         footer={
           <>
             <Button
               variant="secondary"
               onPress={() => {
+                setBairro('');
                 onChange({
                   status: undefined,
                   categoria_id: undefined,
@@ -130,7 +132,14 @@ export function FiltrosFilaBar({ filtros, onChange, categorias, equipes, temPosi
               }}>
               Limpar
             </Button>
-            <Button style={styles.flex} block onPress={() => setFolha(false)}>
+            <Button
+              style={styles.flex}
+              block
+              onPress={() => {
+                // O bairro digitado vale ao fechar, mesmo sem "Enter" (web e teclados sem "concluir").
+                if ((filtros.bairro ?? '') !== bairro.trim()) onChange({ bairro: bairro.trim() || undefined });
+                setFolha(false);
+              }}>
               Ver resultados
             </Button>
           </>
@@ -140,6 +149,7 @@ export function FiltrosFilaBar({ filtros, onChange, categorias, equipes, temPosi
           options={[
             { value: TODOS, label: 'Todos abertos' },
             ...STATUS_ABERTOS.map((s) => ({ value: s, label: rotuloOperacao(s) })),
+            { value: 'fechados', label: 'Encerrados' },
           ]}
           value={filtros.status ?? TODOS}
           onChange={(v) => onChange({ status: v === TODOS ? undefined : v })}
@@ -190,9 +200,13 @@ export function FiltrosFilaBar({ filtros, onChange, categorias, equipes, temPosi
 
         <TextField
           label="Bairro"
-          defaultValue={filtros.bairro ?? ''}
+          value={bairro}
+          onChangeText={setBairro}
           placeholder="Ex.: Centro"
-          onEndEditing={(e) => onChange({ bairro: e.nativeEvent.text.trim() || undefined })}
+          onSubmitEditing={() => onChange({ bairro: bairro.trim() || undefined })}
+          onBlur={() => {
+            if ((filtros.bairro ?? '') !== bairro.trim()) onChange({ bairro: bairro.trim() || undefined });
+          }}
           returnKeyType="done"
         />
       </BottomSheet>

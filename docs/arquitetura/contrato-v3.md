@@ -43,7 +43,8 @@ Timestamps (todos `TIMESTAMPTZ NULL`, gravados **somente** por `fluxo.py`):
 `triado_em` (1ª saída de `pendente`), `atribuido_em` (1ª atribuição a equipe ou
 operador), `iniciado_em` (1º `em_andamento`), `resolvido_em` (último
 `concluido`), `fechado_em` (último status fechado; zera ao reabrir).
-`prazo_em` = `criado_em + prazo_sla_dias` (recalculado se o SLA muda).
+`prazo_em` = `criado_em + prazo_sla_dias` (recalculado se o SLA muda; na
+reabertura vira `agora + prazo_sla_dias`, senão o chamado voltaria já vencido).
 `reaberturas INT DEFAULT 0`.
 
 ## 2. Esquema novo (em `core/management/commands/bootstrap_schema.py`)
@@ -277,17 +278,27 @@ Detalhes da implementação (`backend-python/operacao/`):
   `defeitos/<id>/ordem_servico/`.
 Como o app usa a 7.1 (aba Operação):
 
-- `fila/` sem `status` = só abertos. Para os contadores `vencem_24h` e
-  `sinalizados` do resumo, o app manda também `vencem_24h=1` e `sinalizados=1`
-  (opcionais: o backend pode ignorar, o app recorta a página no cliente).
+- `fila/` sem `status` = só abertos (`status=fechados` mostra os encerrados).
+  `fila/` também aceita `vencem_24h=1` (prazo nas próximas 24 h, o mesmo
+  recorte do contador do resumo) e `sinalizados=1` (algum "já resolvido" ou
+  "não existe"); o app ainda recorta a página no cliente, por segurança.
+  `secretaria_id` filtra pela secretaria efetiva: a do chamado ou, sem ela, a
+  configurada para a categoria em `categoria_municipio` (mesma regra do BI).
 - Ações mutáveis (`transicao`, `atribuir`, `liberar`, `nota`, `resposta`,
-  `evidencia`, `lote`) levam o cabeçalho `Idempotency-Key: <uuid>`: a fila
-  offline reenvia a mesma chave, e o backend deve devolver o mesmo resultado
-  (ou tolerar a repetição). Sem suporte, o app confere `transicao` repetida
-  pelo detalhe (status já igual a `para` = feito).
+  `evidencia`, `lote`) levam a chave de idempotência — no cabeçalho
+  `Idempotency-Key: <uuid>` (nativo) ou em `?idempotency_key=<uuid>` (web: o
+  cabeçalho não está na lista do CORS e derrubaria o preflight). O backend
+  guarda a primeira resposta 2xx por 24 h (por usuário e rota) e devolve a
+  mesma com `Idempotent-Replayed: true` na repetição, sem executar de novo;
+  erro não fica guardado; a mesma chave em paralelo recebe 409. O app ainda
+  confere `transicao` repetida pelo detalhe (status já igual a `para` = feito).
 - `transicao/` multipart (com `foto`) manda `checklist` como string JSON.
+- `texto` em `transicao/` (e no `lote/`) é recado da equipe: vira um evento
+  `nota_interna` (não público) separado do evento de status. Só na reabertura
+  (fechado → `pendente`) ele é o motivo e fica no evento público `reaberto`.
 - Rejeitar como duplicado busca o original por `GET defeitos/protocolo/<p>/`
-  ou por `fila/?q=`.
+  ou por `fila/?q=&status=todos` (o original pode estar fechado).
+- A Ordem de Serviço da ficha usa `GET chamados/<id>/ordem-servico/`.
 
 ### 7.2 Cidadão — `api/v1/defeitos/`
 
@@ -309,7 +320,9 @@ Detalhes de 7.2 (implementação):
   `avaliacao_nota/_comentario/avaliado_em` e evento `avaliacao` público
   (`texto` = comentário, `dados = {nota, edicao}`). Gamificação:
   `XP_AVALIACAO` (5) uma vez por chamado avaliado; `progresso` e as linhas do
-  ranking ganham `avaliacoes`.
+  ranking ganham `avaliacoes`. `avaliado_em` também sai na listagem
+  (`meus/`, `area/`…): o app compara com `resolvido_em` para saber se a nota
+  é da resolução atual (selo "Avaliar" depois de reaberto e resolvido de novo).
 - `reabrir`: `motivo` com ≥5 caracteres (400). 409 se o chamado está aberto.
   Sem papel de gestão: 403 para terceiros, para o autor de chamado
   `rejeitado` e depois de `fluxo.REABERTURA_AUTOR_DIAS`. Passa por
@@ -389,7 +402,11 @@ Detalhes que o app assume: `lida/`, `todas-lidas/` e `push-tokens/` podem
 responder 204 ou JSON; o token é o `ExponentPushToken[...]` e `plataforma` ∈
 {`android`, `ios`}. O payload `data` do push leva `{defeito_id, tipo,
 notificacao_id?}` — o toque abre `/chamado/<defeito_id>`; sem `defeito_id`,
-abre a central (`/notificacoes`).
+`tipo: resumo` abre o painel (`/(tabs)/painel`) e os demais abrem a central
+(`/notificacoes`). A central usa `?nao_lidas=1` no filtro "Não lidas". `aceite-termos/`
+responde `{user}` (o app também aceita `{aceite_termos_em}`); sessão aberta com
+`aceite_termos_em: null` (inclusive login Google de conta existente) é bloqueada
+por um portão de aceite no layout raiz até aceitar ou sair.
 
 ### 7.4 BI — `api/v1/bi/` (gestor+)
 
@@ -399,9 +416,14 @@ Percentuais (`pct_*`, `taxa_resolucao`, `reabertura_pct`) em 0–100; tempos
 (`*_h`) em horas. `kpis_anterior` cobre a janela de mesma duração logo antes
 de `inicio`; KPI sem dado vem `null` (o app mostra "—"). `relatorio/` aceita
 também os filtros de recorte (`categoria_id`, `secretaria_id`, `equipe_id`,
-`bairro`). Drill-down do painel: o app lista a fatia tocada pela fila de
-operação (`operacao/fila/?atribuicao=todos&ordenar=prazo&...`), por isso a
-fila aceita `secretaria_id`.
+`bairro`). Drill-down do painel: o app lista a fatia tocada por `bi/chamados/`
+(mesmos filtros e mesma regra de contagem, então a lista bate com o número).
+`categoria_id`/`secretaria_id`/`equipe_id`/`bairro` aceitam também as chaves
+especiais de `distribuicao/`: `nenhum` (grupo "Sem ...") e, em categoria e
+secretaria, `nome:<texto>` (legado sem id). A secretaria de um chamado é a
+gravada nele ou, sem ela, a de `categoria_municipio` para a categoria
+(secretaria efetiva — vale para filtro, distribuição, exportação e dados
+públicos).
 
 | rota | resposta |
 |---|---|
@@ -410,8 +432,9 @@ fila aceita `secretaria_id`.
 | GET `distribuicao/?dimensao=categoria\|bairro\|secretaria\|equipe\|status` | `[{chave, rotulo, recebidos, abertos, resolvidos, vencidos, pct_no_prazo, lead_time_p50_h}]` |
 | GET `aging/` | `[{faixa: "0-2d"\|"3-7d"\|"8-15d"\|"16-30d"\|">30d", total, vencidos}]` |
 | GET `produtividade/` | `[{usuario_id, nome, equipe_nome, concluidos, lead_time_p50_h, em_andamento}]` |
-| GET `hotspots/` | `{celulas: [{lat, lng, total, categoria_top}], reincidencia: [{bairro, rua, categoria, ocorrencias}]}` |
+| GET `hotspots/` | `{celulas: [{lat, lng, total, categoria_top, bairro_top}], reincidencia: [{bairro, rua, categoria, categoria_id, ocorrencias}]}` |
 | GET `satisfacao/` | `{media, respostas, distribuicao: {1..5}, comentarios: [{nota, comentario, protocolo, criado_em}]}` |
+| GET `chamados/?recorte=abertos\|vencidos\|recebidos\|resolvidos\|rejeitados&status=&page=&page_size=` | página DRF `{count, next, previous, results: [{id, protocolo, titulo, status, status_rotulo, categoria_id, categoria_nome, bairro, rua, prioridade, latitude, longitude, secretaria_id, secretaria_nome, equipe_id, equipe_nome, atendente_nome, criado_em, resolvido_em, prazo_em, sla_vencido, sla_restante_horas, no_prazo}]}` |
 | GET `exportar/?formato=csv\|xlsx` | arquivo |
 | GET `relatorio/?mes=YYYY-MM` | PDF |
 
@@ -435,18 +458,25 @@ de America/Sao_Paulo, `fim` inclusivo, máximo 731 dias):
 - `series/`: buckets com zero preenchidos; semana começa na segunda; `periodo` é a
   data de início do bucket já cortada no período (`AAAA-MM` em `mes`); `backlog` é o
   estoque aberto no fim do bucket.
-- `distribuicao/`: `chave` é o id em texto (categoria/secretaria/equipe) ou
-  `nome:<texto>` para chamados antigos sem id; bairro em minúsculas; status canônico.
+- `distribuicao/`: `chave` é o id em texto (categoria/secretaria efetiva/equipe),
+  `nome:<texto>` para chamados antigos sem id ou `nenhum` para o grupo sem valor;
+  bairro em minúsculas; status canônico. Toda chave volta como filtro.
+- `chamados/`: `recorte` (padrão `abertos`) usa a mesma flag do número —
+  `abertos` = backlog no fim do período, `vencidos` = `backlog_vencido`,
+  `recebidos`/`resolvidos`/`rejeitados` = os KPIs homônimos; `status` restringe
+  à situação atual. `page_size` padrão 20, máximo 100. `sla_*` medidos agora
+  (só para abertos); `no_prazo` só para resolvidos com prazo.
 - `aging/` sempre traz as 5 faixas (idade em dias completos no corte).
 - `produtividade/`: servidores do município (e quem atendeu algo no escopo);
   `em_andamento` = abertos hoje com o servidor como atendente.
-- `hotspots/`: células de 0,002° (~200 m) dos recebidos; `reincidencia` = mesma
-  rua+bairro+categoria com 2+ chamados no período (até 20).
+- `hotspots/`: células de 0,002° (~200 m) dos recebidos, com o bairro mais comum
+  (`bairro_top`); `reincidencia` = mesma rua+bairro+categoria com 2+ chamados no
+  período (até 20).
 - `exportar/`: um chamado recebido no período por linha (até 50 mil), sem dado do
   cidadão; CSV com BOM e `;` (Excel pt-BR); XLSX gerado sem dependência extra.
   Colunas em `consultas.COLUNAS_EXPORTACAO`. Gera `audit_log` `bi.exportar`.
 - `relatorio/`: `mes` padrão = mês anterior; compara com o mês civil anterior;
-  aceita os filtros comuns; gera `audit_log` `bi.relatorio`.
+  aceita os filtros comuns (impressos pelo nome na capa); gera `audit_log` `bi.relatorio`.
 - `?municipio=` de gestor apontando para outra cidade → 403 (não cai em silêncio
   no próprio município).
 
@@ -497,15 +527,21 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
 - Erros 400 trazem `{detail, campos?}` (`campos` = erros por campo do DRF).
 - `municipio/`: `{municipio_id, nome, uf_sigla, contratado, nome_exibicao, cor_primaria (#RRGGBB),
   email_contato, telefone, site, raio_duplicado_m (5..500), parametros, atualizado_em}`;
-  `contratado` só o `super_admin` altera (403 para os demais).
+  `contratado` só o `super_admin` altera (403 para os demais). `parametros` é substituído
+  inteiro no PATCH; chaves conhecidas (lidas pela operação, padrão entre parênteses):
+  `exigir_foto_conclusao` bool (ausente = `true`), `raio_evidencia_m` inteiro 20..2000 (150).
+  Tipo errado → 400.
 - `secretarias/` e `equipes/` devolvem **lista** (não paginada).
   Secretaria: `{id, nome, sigla, email, ativo, criado_em, total_equipes}`.
   Equipe: `{id, nome, secretaria_id, secretaria_nome, ativo, criado_em, total_membros}`.
   Filtros: `?ativo=1`; equipes também `?secretaria_id=`. Nome repetido (sem caixa) → 409.
   DELETE → 204: apaga se nada aponta para ela, senão só desativa (`ativo=false`).
+  Secretaria/equipe referenciada no corpo precisa estar ativa, salvo se for o vínculo que o
+  registro já tem (reenviar o valor atual não dá 400).
 - `membros/` devolve **lista** `{id, nome, email, papel, nivel, secretaria_id, secretaria_nome,
   equipe_id, equipe_nome, suspenso_ate, chamados_abertos, criado_em}`; filtros `q`, `papel`,
-  `equipe_id`, `secretaria_id`. POST: e-mail sem conta → 404; servidor de outra cidade ou já da
+  `equipe_id`, `secretaria_id`. POST: `email` é buscado sem caixa entre as contas existentes
+  (não exige domínio com ponto); e-mail sem conta → 404; servidor de outra cidade ou já da
   equipe → 409; `papel=super_admin` só pelo super admin (403). Equipe informada puxa a
   secretaria dela. Ninguém muda o próprio papel nem se revoga (400); ninguém mexe em papel
   acima do seu (403); rebaixar/revogar o último `admin_municipal` → 409. DELETE → 200
@@ -520,13 +556,18 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
   prazo ajustado à mão num chamado prevalece.
 - `moderacao/`: `sinalizados` (abertos com sinalização, até 100: dados do chamado +
   `autor_id, autor_nome, total_resolvido, total_nao_existe, total_apoios`), `removidos`
-  (até 50, + `removido_em, removido_motivo`), `usuarios` (cidadãos ligados ao município
+  (até 50, + `removido_em, removido_motivo, removido_texto`), `usuarios` (cidadãos ligados ao município
   suspensos ou com strike ativo: `{id, nome, suspenso_ate, suspenso, strikes_ativos,
   em_quarentena, chamados_removidos}`) e `contagens: {sinalizados, removidos, suspensos,
-  em_quarentena}`. Remover usa `regras.remover` (evento `removido`); restaurar grava evento
+  em_quarentena}`. `removido_motivo` é a ORIGEM (`moderacao` | `comunidade` | `autor`);
+  `removido_texto` é o texto do último evento `removido` (o motivo escrito pelo gestor).
+  Remover grava `removido_motivo = "moderacao"` via `regras.remover` (evento `removido` com
+  `texto` = motivo digitado, que vira o corpo do aviso ao autor) e responde
+  `{id, protocolo, removido_em, removido_motivo, removido_texto}`; restaurar grava evento
   `moderacao` e, se a remoção foi comunitária, retira o strike do autor
   (`strike_retirado`). Já removido/não removido → 409. Suspender (`dias` 1..365) e reativar
-  avisam o cidadão (notificação `moderacao`); servidor ou a si mesmo → 400; reativar quem não
+  avisam o cidadão (`notificacoes.servico.notificar`, tipo `moderacao`, com push) e respondem
+  `{id, nome, suspenso_ate, suspenso}`; servidor ou a si mesmo → 400; reativar quem não
   está suspenso → 409. `gestao.servicos.usuario_suspenso(user)` é o teste que as rotas de
   chamado devem usar para barrar suspensos.
 - `auditoria/`: paginado (30 por página, `page_size` ≤ 100) `{id, acao, usuario_id, usuario_nome,
@@ -535,6 +576,11 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
   Ações: `municipio.config`, `secretaria.{criar,alterar,desativar,excluir}`,
   `equipe.{criar,alterar,desativar,excluir}`, `membro.{vincular,alterar,revogar}`,
   `categoria.alterar`, `moderacao.{remover,restaurar}`, `usuario.{suspender,reativar}`.
+  `dados` traz `nome` do alvo (pessoa, secretaria, equipe, categoria) ou `protocolo`/`titulo`
+  (chamado), e `antes`/`depois` nas alterações. Outras apps também auditam aqui:
+  `defeito.{remover,sla,prioridade}` (`dados.de/para`), `resposta_padrao.{criar,editar,excluir}`,
+  `bi.{exportar,relatorio}`, `lgpd.exportacao`, `usuario.{papel,municipio}` (rotas antigas).
+  `ip` = `X-Real-IP` do nginx, senão o último item do `X-Forwarded-For` (o primeiro é forjável).
 - `python manage.py seed_gestao_demo <codigo>` cria (idempotente) as secretarias de Obras e
   Infraestrutura, Serviços Urbanos, Trânsito e Mobilidade e Meio Ambiente, seis equipes e o
   roteamento das categorias base para elas.

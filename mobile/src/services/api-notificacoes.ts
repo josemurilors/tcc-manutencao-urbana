@@ -24,8 +24,9 @@ async function semCorpo(promessa: Promise<unknown>): Promise<void> {
 }
 
 export const notificacoesApi = {
-  /** Página `page` (1, 2, ...), mais recentes primeiro. */
-  listar: (page = 1) => request<PaginaNotificacoes>(`${BASE}/?page=${page}`),
+  /** Página `page` (1, 2, ...), mais recentes primeiro; `naoLidas` filtra no servidor. */
+  listar: (page = 1, opcoes: { naoLidas?: boolean } = {}) =>
+    request<PaginaNotificacoes>(`${BASE}/?page=${page}${opcoes.naoLidas ? '&nao_lidas=1' : ''}`),
 
   naoLidas: () => request<{ total: number }>(`${BASE}/nao-lidas/`),
 

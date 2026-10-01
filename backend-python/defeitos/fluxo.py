@@ -169,6 +169,12 @@ def transicionar(defeito, para, autor, *, papel=None, texto='', resposta_publica
             defeito.reaberturas = (defeito.reaberturas or 0) + 1
             defeito.motivo_rejeicao = ''
             defeito.duplicado_de = None
+            # Prazo novo a partir da reabertura: com o antigo, o chamado
+            # voltaria para a fila (e para o cidadão) já "atrasado há N dias".
+            from .sla import calcular_prazo
+            novo_prazo = calcular_prazo(agora, defeito.prazo_sla_dias)
+            if novo_prazo is not None:
+                defeito.prazo_em = novo_prazo
         if resposta_publica:
             defeito.resposta_publica = resposta_publica
             extras['resposta_publica'] = resposta_publica
@@ -178,7 +184,7 @@ def transicionar(defeito, para, autor, *, papel=None, texto='', resposta_publica
         defeito.save(update_fields=[
             'status', 'atualizado_em', 'triado_em', 'iniciado_em', 'resolvido_em',
             'fechado_em', 'atendido_em', 'reaberturas', 'motivo_rejeicao',
-            'duplicado_de', 'resposta_publica',
+            'duplicado_de', 'resposta_publica', 'prazo_em',
         ])
         registrar_evento(
             defeito, 'reaberto' if reabertura else 'status', autor,
