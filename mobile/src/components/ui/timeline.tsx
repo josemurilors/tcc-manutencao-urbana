@@ -1,108 +1,117 @@
-/** Histórico do chamado — porte de `frontend/src/components/ui/timeline.jsx`. */
+/**
+ * Linha do tempo do chamado.
+ *
+ * Cada marcador leva o ícone do evento (e não só uma cor), então "Resolvido" e
+ * "Não procede" se distinguem para quem não enxerga cores. Itens com
+ * `emphasis` (resposta da prefeitura) ganham fundo de destaque: é o que o
+ * cidadão mais procura no histórico.
+ */
 
-import { StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, View } from 'react-native';
 
-import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { corDoTom, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 import type { TimelineItem } from '@/utils/timeline';
+
+import { AppText } from './text';
+
+const MARCADOR = 28;
 
 export function Timeline({ items }: { items: TimelineItem[] }) {
   const colors = useColors();
   if (items.length === 0) return null;
 
   return (
-    <View style={styles.container}>
-      {/* Trilho vertical ligando os marcadores. */}
-      <View style={[styles.trilho, { backgroundColor: colors.borderDefault }]} />
-      {items.map((item, i) => (
-        <View key={item.id} style={[styles.linha, i === items.length - 1 && styles.ultima]}>
-          <View style={[styles.marcador, { backgroundColor: colors.gold500, borderColor: colors.gold500 }]}>
-            <View style={styles.marcadorInterno} />
-          </View>
-          <View
-            style={[
-              styles.cartao,
-              { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
-            ]}>
-            <Text style={[styles.titulo, { color: colors.textPrimary }]}>{item.title}</Text>
-            {item.description ? (
-              <Text style={[styles.descricao, { color: colors.textSecondary }]}>
-                {item.description}
-              </Text>
-            ) : null}
-            <View style={styles.rodape}>
-              {item.date ? (
-                <Text style={[styles.meta, { color: colors.textMuted }]}>{item.date}</Text>
+    <View style={styles.container} accessibilityRole="list">
+      {items.map((item, i) => {
+        const tom = corDoTom(colors, item.tone ?? 'neutral');
+        const ultimo = i === items.length - 1;
+        const rotulo = [item.title, item.description, item.date, item.meta].filter(Boolean).join('. ');
+        return (
+          <View key={item.id} style={styles.linha} accessible accessibilityLabel={rotulo}>
+            <View style={styles.coluna}>
+              <View
+                style={[styles.marcador, { backgroundColor: tom.bg, borderColor: tom.border }]}>
+                <Ionicons name={item.icon ?? 'ellipse'} size={14} color={tom.fg} />
+              </View>
+              {!ultimo ? <View style={[styles.trilho, { backgroundColor: colors.border }]} /> : null}
+            </View>
+            <View
+              style={[
+                styles.cartao,
+                !ultimo && styles.espaco,
+                item.emphasis
+                  ? { backgroundColor: colors.primarySubtle, borderColor: colors.primary }
+                  : { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}>
+              <AppText variant="label">{item.title}</AppText>
+              {item.description ? (
+                <AppText variant="bodySm" tone={item.emphasis ? 'primary' : 'secondary'}>
+                  {item.description}
+                </AppText>
               ) : null}
-              {item.meta ? (
-                <Text style={[styles.meta, { color: colors.textMuted }]}>{item.meta}</Text>
+              {item.date || item.meta ? (
+                <View style={styles.rodape}>
+                  {item.date ? (
+                    <AppText variant="caption" tone="muted">
+                      {item.date}
+                    </AppText>
+                  ) : null}
+                  {item.meta ? (
+                    <AppText variant="caption" tone="muted">
+                      {item.meta}
+                    </AppText>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
 
-const MARCADOR = 20;
-
 const styles = StyleSheet.create({
   container: {
-    paddingLeft: Spacing[8],
-    position: 'relative',
-  },
-  trilho: {
-    position: 'absolute',
-    left: Spacing[8] - MARCADOR / 2 - 1,
-    top: Spacing[2],
-    bottom: Spacing[2],
-    width: 1,
+    gap: 0,
   },
   linha: {
-    position: 'relative',
-    paddingBottom: Spacing[4],
+    flexDirection: 'row',
+    gap: Spacing[3],
   },
-  ultima: {
-    paddingBottom: 0,
+  coluna: {
+    width: MARCADOR,
+    alignItems: 'center',
   },
   marcador: {
-    position: 'absolute',
-    left: -(Spacing[8] - MARCADOR / 2) - MARCADOR / 2 + 1,
-    top: Spacing[1],
     width: MARCADOR,
     height: MARCADOR,
     borderRadius: Radius.full,
-    borderWidth: 2,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: Spacing[2],
   },
-  marcadorInterno: {
-    width: 6,
-    height: 6,
-    borderRadius: Radius.full,
-    backgroundColor: '#fff',
+  trilho: {
+    flex: 1,
+    width: 2,
+    marginTop: Spacing[1],
   },
   cartao: {
+    flex: 1,
     borderWidth: 1,
     borderRadius: Radius.md,
     padding: Spacing[3],
     gap: Spacing[1],
   },
-  titulo: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semibold,
-  },
-  descricao: {
-    fontSize: FontSize.xs,
-    lineHeight: 18,
+  espaco: {
+    marginBottom: Spacing[3],
   },
   rodape: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing[2],
-  },
-  meta: {
-    fontSize: FontSize.xs - 1,
+    columnGap: Spacing[2],
   },
 });
