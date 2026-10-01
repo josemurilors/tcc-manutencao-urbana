@@ -7,9 +7,8 @@
  * técnico: a única decisão aqui é entrar.
  */
 
-import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -22,7 +21,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthFlow } from '@/components/auth-flow';
-import { FontSize, FontWeight, Spacing } from '@/constants/theme';
+import { IconButton } from '@/components/ui/icon-button';
+import { AppText } from '@/components/ui/text';
+import { FontSize, FontWeight, Layout, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 
 const LOGO = require('@/assets/images/icon.png');
@@ -42,14 +43,12 @@ export function AuthWelcome() {
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.bgPrimary }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Pressable
-        onPress={voltar}
-        accessibilityRole="button"
+      <IconButton
+        icon="arrow-back"
         accessibilityLabel="Voltar sem entrar"
-        hitSlop={8}
-        style={[styles.voltar, { top: insets.top + Spacing[3] }]}>
-        <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
-      </Pressable>
+        onPress={voltar}
+        style={[styles.voltar, { top: insets.top + Spacing[2] }]}
+      />
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
@@ -76,6 +75,29 @@ export function AuthWelcome() {
           ]}>
           <AuthFlow />
         </View>
+
+        {/* Os textos ficam à mão antes de qualquer cadastro (LGPD: transparência). */}
+        <View style={styles.legal}>
+          <Pressable
+            onPress={() => router.push('/termos' as Href)}
+            accessibilityRole="link"
+            style={styles.legalLink}>
+            <AppText variant="caption" tone="muted" style={styles.sublinhado}>
+              Termos de Uso
+            </AppText>
+          </Pressable>
+          <AppText variant="caption" tone="muted" accessibilityElementsHidden>
+            ·
+          </AppText>
+          <Pressable
+            onPress={() => router.push('/privacidade' as Href)}
+            accessibilityRole="link"
+            style={styles.legalLink}>
+            <AppText variant="caption" tone="muted" style={styles.sublinhado}>
+              Política de Privacidade
+            </AppText>
+          </Pressable>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -87,12 +109,8 @@ const styles = StyleSheet.create({
   },
   voltar: {
     position: 'absolute',
-    left: Spacing[4],
+    left: Spacing[3],
     zIndex: 10,
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   scroll: {
     flexGrow: 1,
@@ -133,6 +151,23 @@ const styles = StyleSheet.create({
   },
   cartao: {
     borderWidth: 1,
+    borderRadius: Radius.lg,
     padding: Spacing[6],
+  },
+  legal: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing[2],
+    marginTop: -Spacing[4],
+  },
+  legalLink: {
+    minHeight: Layout.minTouch,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing[1],
+  },
+  sublinhado: {
+    textDecorationLine: 'underline',
   },
 });

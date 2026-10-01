@@ -89,6 +89,15 @@ module.exports = {
           cameraPermission: 'Permite fotografar o defeito urbano ao abrir um chamado.',
         },
       ],
+      [
+        // Push de andamento dos chamados. Sem `icon` próprio o Android usa o
+        // ícone do app; um PNG monocromático branco fica de pendência de arte.
+        'expo-notifications',
+        {
+          color: '#D4AF37',
+          defaultChannel: 'chamados',
+        },
+      ],
       ...mapsPlugin,
     ],
     experiments: {

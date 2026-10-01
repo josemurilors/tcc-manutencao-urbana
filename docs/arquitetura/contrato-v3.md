@@ -385,6 +385,12 @@ Detalhes da implementação (`notificacoes/`):
   abertos, vencidos e CSAT da semana; e-mail também se `RESEND_API_KEY` estiver
   configurada. Não repete para quem recebeu nos últimos 6 dias.
 
+Detalhes que o app assume: `lida/`, `todas-lidas/` e `push-tokens/` podem
+responder 204 ou JSON; o token é o `ExponentPushToken[...]` e `plataforma` ∈
+{`android`, `ios`}. O payload `data` do push leva `{defeito_id, tipo,
+notificacao_id?}` — o toque abre `/chamado/<defeito_id>`; sem `defeito_id`,
+abre a central (`/notificacoes`).
+
 ### 7.4 BI — `api/v1/bi/` (gestor+)
 
 Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
@@ -559,3 +565,9 @@ Detalhes de 7.7 (implementação):
   por IP; `verificar-email/` 5 a cada 10 min por usuário; `reenviar-codigo/`
   5/h; `senha/esqueci/` 5/h por IP e por e-mail; `senha/redefinir/` 5 a cada
   10 min por e-mail; `meus-dados/` 10/h. Cache Redis com fail-open.
+No app: `aceite-termos/` recebe `{versao}` (hoje `2026-10`; campo opcional para
+o backend) e pode responder o `user` ou `{aceite_termos_em}`. `aceite_termos_em:
+null` no `user` faz o app pedir o aceite antes de abrir a sessão (ausente = não
+pede). O app chama `aceite-termos/` logo após `register/`, com o token recém-
+emitido. `senha/redefinir/` não precisa devolver tokens: o app faz login com a
+senha nova. O app relê `GET auth/profile/` a cada boot (papel, suspensão).

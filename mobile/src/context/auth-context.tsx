@@ -3,13 +3,25 @@
  *
  * Diferenças em relação ao web:
  * - a sessão é hidratada de forma assíncrona do SecureStore no boot;
- * - não há inscrição em Web Push (VAPID é uma API de navegador). Notificações
- *   nativas exigiriam FCM/APNs no backend — ver README.
+ * - push é nativo (Expo Push, `hooks/use-push.ts`): com sessão aberta o token
+ *   do aparelho é sincronizado em silêncio, e o logout o desvincula. O pedido
+ *   de permissão nunca sai daqui — só em momentos de contexto.
+ *
+ * O usuário segue o contrato v3 (`Usuario`: papel, secretaria, equipe,
+ * aceite dos termos, suspensão) e é reconferido com o servidor a cada boot,
+ * porque papel e suspensão mudam do lado da prefeitura.
  */
 
+import { useRootNavigationState } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import {
+  removerPushDoAparelho,
+  sincronizarPush,
+  useAbrirChamadoDaNotificacao,
+} from '@/hooks/use-push';
 import { api, setUnauthorizedHandler } from '@/services/api';
+import { contaApi } from '@/services/api-conta';
 import {
   clearSession,
   getStoredUser,
@@ -19,24 +31,60 @@ import {
   setStoredUser,
   setToken,
 } from '@/services/storage';
-import type { AuthResponse, Municipio, User } from '@/types';
+import type { AuthResponse, Municipio } from '@/types';
+import type { PapelUsuario, Usuario } from '@/types/conta';
 import { decodeJwt } from '@/utils/jwt';
 
 type AuthContextValue = {
-  user: User | null;
+  user: Usuario | null;
   isAuthenticated: boolean;
   loading: boolean;
   login: (response: AuthResponse) => Promise<void>;
   logout: () => Promise<void>;
-  updateUser: (updates: Partial<User>) => Promise<void>;
+  updateUser: (updates: Partial<Usuario>) => Promise<void>;
 };
+
+const PAPEIS_EQUIPE: readonly string[] = ['operador', 'gestor', 'admin_municipal', 'super_admin'];
+
+/** Papel efetivo, inclusive para usuários salvos antes do contrato v3 (só `admin`). */
+export function papelDe(user: Usuario | null | undefined): PapelUsuario | string {
+  if (!user) return 'cidadao';
+  if (user.papel) return user.papel;
+  if (user.super_admin) return 'super_admin';
+  return user.admin ? 'admin_municipal' : 'cidadao';
+}
+
+/** Servidor da prefeitura (operador ou acima). */
+export function ehEquipe(user: Usuario | null | undefined) {
+  return PAPEIS_EQUIPE.includes(papelDe(user));
+}
+
+/**
+ * Falta aceitar os termos: só quando o backend manda o campo e ele vem nulo
+ * (backend antigo, sem o campo, não bloqueia ninguém).
+ */
+export function precisaAceitarTermos(user: Usuario | null | undefined) {
+  return !!user && user.aceite_termos_em === null;
+}
+
+/** Normaliza o que vem do servidor/armazenamento para o formato do app. */
+function normalizarUsuario(dados: Partial<Usuario>): Partial<Usuario> {
+  return {
+    ...dados,
+    email_verificado: dados.email_verificado ?? dados.email_verified ?? false,
+  };
+}
+
+function avisarFalhaPush(acao: string) {
+  return (err: unknown) => console.warn(`[push] falha ao ${acao}`, err);
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const decodeToken = decodeJwt;
 
 /** O município precisa do polígono e do bounding box para desenhar o mapa. */
-function precisaCarregarMunicipio(user: User) {
+function precisaCarregarMunicipio(user: Usuario) {
   if (!user.municipio_id) return false;
   const m = user.municipio;
   return (
@@ -50,11 +98,19 @@ function precisaCarregarMunicipio(user: User) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<Usuario | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Toque numa notificação abre o chamado — só depois da sessão lida e da
+  // pilha raiz montada (navegar antes disso quebra o router).
+  const navegacao = useRootNavigationState();
+  useAbrirChamadoDaNotificacao(!loading && !!navegacao?.key);
+
   const logout = useCallback(async () => {
+    // Desvincula o aparelho enquanto o token de sessão ainda vale; se falhar
+    // (sessão já expirada, sem rede), sair continua valendo.
+    await removerPushDoAparelho().catch(avisarFalhaPush('desvincular o aparelho'));
     setTokenState(null);
     setUser(null);
     await clearSession();
@@ -88,8 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await logout();
         return;
       }
-      const stored = (await getStoredUser()) ?? {};
-      const base: User = {
+      const stored = ((await getStoredUser()) ?? {}) as Partial<Usuario>;
+      const base: Usuario = {
         id: stored.id ?? payload.user_id ?? '',
         email: stored.email ?? payload.email ?? '',
         nome: stored.nome ?? '',
@@ -99,12 +155,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         municipio_id: stored.municipio_id ?? null,
         municipio: stored.municipio ?? null,
         email_verificado: stored.email_verificado ?? stored.email_verified ?? false,
+        papel: stored.papel,
+        secretaria_id: stored.secretaria_id ?? null,
+        equipe_id: stored.equipe_id ?? null,
+        aceite_termos_em: stored.aceite_termos_em,
+        suspenso_ate: stored.suspenso_ate ?? null,
       };
       setUser(base);
       if (precisaCarregarMunicipio(base)) await carregarMunicipio(base.municipio_id!);
     },
     [carregarMunicipio, logout],
   );
+
+  /**
+   * Reconfere o perfil no servidor sem travar o boot: papel, suspensão e
+   * aceite dos termos mudam do lado da prefeitura. Offline, fica o salvo.
+   */
+  const reconferirPerfil = useCallback(async () => {
+    try {
+      const atual = normalizarUsuario(await contaApi.perfil());
+      const salvo = await getStoredUser();
+      // O perfil não traz o polígono do município: preserva o já carregado,
+      // a menos que a cidade tenha mudado.
+      const trocouMunicipio = (atual.municipio_id ?? null) !== (salvo?.municipio_id ?? null);
+      setUser((prev) =>
+        prev ? { ...prev, ...atual, municipio: trocouMunicipio ? null : prev.municipio } : prev,
+      );
+      await mergeStoredUser(trocouMunicipio ? { ...atual, municipio: null } : atual);
+      if (trocouMunicipio && atual.municipio_id) await carregarMunicipio(atual.municipio_id);
+    } catch (err) {
+      console.warn('[auth] não foi possível reconferir o perfil', err);
+    }
+  }, [carregarMunicipio]);
 
   // Boot: lê SecureStore e reconstrói a sessão.
   useEffect(() => {
@@ -115,13 +197,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session.token) {
         setTokenState(session.token);
         await aplicarSessao(session.token);
+        // Em segundo plano: não seguram a splash.
+        reconferirPerfil();
+        sincronizarPush().catch(avisarFalhaPush('registrar o aparelho'));
       }
       if (!cancelado) setLoading(false);
     })();
     return () => {
       cancelado = true;
     };
-  }, [aplicarSessao]);
+  }, [aplicarSessao, reconferirPerfil]);
 
   const login = useCallback(
     async (response: AuthResponse) => {
@@ -131,10 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (userData) await setStoredUser(userData);
       setTokenState(access);
       if (userData) {
-        const normalizado: User = {
-          ...userData,
-          email_verificado: userData.email_verificado ?? userData.email_verified ?? false,
-        };
+        const normalizado = normalizarUsuario(userData) as Usuario;
         setUser(normalizado);
         if (precisaCarregarMunicipio(normalizado)) {
           await carregarMunicipio(normalizado.municipio_id!);
@@ -142,11 +224,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         await aplicarSessao(access);
       }
+      // Quem já tinha ligado o push neste aparelho volta a recebê-lo na conta
+      // que acabou de entrar.
+      sincronizarPush().catch(avisarFalhaPush('registrar o aparelho'));
     },
     [aplicarSessao, carregarMunicipio],
   );
 
-  const updateUser = useCallback(async (updates: Partial<User>) => {
+  const updateUser = useCallback(async (updates: Partial<Usuario>) => {
     setUser((prev) => (prev ? { ...prev, ...updates } : prev));
     await mergeStoredUser(updates);
   }, []);
