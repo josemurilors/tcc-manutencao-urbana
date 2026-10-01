@@ -227,7 +227,7 @@ no formato DRF (`{count, next, previous, results}`, `?page=`); erros
 
 | método e rota | corpo / query | resposta |
 |---|---|---|
-| GET `fila/` | `status`, `categoria_id`, `equipe_id`, `atribuicao=meus\|equipe\|sem\|todos`, `vencidos=1`, `bairro`, `q`, `ordenar=score\|prazo\|antigos\|apoios\|distancia`, `lat`, `lng`, `page` | paginado de `ChamadoFila` |
+| GET `fila/` | `status`, `categoria_id`, `secretaria_id`, `equipe_id`, `atribuicao=meus\|equipe\|sem\|todos`, `vencidos=1`, `bairro`, `q`, `ordenar=score\|prazo\|antigos\|apoios\|distancia`, `lat`, `lng`, `page` | paginado de `ChamadoFila` |
 | GET `resumo/` | — | `{abertos, meus, vencidos, vencem_24h, sem_atribuicao, sinalizados, concluidos_hoje}` |
 | POST `chamados/<id>/transicao/` | `{para, texto?, resposta_publica?, motivo?, duplicado_de?, checklist?}`; multipart com `foto`, `latitude`, `longitude` quando houver evidência | detalhe do chamado |
 | POST `chamados/<id>/atribuir/` | `{equipe_id?, atendente_id?}` (operador só pode `atendente_id`= si mesmo) | detalhe |
@@ -271,6 +271,13 @@ Tipos: `status`, `resposta`, `avaliar`, `apoio_marco`, `sla_alerta`, `atribuido`
 
 Filtros comuns: `inicio`, `fim` (YYYY-MM-DD; padrão últimos 30 dias),
 `categoria_id`, `secretaria_id`, `equipe_id`, `bairro`.
+Percentuais (`pct_*`, `taxa_resolucao`, `reabertura_pct`) em 0–100; tempos
+(`*_h`) em horas. `kpis_anterior` cobre a janela de mesma duração logo antes
+de `inicio`; KPI sem dado vem `null` (o app mostra "—"). `relatorio/` aceita
+também os filtros de recorte (`categoria_id`, `secretaria_id`, `equipe_id`,
+`bairro`). Drill-down do painel: o app lista a fatia tocada pela fila de
+operação (`operacao/fila/?atribuicao=todos&ordenar=prazo&...`), por isso a
+fila aceita `secretaria_id`.
 
 | rota | resposta |
 |---|---|
