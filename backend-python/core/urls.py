@@ -25,5 +25,6 @@ urlpatterns = [
     path('api/v1/dados-abertos/', include(bi_urls.dados_abertos_urlpatterns)),
     path('api/v1/open311/', include(bi_urls.open311_urlpatterns)),
     path('api/v1/gestao/', include('gestao.urls')),
+    path('api/v1/notificacoes/', include('notificacoes.urls')),
     path('admin/', admin.site.urls),
 ]

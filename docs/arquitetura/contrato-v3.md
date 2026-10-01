@@ -171,7 +171,7 @@ def atribuir(defeito, autor, *, equipe_id=None, atendente_id=None) -> Defeito
 `transicionar` chama `notificacoes.servico.ao_evento(defeito, evento)` em
 `transaction.on_commit`; o import é tardio e tolera o app ausente.
 (Na prática quem agenda é `registrar_evento`, para todo evento; `ao_evento`
-filtra os públicos de `status`/`resposta_publica`.)
+trata `status`/`reaberto`/`resposta_publica` públicos, `atribuido` e `removido` — ver 7.3.)
 
 Extras de `fluxo.py`: `TransicaoNaoPermitida(TransicaoInvalida)` — transição
 válida mas sem papel para ela (as views devolvem 403; `TransicaoInvalida`, 400);
@@ -182,7 +182,7 @@ concluído até `REABERTURA_AUTOR_DIAS`; `papel='comunidade'` só conclui.
 Soft delete: `Defeito.objects.ativos()` e `regras.remover(defeito, usuario, motivo)`.
 `sla.py` traz ainda `normalizar`, `calcular_prazo`, `sla_vencido` e
 `sla_restante_horas`. `notificacoes.servico.enviar_push(usuarios, titulo, corpo, dados)`
-é no-op até existir o transporte de push.
+envia pelo Expo Push (ver 7.3).
 
 Serializers de chamado nunca expõem `usuario`, `usuario_email` nem ids de
 usuário: `autor_nome` sai mascarado ("Maria S.") e `atendente_id` nulo para quem
@@ -292,7 +292,45 @@ Detalhes da implementação (`backend-python/operacao/`):
 GET `/` (paginado `[{id, tipo, titulo, corpo, defeito_id, lida_em, criado_em}]`),
 GET `nao-lidas/` → `{total}`, POST `<id>/lida/`, POST `todas-lidas/`,
 POST `push-tokens/` `{token, plataforma}`, DELETE `push-tokens/` `{token}`.
-Tipos: `status`, `resposta`, `avaliar`, `apoio_marco`, `sla_alerta`, `atribuido`, `moderacao`.
+Tipos: `status`, `resposta`, `avaliar`, `apoio_marco`, `sla_alerta`, `atribuido`, `moderacao`,
+`resumo` (resumo semanal do gestor; acrescentado na entrega das notificações).
+
+Detalhes da implementação (`notificacoes/`):
+
+- GET `/` aceita ainda `?nao_lidas=1` e `?tipo=`; sempre mais recentes primeiro.
+  POST `<id>/lida/` devolve a notificação (404 se não for do usuário);
+  POST `todas-lidas/` → `{atualizadas}`.
+- POST `push-tokens/` aceita só tokens Expo (`ExponentPushToken[...]`/`ExpoPushToken[...]`,
+  senão 400), responde `{token, plataforma}` com 201 (novo) ou 200 (já existia). O token
+  é do aparelho: registrar numa conta move-o dessa conta para a nova. Até 10 por conta
+  (os mais antigos saem). DELETE é idempotente (204); também aceita `?token=`.
+- Push via Expo Push API (`notificacoes/push.py`): lotes de 100, timeout de 5 s,
+  `DeviceNotRegistered` apaga o token. Payload `data` = `{tipo, defeito_id?, protocolo?}`
+  — o app abre o chamado ao tocar. Settings/variáveis: `EXPO_PUSH_ENABLED` (padrão
+  ligado; sempre desligado sob pytest se o setting não existir), `EXPO_PUSH_ASYNC`
+  (padrão ligado: envio num pool de threads, fora da request), `EXPO_ACCESS_TOKEN`
+  (opcional).
+- Quem recebe o quê (`servico.ao_evento`): status público → autor ("Seu chamado
+  2026-000123 (Buraco) está em execução") e apoiadores ("O chamado …, que você apoia,
+  …"); ao concluir, o autor sem avaliação recebe `avaliar` no lugar de `status`;
+  resposta pública → autor e apoiadores (`resposta`); atribuição → o operador
+  atribuído, ou os membros da equipe se só ela foi definida (`atribuido`); remoção por
+  moderação ou pela comunidade → o autor (`moderacao`); 5, 10 e 25 apoios de terceiros
+  → o autor (`apoio_marco`, uma vez por marco; disparado pelo `post_save` de `Apoio`,
+  já que apoiar não gera evento). Quem fez a ação nunca é avisado dela.
+- `servico.notificar(usuarios, tipo, titulo, corpo='', defeito=None, *, com_push=True,
+  dados_push=None)` é a porta de entrada para outros apps avisarem alguém (ex.:
+  suspensão de conta → `moderacao`).
+- `manage.py alertas_sla [--municipio X] [--vencidos-desde-dias 7] [--dry-run]` (rodar de
+  hora em hora): chamados abertos que vencem em 24 h ou venceram → operador atribuído,
+  membros da equipe e gestores/admins do município (gestor com `secretaria_id` só recebe
+  os da sua secretaria). In-app um por chamado; push agrupado por pessoa. Sem repetir:
+  a janela de deduplicação é `prazo_em - 24h` (vencendo) e `prazo_em` (vencido), então
+  um prazo alterado volta a gerar alerta.
+- `manage.py resumo_semanal [--municipio X] [--forcar] [--sem-email]` (segunda de manhã):
+  `resumo` in-app para gestor/admin_municipal com recebidos, resolvidos (% no prazo),
+  abertos, vencidos e CSAT da semana; e-mail também se `RESEND_API_KEY` estiver
+  configurada. Não repete para quem recebeu nos últimos 6 dias.
 
 ### 7.4 BI — `api/v1/bi/` (gestor+)
 
