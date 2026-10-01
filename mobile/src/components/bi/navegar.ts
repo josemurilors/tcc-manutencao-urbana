@@ -86,3 +86,8 @@ export function abrirDrill(
 export function abrirChamado(id: string | number) {
   router.push({ pathname: '/(tabs)/mapa', params: { abrir: String(id) } });
 }
+
+/** Enquadra um ponto (ex.: área crítica do painel) no mapa do app. */
+export function abrirCoordenada(lat: number, lng: number) {
+  router.push({ pathname: '/(tabs)/mapa', params: { lat: String(lat), lng: String(lng) } });
+}

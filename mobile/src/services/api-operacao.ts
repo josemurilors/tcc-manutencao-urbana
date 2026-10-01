@@ -39,6 +39,25 @@ import type {
 const BASE = '/api/v1/operacao';
 
 /**
+ * Regras da prefeitura (`municipio_config.parametros`) que o app aplica antes
+ * de enviar, já com o padrão da plataforma no que a cidade não definiu.
+ */
+export type ParametrosOperacao = {
+  /** Concluir exige a foto do depois (padrão: sim). */
+  exigir_foto_conclusao: boolean;
+  /** Distância máxima, em metros, da foto até o chamado. */
+  raio_evidencia_m: number;
+};
+
+/** GET `operacao/resumo/`. `parametros` falta em backends anteriores a ele. */
+export type ResumoOperacao = ResumoFila & { parametros?: ParametrosOperacao };
+
+/** Foto obrigatória ao concluir? Sem a informação, vale o padrão (exige). */
+export function exigeFotoAoConcluir(resumo: ResumoOperacao | null | undefined) {
+  return resumo?.parametros?.exigir_foto_conclusao ?? true;
+}
+
+/**
  * Cabeçalho de idempotência. No navegador ele iria num preflight de CORS que o
  * backend não libera (a requisição cairia como "Failed to fetch" e a ação iria
  * para a fila offline para sempre); lá a chave vai na query (`comChave`).
@@ -114,7 +133,7 @@ export const apiOperacao = {
     return request<PaginaFila>(caminho);
   },
 
-  resumo: () => request<ResumoFila>(`${BASE}/resumo/`),
+  resumo: () => request<ResumoOperacao>(`${BASE}/resumo/`),
 
   /** Mudança de status. Com `foto`, vai multipart como evidência (`depois` ao concluir). */
   transicao: async (

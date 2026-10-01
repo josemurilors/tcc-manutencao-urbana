@@ -14,6 +14,11 @@
  *   mensagem, visível na folha da fila — sem travar os itens seguintes;
  * - qualquer outro erro do servidor: tenta de novo com espera; depois de
  *   `MAX_TENTATIVAS_AMBIGUAS` vira `falhou` (continua na fila, nunca some).
+ *
+ * A fila de **ações da operação** (assumir, concluir, nota, foto... feitas sem
+ * rede pela equipe) tem o seu provider aqui também, `OperacaoSyncProvider`,
+ * montado no mesmo layout raiz: drena com o app em qualquer tela, não só com
+ * a aba Operação aberta. A lógica fica em `components/operacao/use-sync-operacao`.
  */
 
 import * as Network from 'expo-network';
@@ -28,6 +33,7 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 
+import { useSyncOperacaoEstado, type SyncOperacao } from '@/components/operacao/use-sync-operacao';
 import { useAuth } from '@/context/auth-context';
 import { useToast } from '@/context/toast-context';
 import { DefeitoDuplicadoError, postDefeitoDireto } from '@/services/api';
@@ -334,5 +340,22 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
 export function useOfflineSyncContext() {
   const ctx = useContext(OfflineSyncContext);
   if (!ctx) throw new Error('useOfflineSync precisa estar dentro de <OfflineSyncProvider>');
+  return ctx;
+}
+
+// ---------------------------------------------------------------------------
+// Fila de ações da operação (equipe)
+
+const OperacaoSyncContext = createContext<SyncOperacao | null>(null);
+
+export function OperacaoSyncProvider({ children }: { children: React.ReactNode }) {
+  const sync = useSyncOperacaoEstado();
+  return <OperacaoSyncContext.Provider value={sync}>{children}</OperacaoSyncContext.Provider>;
+}
+
+/** Estado da fila de ações da operação (pendências, envio, "envio pendente"). */
+export function useSyncOperacao() {
+  const ctx = useContext(OperacaoSyncContext);
+  if (!ctx) throw new Error('useSyncOperacao precisa estar dentro de <OperacaoSyncProvider>');
   return ctx;
 }

@@ -108,11 +108,21 @@ notificacoes(id BIGSERIAL PK, usuario_id UUID NOT NULL REFERENCES users(id) ON D
 push_tokens(id SERIAL PK, usuario_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         token TEXT NOT NULL UNIQUE, plataforma TEXT DEFAULT '', criado_em TIMESTAMPTZ DEFAULT NOW(),
         ultimo_uso TIMESTAMPTZ DEFAULT NOW())
+convites(id SERIAL PK, email TEXT NOT NULL, municipio_id TEXT NOT NULL, papel TEXT NOT NULL,
+        secretaria_id INT REFERENCES secretarias(id) ON DELETE SET NULL,
+        equipe_id INT REFERENCES equipes(id) ON DELETE SET NULL, token TEXT NOT NULL UNIQUE,
+        convidado_por_id UUID REFERENCES users(id) ON DELETE SET NULL, criado_em TIMESTAMPTZ DEFAULT NOW(),
+        expira_em TIMESTAMPTZ NOT NULL, aceito_em TIMESTAMPTZ,
+        aceito_por_id UUID REFERENCES users(id) ON DELETE SET NULL)
+        -- índices parciais (pendentes): lower(email), municipio_id
 ```
 
 Tipos de `defeito_eventos.tipo`: `criado`, `status`, `atribuido`, `resposta_publica`,
 `nota_interna` (publico=false), `apoio`, `sinalizacao`, `anexo`, `avaliacao`,
 `reaberto`, `prioridade`, `sla`, `removido`, `moderacao`.
+`apoio`: gravado por `POST <id>/apoiar/` quando quem apoia não é o autor
+(público; `autor_nome` vazio para quem não é da equipe; desfazer o apoio apaga o
+evento). O app agrega todos numa linha do histórico ("N pessoas confirmaram").
 `papel` do autor no momento: `cidadao`, `operador`, `gestor`, `admin_municipal`,
 `super_admin`, `comunidade`, `sistema`.
 
@@ -229,7 +239,7 @@ no formato DRF (`{count, next, previous, results}`, `?page=`); erros
 | método e rota | corpo / query | resposta |
 |---|---|---|
 | GET `fila/` | `status`, `categoria_id`, `secretaria_id`, `equipe_id`, `atribuicao=meus\|equipe\|sem\|todos`, `vencidos=1`, `bairro`, `q`, `ordenar=score\|prazo\|antigos\|apoios\|distancia`, `lat`, `lng`, `page` | paginado de `ChamadoFila` |
-| GET `resumo/` | — | `{abertos, meus, vencidos, vencem_24h, sem_atribuicao, sinalizados, concluidos_hoje}` |
+| GET `resumo/` | — | `{abertos, meus, vencidos, vencem_24h, sem_atribuicao, sinalizados, concluidos_hoje, parametros: {exigir_foto_conclusao, raio_evidencia_m}}` |
 | POST `chamados/<id>/transicao/` | `{para, texto?, resposta_publica?, motivo?, duplicado_de?, checklist?}`; multipart com `foto`, `latitude`, `longitude` quando houver evidência | detalhe do chamado |
 | POST `chamados/<id>/atribuir/` | `{equipe_id?, atendente_id?}` (operador só pode `atendente_id`= si mesmo) | detalhe |
 | POST `chamados/<id>/liberar/` | — | detalhe |
@@ -274,8 +284,12 @@ Detalhes da implementação (`backend-python/operacao/`):
   "Prefeitura" (antes/depois) ou mascarado (cidadão).
 - `lote/` não leva foto: concluir em lote obedece à mesma exigência acima.
 - Extra: GET `chamados/<id>/ordem-servico/` → PDF da OS (protocolo, equipe,
-  responsável, prazo e checklist da categoria), substituto de
-  `defeitos/<id>/ordem_servico/`.
+  responsável, prazo e checklist da categoria). As rotas legadas
+  `GET defeitos/<id>/ordem_servico/` e `GET defeitos/operacao/` (fila sem
+  paginação, teto de 2000) foram **removidas** (404); o app não as usa mais.
+- `resumo/` traz `parametros` do município do usuário já com o padrão da
+  plataforma no que a prefeitura não definiu (ou mandou `null`):
+  `exigir_foto_conclusao` (padrão `true`) e `raio_evidencia_m` (150).
 Como o app usa a 7.1 (aba Operação):
 
 - `fila/` sem `status` = só abertos (`status=fechados` mostra os encerrados).
@@ -299,6 +313,19 @@ Como o app usa a 7.1 (aba Operação):
 - Rejeitar como duplicado busca o original por `GET defeitos/protocolo/<p>/`
   ou por `fila/?q=&status=todos` (o original pode estar fechado).
 - A Ordem de Serviço da ficha usa `GET chamados/<id>/ordem-servico/`.
+- "Concluir" lê `resumo.parametros.exigir_foto_conclusao`: com `false` a foto
+  do depois fica opcional na folha; sem o campo (backend antigo) o app exige.
+  O valor viaja no cache offline da fila junto com o resumo.
+- A fila offline das ações drena com o app em qualquer tela
+  (`OperacaoSyncProvider` no layout raiz), com uma pílula de pendências fora
+  da aba Operação e a faixa dentro dela.
+- A ficha mostra um bloco único de fotos: a do reporte (autor, ponto do
+  reporte), os anexos `cidadao`/`antes`/`depois` (GPS e `autor_nome`) e, só
+  quando não há anexo do mesmo tipo, as cópias legadas (`imagens_extra`,
+  `foto_resolucao_url`). O visualizador em tela cheia manda
+  `Authorization: Bearer` quando a URL é da API (anexo de chamado restrito).
+- Ação em lote: botão "Selecionar" na lista (o web não tem toque longo), com
+  "Marcar todos" os carregados; o toque longo segue valendo no celular.
 
 ### 7.2 Cidadão — `api/v1/defeitos/`
 
@@ -307,7 +334,7 @@ Como o app usa a 7.1 (aba Operação):
 | GET `<id>/eventos/` | — | `[{id, tipo, de_status, para_status, papel, texto, publico, criado_em}]` (internos só equipe) |
 | POST `<id>/avaliar/` | `{nota: 1..5, comentario?}` (autor; só `concluido`; editável por 7 dias) | detalhe |
 | POST `<id>/reabrir/` | `{motivo}` (autor até 30 dias após `resolvido_em`, ou gestor+) | detalhe |
-| GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios}]` (abertos no raio + resolvidos há ≤30 dias) |
+| GET `proximos/` (público) | `lat, lng, categoria?, raio?` | `[{id, protocolo, titulo, categoria, status, distancia_m, criado_em, resolvido_em, total_apoios, raio_duplicado_m}]` (abertos no raio + resolvidos há ≤30 dias); cabeçalhos `X-Raio-Duplicado-M`, `X-Raio-M` |
 | GET `protocolo/<protocolo>/` (público) | — | detalhe público |
 | GET `area/` | + `situacao=abertos\|resolvidos\|todos` (padrão abertos), `categorias=<ids>` | como hoje, com `celulas` para todos os usuários |
 
@@ -329,7 +356,12 @@ Detalhes de 7.2 (implementação):
   `fluxo.transicionar(…, 'pendente', texto=motivo)` (evento `reaberto`,
   `reaberturas += 1`).
 - `proximos`: raio = `?raio=` (1–500 m), senão `municipio_config.raio_duplicado_m`
-  do município do ponto, senão 30 m. **Desvio:** entram os abertos e só os
+  do município do ponto, senão 30 m. O raio de duplicado do município (ou os
+  30 m) vai em cada item (`raio_duplicado_m`) e no cabeçalho
+  `X-Raio-Duplicado-M`, mesmo quando `?raio=` troca o raio da busca;
+  `X-Raio-M` é o raio usado na busca. O app chama sem `?raio=` e usa
+  `raio_duplicado_m` no "é o mesmo problema?" (mesma categoria, aberto, dentro
+  do raio → apoiar o existente). **Desvio:** entram os abertos e só os
   `concluido` com `resolvido_em` ≤30 dias (rejeitados não ajudam quem vai
   reportar). `categoria` aceita id (`categoria_id`) ou nome (sem caixa). Ordem
   por distância, até 50 itens; cada item traz também `categoria_id`,
@@ -378,7 +410,8 @@ Detalhes da implementação (`notificacoes/`):
   (opcional).
 - Quem recebe o quê (`servico.ao_evento`): status público → autor ("Seu chamado
   2026-000123 (Buraco) está em execução") e apoiadores ("O chamado …, que você apoia,
-  …"); ao concluir, o autor sem avaliação recebe `avaliar` no lugar de `status`;
+  …"); ao concluir, o autor sem avaliação **deste ciclo** (nunca avaliou, ou
+  `avaliado_em` < `resolvido_em` depois de reaberto) recebe `avaliar` no lugar de `status`;
   resposta pública → autor e apoiadores (`resposta`); atribuição → o operador
   atribuído, ou os membros da equipe se só ela foi definida (`atribuido`); remoção por
   moderação ou pela comunidade → o autor (`moderacao`); 5, 10 e 25 apoios de terceiros
@@ -510,12 +543,13 @@ Detalhes (implementados em `bi/publico.py`, throttle anônimo 60/min):
 |---|---|---|
 | GET/PATCH `municipio/` | GET equipe, PATCH admin_municipal | `MunicipioConfig` + nome/uf |
 | CRUD `secretarias/`, `equipes/` | admin_municipal (GET gestor+) | |
-| GET/POST `membros/`, PATCH/DELETE `membros/<id>/` | GET gestor+, escrita admin_municipal | POST `{email, papel, secretaria_id?, equipe_id?}` vincula conta existente; DELETE volta a cidadão |
+| GET/POST `membros/`, PATCH/DELETE `membros/<id>/` | GET gestor+, escrita admin_municipal | GET paginado; POST `{email, papel, secretaria_id?, equipe_id?}` vincula conta existente ou, sem conta, cria convite; DELETE volta a cidadão |
+| GET `convites/`, DELETE `convites/<id>/`, POST `convites/<id>/reenviar/` | GET gestor+, escrita admin_municipal | convites pendentes de quem ainda não tem conta |
 | GET `categorias/`, PATCH `categorias/<categoria_id>/` | GET equipe, PATCH admin_municipal | `{categoria_id, nome, icone, prazo_sla_dias, prioridade, secretaria_id, ativo, checklist}` |
 | GET `moderacao/` | gestor+ | `{sinalizados, removidos, usuarios}` |
 | POST `moderacao/defeitos/<id>/remover/` `{motivo}`, `.../restaurar/` | gestor+ | |
 | POST `moderacao/usuarios/<id>/suspender/` `{dias, motivo}`, `.../reativar/` | gestor+ | |
-| GET `auditoria/?acao=&usuario_id=` | admin_municipal | paginado |
+| GET `auditoria/?acao=&usuario_id=` | admin_municipal | paginado; `?formato=csv` exporta |
 
 Todas as escritas chamam `core.auditoria.registrar`.
 
@@ -538,15 +572,31 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
   DELETE → 204: apaga se nada aponta para ela, senão só desativa (`ativo=false`).
   Secretaria/equipe referenciada no corpo precisa estar ativa, salvo se for o vínculo que o
   registro já tem (reenviar o valor atual não dá 400).
-- `membros/` devolve **lista** `{id, nome, email, papel, nivel, secretaria_id, secretaria_nome,
+- `membros/` é **paginado** (DRF, 30 por página, `page_size` ≤ 100; ordem: papel mais alto,
+  depois nome) com itens `{id, nome, email, papel, nivel, secretaria_id, secretaria_nome,
   equipe_id, equipe_nome, suspenso_ate, chamados_abertos, criado_em}`; filtros `q`, `papel`,
-  `equipe_id`, `secretaria_id`. POST: `email` é buscado sem caixa entre as contas existentes
-  (não exige domínio com ponto); e-mail sem conta → 404; servidor de outra cidade ou já da
-  equipe → 409; `papel=super_admin` só pelo super admin (403). Equipe informada puxa a
+  `equipe_id`, `secretaria_id`, `page`. POST: `email` é buscado sem caixa entre as contas
+  existentes (não exige domínio com ponto). E-mail sem conta → 201
+  `{convite, email_enviado}` (ver convites abaixo; `papel=super_admin` por convite → 400);
+  servidor de outra cidade ou já da equipe → 409; `papel=super_admin` só pelo super admin (403). Equipe informada puxa a
   secretaria dela. Ninguém muda o próprio papel nem se revoga (400); ninguém mexe em papel
   acima do seu (403); rebaixar/revogar o último `admin_municipal` → 409. DELETE → 200
   `{id, papel: "cidadao", chamados_liberados}`: os chamados abertos dele perdem o atendente
   (evento interno `atribuido` com `dados.motivo = "membro_revogado"`).
+- `convites/`: **lista** dos pendentes (não aceitos, inclusive vencidos) do município,
+  `{id, email, papel, secretaria_id, secretaria_nome, equipe_id, equipe_nome,
+  convidado_por_nome, criado_em, expira_em, expirado}` (o `token` não sai na API). Convidar
+  de novo um e-mail com convite pendente no mesmo município atualiza papel/lotação e renova o
+  prazo (não duplica). Validade: 14 dias. O e-mail sai por `services.email_service` (Resend);
+  sem `RESEND_API_KEY` ou com falha, o convite vale assim mesmo e `email_enviado = false`.
+  `reenviar/` → 200 `{convite, email_enviado}` (renova o prazo, inclusive de vencido);
+  DELETE → 204 (cancela). Id de outra cidade ou já aceito → 404.
+  **Aceite:** ao entrar com o e-mail **verificado** — `verificar-email/`, `login/` (conta já
+  verificada) ou `google/` — `gestao.servicos.aplicar_convite` aplica o convite pendente e
+  válido mais recente: `papel`, `municipio_id` e a lotação (secretaria/equipe ainda ativas),
+  marca `aceito_em`/`aceito_por_id` e audita `convite.aceitar`. Só o cadastro (`register/`,
+  e-mail ainda não verificado) não aplica. Quem já é da equipe não é alterado.
+  Auditoria: `convite.{criar,reenviar,cancelar,aceitar}`.
 - `categorias/` devolve **lista** com, além dos campos acima, `personalizado` e
   `base: {prazo_sla_dias, prioridade}`. PATCH aceita `prazo_sla_dias` (1..365), `prioridade`,
   `secretaria_id` (`null` nesses três = volta ao padrão), `ativo`, `checklist` (≤20 itens) e
@@ -573,6 +623,9 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
 - `auditoria/`: paginado (30 por página, `page_size` ≤ 100) `{id, acao, usuario_id, usuario_nome,
   municipio_id, alvo_tipo, alvo_id, dados, ip, criado_em}`; filtros `acao` (exata ou prefixo:
   `acao=membro` traz `membro.*`), `usuario_id`, `alvo_tipo`, `alvo_id`, `inicio`, `fim`.
+  `?formato=csv` devolve os mesmos filtros em CSV (`text/csv`, `;`, BOM UTF-8, até 20.000
+  linhas, `Content-Disposition: attachment; filename="auditoria-<municipio>-<data>.csv"`):
+  colunas `data_hora, usuario, usuario_id, acao, alvo_tipo, alvo_id, ip, dados` (`dados` em JSON).
   Ações: `municipio.config`, `secretaria.{criar,alterar,desativar,excluir}`,
   `equipe.{criar,alterar,desativar,excluir}`, `membro.{vincular,alterar,revogar}`,
   `categoria.alterar`, `moderacao.{remover,restaurar}`, `usuario.{suspender,reativar}`.

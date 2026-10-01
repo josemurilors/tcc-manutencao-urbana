@@ -3,6 +3,8 @@ import base64
 from pathlib import Path
 from datetime import timedelta
 
+from corsheaders.defaults import default_headers
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # SECURITY: Separate Django SECRET_KEY from JWT_SECRET
@@ -116,6 +118,10 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
     'FRONTEND_URL', 'http://localhost:5173'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
+# Padrões do django-cors-headers + o `Idempotency-Key` das ações da operação
+# (`operacao/idempotencia.py`): liberado, o app web também pode mandá-lo como
+# cabeçalho em vez do `?idempotency_key=` sem o preflight barrar a requisição.
+CORS_ALLOW_HEADERS = (*default_headers, 'idempotency-key')
 
 # Login com Google (OAuth / OpenID Connect). Um client ID por plataforma; o
 # backend aceita ID tokens emitidos para qualquer um deles e entrega os IDs aos

@@ -14,6 +14,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { Pagina } from '@/types/gestao';
 
 import { ehErroDeRede, mensagemDeErro } from './confirmar';
+import { useMunicipioGestao } from './municipio-gestao';
 
 export type EstadoLista = 'carregando' | 'pronto' | 'erro' | 'offline';
 
@@ -40,7 +41,9 @@ export function useListaPaginada<T>(
   // onEndReached dispara duas vezes seguidas.
   const pedindoMais = useRef(false);
 
-  const origem = `${chave}#${versao}`;
+  // Trocar o município (super_admin) é outra consulta: volta à página 1.
+  const municipio = useMunicipioGestao()?.codigo ?? '';
+  const origem = `${chave}@${municipio}#${versao}`;
   const buscarAgora = useEffectEvent((page: number) => buscar(page));
 
   useEffect(() => {

@@ -25,7 +25,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import { apiOperacao, ehErroDeRede } from '@/services/api-operacao';
+import { apiOperacao, ehErroDeRede, type ResumoOperacao } from '@/services/api-operacao';
 import { getStoredUser } from '@/services/storage';
 import type { PickedImage } from '@/types';
 import type {
@@ -35,7 +35,6 @@ import type {
   DadosTransicao,
   FiltrosFila,
   IdChamado,
-  ResumoFila,
 } from '@/types/operacao';
 
 const CHAVE_CACHE = 'ciu_operacao_cache';
@@ -90,7 +89,7 @@ export type CacheFila = {
   filtros: FiltrosFila;
   resultados: ChamadoFila[];
   count: number;
-  resumo: ResumoFila | null;
+  resumo: ResumoOperacao | null;
 };
 
 export async function salvarCacheFila(cache: Omit<CacheFila, 'salvo_em'>) {

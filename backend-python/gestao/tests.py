@@ -127,7 +127,7 @@ class TestIsolamento:
         assert cli_a.delete(reverse('gestao-membro', args=[membro_b.id])).status_code == 404
         ids = [s['id'] for s in cli_a.get(reverse('gestao-secretarias')).data]
         assert sec_b.id not in ids
-        assert str(membro_b.id) not in [m['id'] for m in cli_a.get(reverse('gestao-membros')).data]
+        assert str(membro_b.id) not in [m['id'] for m in cli_a.get(reverse('gestao-membros')).data['results']]
 
     def test_admin_nao_usa_parametro_municipio_de_outra_cidade(self):
         cli_a, _ = _usuario('admin_municipal')
@@ -287,11 +287,6 @@ class TestMembros:
         assert cli.post(reverse('gestao-membros'), {'email': 'sem-arroba', 'papel': 'operador'},
                         format='json').status_code == 400
 
-    def test_email_desconhecido_404(self):
-        cli, _ = _usuario('admin_municipal')
-        r = cli.post(reverse('gestao-membros'), {'email': 'ninguem@example.com', 'papel': 'operador'}, format='json')
-        assert r.status_code == 404
-
     def test_admin_municipal_nao_cria_super_admin(self):
         cli, _ = _usuario('admin_municipal')
         _, pessoa = _usuario('cidadao')
@@ -364,13 +359,155 @@ class TestMembros:
         cli, _ = _usuario('gestor', nome='Gestora Ana')
         _, op = _usuario('operador', nome='Operador Zé')
         _usuario('cidadao', nome='Cidadão Fora Da Lista')
-        lista = cli.get(reverse('gestao-membros')).data
+        lista = cli.get(reverse('gestao-membros')).data['results']
         nomes = [m['nome'] for m in lista]
         assert 'Gestora Ana' in nomes and 'Operador Zé' in nomes
         assert 'Cidadão Fora Da Lista' not in nomes
-        so_ops = cli.get(reverse('gestao-membros') + '?papel=operador').data
+        so_ops = cli.get(reverse('gestao-membros') + '?papel=operador').data['results']
         assert all(m['papel'] == 'operador' for m in so_ops)
-        assert [m['id'] for m in cli.get(reverse('gestao-membros') + '?q=Zé').data] == [str(op.id)]
+        assert [m['id'] for m in cli.get(reverse('gestao-membros') + '?q=Zé').data['results']] == [str(op.id)]
+
+    def test_lista_paginada_no_servidor(self):
+        cli, _ = _usuario('admin_municipal', nome='Admin Paginado')
+        for i in range(4):
+            _usuario('operador', nome=f'Operador {i:02d}')
+        r = cli.get(reverse('gestao-membros') + '?page_size=2')
+        assert r.data['count'] == 5 and len(r.data['results']) == 2 and r.data['next']
+        # Papel mais alto primeiro, depois nome.
+        assert r.data['results'][0]['nome'] == 'Admin Paginado'
+        pag3 = cli.get(reverse('gestao-membros') + '?page_size=2&page=3').data
+        assert [m['nome'] for m in pag3['results']] == ['Operador 03'] and pag3['next'] is None
+
+
+# ---------------------------------------------------------------- convites
+
+class TestConvites:
+
+    def _convidar(self, cli, email, papel='operador', **extra):
+        return cli.post(reverse('gestao-membros'), {'email': email, 'papel': papel, **extra}, format='json')
+
+    def test_email_sem_conta_vira_convite(self, monkeypatch):
+        enviados = []
+
+        async def falso_envio(to, subject, html):
+            enviados.append((to, html))
+            return {'id': 'x'}
+
+        monkeypatch.setattr('services.email_service._send_email', falso_envio)
+        cli, _ = _usuario('admin_municipal')
+        eq = Equipe.objects.create(municipio_id=CIDADE, nome='Equipe Convite')
+        email = f'novo-{uuid.uuid4().hex[:6]}@example.com'
+        r = self._convidar(cli, email.upper(), 'gestor', equipe_id=eq.id)
+        assert r.status_code == 201, r.data
+        assert r.data['email_enviado'] is True
+        assert r.data['convite']['email'] == email and r.data['convite']['equipe_nome'] == 'Equipe Convite'
+        assert 'token' not in r.data['convite']
+        assert enviados and enviados[0][0] == email and 'Gestor' in enviados[0][1]
+        assert AuditLog.objects.filter(acao='convite.criar', municipio_id=CIDADE).exists()
+        # Convidar de novo o mesmo e-mail atualiza o convite, não duplica.
+        r2 = self._convidar(cli, email, 'operador')
+        assert r2.data['convite']['id'] == r.data['convite']['id']
+        lista = cli.get(reverse('gestao-convites')).data
+        assert [c['papel'] for c in lista] == ['operador']
+
+    def test_sem_resend_convite_fica_e_avisa(self, settings):
+        settings.RESEND_API_KEY = ''
+        cli, _ = _usuario('admin_municipal')
+        r = self._convidar(cli, f'sem-envio-{uuid.uuid4().hex[:6]}@example.com')
+        assert r.status_code == 201 and r.data['email_enviado'] is False
+
+    def test_gestor_le_mas_nao_convida(self):
+        cli, _ = _usuario('gestor')
+        assert cli.get(reverse('gestao-convites')).status_code == 200
+        assert self._convidar(cli, 'x@example.com').status_code == 403
+
+    def test_convites_isolados_por_municipio(self, settings):
+        settings.RESEND_API_KEY = ''
+        cli_a, _ = _usuario('admin_municipal')
+        cli_b, _ = _usuario('admin_municipal', OUTRA)
+        cid = self._convidar(cli_b, f'b-{uuid.uuid4().hex[:6]}@example.com').data['convite']['id']
+        assert cid not in [c['id'] for c in cli_a.get(reverse('gestao-convites')).data]
+        assert cli_a.delete(reverse('gestao-convite', args=[cid])).status_code == 404
+        assert cli_a.post(reverse('gestao-convite-reenviar', args=[cid])).status_code == 404
+
+    def test_reenviar_renova_e_cancelar_remove(self, settings):
+        from gestao.models import Convite
+
+        settings.RESEND_API_KEY = ''
+        cli, _ = _usuario('admin_municipal')
+        cid = self._convidar(cli, f'r-{uuid.uuid4().hex[:6]}@example.com').data['convite']['id']
+        Convite.objects.filter(pk=cid).update(expira_em=timezone.now() - timedelta(days=1))
+        assert cli.get(reverse('gestao-convites')).data[0]['expirado'] is True
+        r = cli.post(reverse('gestao-convite-reenviar', args=[cid]))
+        assert r.status_code == 200 and r.data['convite']['expirado'] is False
+        assert cli.delete(reverse('gestao-convite', args=[cid])).status_code == 204
+        assert not Convite.objects.filter(pk=cid).exists()
+        assert AuditLog.objects.filter(acao='convite.cancelar', alvo_id=str(cid)).exists()
+
+    def test_convite_aplicado_ao_verificar_o_email(self, settings):
+        settings.RESEND_API_KEY = ''
+        cli, _ = _usuario('admin_municipal')
+        sec = Secretaria.objects.create(municipio_id=CIDADE, nome='Obras Convite')
+        email = f'chega-{uuid.uuid4().hex[:6]}@example.com'
+        cid = self._convidar(cli, email, 'gestor', secretaria_id=sec.id).data['convite']['id']
+
+        anon = APIClient()
+        r = anon.post(reverse('auth-register'), {
+            'nome': 'Pessoa Convidada', 'email': email,
+            'password': 'Test@123456', 'confirm_password': 'Test@123456',
+        }, format='json')
+        assert r.status_code == 201, r.data
+        novo = User.objects.get(email__iexact=email)
+        # Sem verificar o e-mail, nada muda: o convite é de quem prova o e-mail.
+        assert novo.papel == 'cidadao'
+        login = anon.post(reverse('auth-login'), {'email': email, 'password': 'Test@123456'}, format='json')
+        assert login.status_code == 200
+        novo.refresh_from_db()
+        assert novo.papel == 'cidadao'
+
+        anon.force_authenticate(novo)
+        r = anon.post(reverse('auth-verify-email'), {'codigo': novo.codigo_2fa}, format='json')
+        assert r.status_code == 200, r.data
+        novo.refresh_from_db()
+        assert novo.papel == 'gestor' and novo.municipio_id == CIDADE and novo.secretaria_id == sec.id
+        assert cli.get(reverse('gestao-convites')).data == []
+        log = AuditLog.objects.get(acao='convite.aceitar', alvo_id=str(novo.id))
+        assert log.dados['convite_id'] == cid
+
+    def test_convite_aplicado_no_login_de_conta_verificada(self, settings):
+        settings.RESEND_API_KEY = ''
+        cli, _ = _usuario('admin_municipal')
+        email = f'login-{uuid.uuid4().hex[:6]}@example.com'
+        # Conta criada depois do convite (o vínculo direto não se aplica).
+        self._convidar(cli, email, 'operador')
+        _, pessoa = _usuario('cidadao', municipio_id=None, email=email)
+        pessoa.email_verified = 1
+        pessoa.save(update_fields=['email_verified'])
+        r = APIClient().post(reverse('auth-login'), {'email': email, 'password': 'Test@123456'}, format='json')
+        assert r.status_code == 200
+        assert r.data['user']['papel'] == 'operador'
+
+    def test_convite_vencido_nao_aplica_e_equipe_nao_e_sobrescrita(self, settings):
+        from gestao.models import Convite
+        from gestao.servicos import aplicar_convite
+
+        settings.RESEND_API_KEY = ''
+        cli, _ = _usuario('admin_municipal')
+        email = f'venc-{uuid.uuid4().hex[:6]}@example.com'
+        cid = self._convidar(cli, email).data['convite']['id']
+        Convite.objects.filter(pk=cid).update(expira_em=timezone.now() - timedelta(minutes=1))
+        _, pessoa = _usuario('cidadao', municipio_id=None, email=email)
+        pessoa.email_verified = 1
+        pessoa.save(update_fields=['email_verified'])
+        assert aplicar_convite(pessoa) is None and pessoa.papel == 'cidadao'
+
+        email2 = f'op-{uuid.uuid4().hex[:6]}@example.com'
+        self._convidar(cli, email2, 'admin_municipal')
+        _, de_fora = _usuario('operador', OUTRA, email=email2)
+        de_fora.email_verified = 1
+        assert aplicar_convite(de_fora) is None
+        de_fora.refresh_from_db()
+        assert de_fora.papel == 'operador' and de_fora.municipio_id == OUTRA
 
 
 # --------------------------------------------------------------- categorias
@@ -558,6 +695,31 @@ class TestAuditoria:
         assert cli.get(reverse('gestao-auditoria') + f'?inicio={hoje}&fim={hoje}').data['count'] == 4
         assert cli.get(reverse('gestao-auditoria') + '?inicio=ontem').status_code == 400
         assert cli.get(reverse('gestao-auditoria') + '?usuario_id=abc').status_code == 400
+
+    def test_exporta_csv_com_os_filtros(self):
+        import csv
+        import io
+
+        cli, admin = _usuario('admin_municipal')
+        cli.post(reverse('gestao-secretarias'), {'nome': 'Secretaria Ção; CSV'}, format='json')
+        cli.post(reverse('gestao-equipes'), {'nome': 'Equipe CSV'}, format='json')
+        _, outro_admin = _usuario('admin_municipal', OUTRA)
+        AuditLog.objects.create(usuario=outro_admin, municipio_id=OUTRA, acao='secretaria.criar')
+
+        r = cli.get(reverse('gestao-auditoria') + '?formato=csv&acao=secretaria')
+        assert r.status_code == 200
+        assert r['Content-Type'].startswith('text/csv')
+        assert 'attachment' in r['Content-Disposition'] and CIDADE in r['Content-Disposition']
+        texto = r.content.decode('utf-8')
+        assert texto.startswith('﻿')
+        linhas = list(csv.reader(io.StringIO(texto.lstrip('﻿')), delimiter=';'))
+        assert linhas[0][:4] == ['data_hora', 'usuario', 'usuario_id', 'acao']
+        assert len(linhas) == 2  # cabeçalho + a secretaria (sem a equipe nem a outra cidade)
+        assert linhas[1][1] == admin.nome and linhas[1][3] == 'secretaria.criar'
+        assert 'Secretaria Ção; CSV' in linhas[1][7]
+        # Gestor não exporta (a auditoria é do administrador).
+        gestor, _ = _usuario('gestor')
+        assert gestor.get(reverse('gestao-auditoria') + '?formato=csv').status_code == 403
 
 
 # ------------------------------------------------------------------- seed

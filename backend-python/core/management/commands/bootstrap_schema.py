@@ -327,6 +327,27 @@ SCHEMA_V3 = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS equipe_id INT",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspenso_ate TIMESTAMPTZ",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS aceite_termos_em TIMESTAMPTZ",
+    # --- Convites para a equipe (quem ainda não tem conta) --------------------
+    # O papel é aplicado quando a pessoa entra com este e-mail já verificado
+    # (`gestao.servicos.aplicar_convite`); `aceito_em` fecha o convite.
+    """
+    CREATE TABLE IF NOT EXISTS convites (
+        id SERIAL PRIMARY KEY,
+        email TEXT NOT NULL,
+        municipio_id TEXT NOT NULL,
+        papel TEXT NOT NULL,
+        secretaria_id INT REFERENCES secretarias(id) ON DELETE SET NULL,
+        equipe_id INT REFERENCES equipes(id) ON DELETE SET NULL,
+        token TEXT NOT NULL UNIQUE,
+        convidado_por_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        criado_em TIMESTAMPTZ DEFAULT NOW(),
+        expira_em TIMESTAMPTZ NOT NULL,
+        aceito_em TIMESTAMPTZ,
+        aceito_por_id UUID REFERENCES users(id) ON DELETE SET NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_convites_email ON convites(lower(email)) WHERE aceito_em IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_convites_municipio ON convites(municipio_id) WHERE aceito_em IS NULL",
 ]
 
 # Backfills do v3, na ordem. Cada um só toca em quem ainda não foi convertido,

@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["SUBSTITUA_PELO_TEAM_ID.com.ciu.mobile"],
+        "components": [
+          { "/": "/chamado/*", "comment": "Detalhe público do chamado (linkPublicoDoChamado)" }
+        ]
+      }
+    ]
+  }
+}

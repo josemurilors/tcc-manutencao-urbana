@@ -6,7 +6,8 @@
  *
  * Erros de render têm dois níveis: `AppErrorBoundary` em volta dos providers
  * (último recurso) e o `ErrorBoundary` exportado abaixo, que o Expo Router
- * aplica por rota. A fila offline sincroniza daqui, para o app todo.
+ * aplica por rota. As filas offline (chamados do cidadão e ações da
+ * operação) sincronizam daqui, para o app todo, cada uma com seu indicador.
  */
 
 import {
@@ -25,12 +26,13 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 import { AceiteTermos } from '@/components/auth-flow';
 import { AppErrorBoundary, RouteErrorBoundary } from '@/components/error-boundary';
+import { IndicadorOperacaoGlobal } from '@/components/operacao/pendencias';
 import { SyncIndicatorGlobal } from '@/components/sync-indicator';
 import { Button } from '@/components/ui/button';
 import { AppText } from '@/components/ui/text';
 import { Layout, Radius, Spacing } from '@/constants/theme';
 import { AuthProvider, precisaAceitarTermos, useAuth } from '@/context/auth-context';
-import { OfflineSyncProvider } from '@/context/offline-sync-context';
+import { OfflineSyncProvider, OperacaoSyncProvider } from '@/context/offline-sync-context';
 import { ThemeProvider, useTheme } from '@/context/theme-context';
 import { ToastProvider, useToast } from '@/context/toast-context';
 import { contaApi } from '@/services/api-conta';
@@ -49,7 +51,9 @@ export default function RootLayout() {
             <AuthProvider>
               <ToastProvider>
                 <OfflineSyncProvider>
-                  <RootNavigator />
+                  <OperacaoSyncProvider>
+                    <RootNavigator />
+                  </OperacaoSyncProvider>
                 </OfflineSyncProvider>
               </ToastProvider>
             </AuthProvider>
@@ -111,6 +115,7 @@ function RootNavigator() {
         <Stack.Screen name="dev/catalogo" options={{ headerShown: false }} />
       </Stack>
       <SyncIndicatorGlobal />
+      <IndicadorOperacaoGlobal />
       <PortaoTermos />
     </NavigationThemeProvider>
   );

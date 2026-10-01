@@ -56,13 +56,20 @@ const CATEGORIAS_PADRAO: Categoria[] = [
 
 /** Até onde o ponto pode ser arrastado a partir de onde a pessoa está. */
 const LIMITE_AJUSTE_M = 50;
-/** Raio da busca de "já reportado": um pouco além do raio de duplicado do município (30 m). */
-const RAIO_PROXIMOS_M = 50;
 const MAX_DESCRICAO = 280;
 /** Espera o dedo parar de arrastar o mapa antes de geocodificar e buscar duplicados. */
 const ESPERA_MS = 600;
 
 type Endereco = { rua: string; bairro: string };
+
+/**
+ * Raio de duplicado da prefeitura do ponto, que o `GET /defeitos/proximos/`
+ * manda em cada item (`raio_duplicado_m`); backend antigo: a constante.
+ */
+function raioDuplicado(c: ChamadoProximo) {
+  const raio = (c as ChamadoProximo & { raio_duplicado_m?: number }).raio_duplicado_m;
+  return typeof raio === 'number' && raio > 0 ? raio : RAIO_DUPLICADO_M;
+}
 type Geocodificacao = 'buscando' | 'ok' | 'falhou';
 type Resultado =
   | { tipo: 'enviado'; defeito: Defeito }
@@ -134,7 +141,8 @@ export default function NovoChamadoScreen() {
     if (!coordenadaValida) return;
     let cancelado = false;
     apiCidadao
-      .proximos(pontoEstavel.latitude, pontoEstavel.longitude, { raio: RAIO_PROXIMOS_M })
+      // Sem ?raio=: o backend busca no raio de duplicado da prefeitura do ponto.
+      .proximos(pontoEstavel.latitude, pontoEstavel.longitude)
       .then((itens) => {
         if (!cancelado) setResProximos({ chave: chaveProximos, estado: { tipo: 'ok', itens } });
       })
@@ -197,7 +205,7 @@ export default function NovoChamadoScreen() {
         (c) =>
           statusAberto(c.status) &&
           c.categoria.toLowerCase() === categoria.toLowerCase() &&
-          c.distancia_m <= RAIO_DUPLICADO_M,
+          c.distancia_m <= raioDuplicado(c),
       )
     : undefined;
   const foraDoLimite = distanciaDaOrigem(origem, ponto) > LIMITE_AJUSTE_M;

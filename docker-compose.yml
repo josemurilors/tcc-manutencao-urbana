@@ -93,7 +93,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    environment:
+    environment: &backend-env
       - DJANGO_SETTINGS_MODULE=core.settings.production
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
@@ -112,6 +112,8 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - EXPO_PUSH_ENABLED=${EXPO_PUSH_ENABLED:-1}
+      - EXPO_ACCESS_TOKEN=${EXPO_ACCESS_TOKEN:-}
       - GOOGLE_CLIENT_ID_WEB=${GOOGLE_CLIENT_ID_WEB:-}
       - GOOGLE_CLIENT_ID_ANDROID=${GOOGLE_CLIENT_ID_ANDROID:-}
       - GOOGLE_CLIENT_ID_IOS=${GOOGLE_CLIENT_ID_IOS:-}
@@ -139,6 +141,32 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
+    restart: unless-stopped
+
+  # Agendador: mesma imagem do backend rodando `entrypoint.sh agendador`
+  # (alertas_sla de hora em hora; resumo_semanal às segundas, 8h, America/Sao_Paulo).
+  # Logs: docker compose logs -f scheduler
+  scheduler:
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
+    command: ["agendador"]
+    environment: *backend-env
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     restart: unless-stopped
 
   ia:

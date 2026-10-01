@@ -194,7 +194,7 @@ export function FotoCampo({
     <View style={styles.foto}>
       <AppText variant="label">
         {rotulo}
-        {obrigatoria ? ' (obrigatória)' : ''}
+        {obrigatoria ? ' (obrigatória)' : ' (opcional)'}
       </AppText>
       {evidencia ? (
         <View style={styles.previa}>

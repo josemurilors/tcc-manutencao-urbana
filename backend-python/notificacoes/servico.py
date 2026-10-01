@@ -136,6 +136,17 @@ def _corpo_status(defeito, evento, para):
     return resposta or evento.texto or CORPOS_STATUS.get(para, '')
 
 
+def _falta_avaliar(defeito):
+    """
+    O autor ainda não avaliou este ciclo de resolução: nunca avaliou, ou a
+    avaliação é de antes da resolução atual (chamado reaberto e resolvido de
+    novo — vale uma avaliação nova, como em `avaliar`).
+    """
+    if defeito.avaliacao_nota is None or defeito.avaliado_em is None:
+        return True
+    return bool(defeito.resolvido_em and defeito.avaliado_em < defeito.resolvido_em)
+
+
 def _ao_status(defeito, evento):
     para = evento.para_status or defeito.status
     frase = FRASES_STATUS.get(para)
@@ -147,7 +158,7 @@ def _ao_status(defeito, evento):
     apoiadores = _apoiadores(defeito) - {defeito.usuario_id, evento.autor_id}
     criadas = []
     if autor:
-        if para == 'concluido' and defeito.avaliacao_nota is None:
+        if para == 'concluido' and _falta_avaliar(defeito):
             criadas += notificar(
                 [autor], 'avaliar', f'Seu chamado {ref} foi resolvido. Como foi o atendimento?',
                 f'{corpo} Avalie o serviço: sua resposta ajuda a prefeitura a melhorar.'.strip(), defeito,

@@ -1,6 +1,7 @@
 /**
- * Blocos de leitura da ficha de atendimento: evidências (antes/depois, com
- * GPS) e o histórico com as notas internas da equipe.
+ * Blocos de leitura da ficha de atendimento: as fotos do chamado (um bloco
+ * só, do cidadão, antes e depois, com GPS e autor) e o histórico com as
+ * notas internas da equipe.
  *
  * Os dois vêm de rotas próprias e carregam sozinhos; falha em um não derruba
  * a ficha — mostra o erro ali mesmo, com "Tentar de novo".
@@ -13,20 +14,27 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ImageViewer } from '@/components/ui/image-viewer';
+import { fonteDaImagem, ImageViewer } from '@/components/ui/image-viewer';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AppText } from '@/components/ui/text';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing, type Tom } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
 import { apiOperacao } from '@/services/api-operacao';
 import type { DefeitoEvento } from '@/types';
-import type { AnexoChamado, IdChamado } from '@/types/operacao';
-import { formatarDataHora } from '@/utils/format';
+import type { ChamadoDetalhe } from '@/types/cidadao';
+import type { AnexoChamado, ChamadoFila } from '@/types/operacao';
+import { formatarDataHora, parseImagensExtra } from '@/utils/format';
 
 const ROTULO_ANEXO: Record<AnexoChamado['tipo'], string> = {
   cidadao: 'Do cidadão',
   antes: 'Antes',
   depois: 'Depois',
+};
+
+const TOM_ANEXO: Record<AnexoChamado['tipo'], Tom> = {
+  cidadao: 'neutral',
+  antes: 'warning',
+  depois: 'success',
 };
 
 function useCarga<T>(carregar: () => Promise<T>, versao: number) {
@@ -73,54 +81,136 @@ function Erro({ mensagem, onRetry }: { mensagem: string; onRetry: () => void }) 
   );
 }
 
-/** Fotos de evidência. `versao` muda quando a ficha registra uma nova. */
-export function EvidenciasChamado({ id, versao }: { id: IdChamado; versao: number }) {
+/** Uma foto do bloco, já com o que a equipe precisa ler sem ampliar. */
+type FotoFicha = {
+  chave: string;
+  uri: string;
+  tipo: AnexoChamado['tipo'];
+  /** `ponto` = local informado no reporte (a foto original não tem GPS próprio). */
+  gps: 'foto' | 'ponto' | null;
+  autor: string | null;
+  quando: string | null;
+};
+
+function absoluta(uri: string | null | undefined) {
+  return uri ? fonteDaImagem(uri).uri : null;
+}
+
+/**
+ * Junta a foto do reporte (campos do detalhe) com os anexos. Fotos antigas,
+ * de antes dos anexos, só entram quando não há anexo do mesmo tipo — o
+ * backend ainda grava uma cópia em `imagens_extra`/`foto_resolucao` e elas
+ * apareceriam duas vezes.
+ */
+function montarFotos(c: ChamadoFila, anexos: AnexoChamado[]): FotoFicha[] {
+  const d = c as ChamadoFila & Partial<ChamadoDetalhe>;
+  const fotos: FotoFicha[] = [];
+  const original = absoluta(d.imagem_thumbnail ?? d.imagem_url);
+  if (original) {
+    fotos.push({
+      chave: 'original',
+      uri: original,
+      tipo: 'cidadao',
+      gps: 'ponto',
+      autor: d.autor_nome ?? null,
+      quando: d.criado_em ?? null,
+    });
+  }
+  if (!anexos.some((a) => a.tipo === 'cidadao')) {
+    parseImagensExtra(d.imagens_extra).forEach((uri, i) =>
+      fotos.push({ chave: `extra-${i}`, uri, tipo: 'cidadao', gps: null, autor: d.autor_nome ?? null, quando: null }),
+    );
+  }
+  const ordenados = [...anexos].sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  for (const a of ordenados) {
+    fotos.push({
+      chave: `anexo-${a.id}`,
+      uri: absoluta(a.url) ?? a.url,
+      tipo: a.tipo,
+      gps: a.latitude != null && a.longitude != null ? 'foto' : null,
+      autor: a.autor_nome || null,
+      quando: a.criado_em,
+    });
+  }
+  const resolucao = absoluta(d.foto_resolucao_url);
+  if (resolucao && !anexos.some((a) => a.tipo === 'depois')) {
+    fotos.push({ chave: 'resolucao', uri: resolucao, tipo: 'depois', gps: null, autor: null, quando: d.resolvido_em ?? null });
+  }
+  return fotos;
+}
+
+function rotuloGps(gps: FotoFicha['gps']) {
+  if (gps === 'foto') return 'com GPS';
+  if (gps === 'ponto') return 'no ponto do reporte';
+  return 'sem GPS';
+}
+
+/**
+ * Bloco único de fotos da ficha. `versao` muda quando a ficha registra uma
+ * foto nova (antes/depois) e os anexos recarregam.
+ */
+export function FotosChamado({ chamado, versao }: { chamado: ChamadoFila; versao: number }) {
   const colors = useColors();
+  const id = chamado.id;
   const carregar = useCallback(() => apiOperacao.anexos(id), [id]);
   const { dados, erro, tentarDeNovo } = useCarga(carregar, versao);
   const [aberta, setAberta] = useState<string | null>(null);
 
-  if (erro) return <Erro mensagem={`Evidências: ${erro}`} onRetry={tentarDeNovo} />;
-  if (!dados) return <Skeleton height={96} />;
-  if (dados.length === 0) {
-    return (
-      <AppText variant="caption" tone="muted">
-        Nenhuma foto de evidência ainda.
-      </AppText>
-    );
-  }
+  const fotos = montarFotos(chamado, dados ?? []);
 
   return (
-    <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fotos}>
-        {dados.map((a) => {
-          const fonte = apiOperacao.fonteDoAnexo(a);
-          return (
-            <Pressable
-              key={a.id}
-              onPress={() => setAberta(fonte.uri)}
-              accessibilityRole="imagebutton"
-              accessibilityLabel={`Foto ${ROTULO_ANEXO[a.tipo]}, ${formatarDataHora(a.criado_em)}${
-                a.latitude != null ? ', com localização' : ', sem localização'
-              }. Toque para ampliar`}
-              style={styles.foto}>
-              <Image source={fonte} style={[styles.miniatura, { backgroundColor: colors.surfaceSunken }]} contentFit="cover" />
-              <Badge
-                label={ROTULO_ANEXO[a.tipo]}
-                tone={a.tipo === 'depois' ? 'success' : a.tipo === 'antes' ? 'warning' : 'neutral'}
-                icon={a.latitude != null ? 'location' : 'location-outline'}
-              />
-              <AppText variant="caption" tone="muted" numberOfLines={1}>
-                {formatarDataHora(a.criado_em)}
-              </AppText>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-      {/* O visualizador não manda o token: amplia os anexos de chamado público, que a
-          rota de imagem serve sem login (contrato §7.1). */}
+    <View style={styles.bloco}>
+      {erro ? <Erro mensagem={`Fotos da equipe: ${erro}`} onRetry={tentarDeNovo} /> : null}
+      {!dados && !erro ? (
+        <Skeleton height={140} />
+      ) : fotos.length === 0 ? (
+        <AppText variant="caption" tone="muted">
+          Nenhuma foto ainda. Registre o antes e o depois com a câmera: a foto vai com o local do GPS.
+        </AppText>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fotos}>
+          {fotos.map((f) => {
+            const rotulo = ROTULO_ANEXO[f.tipo];
+            const meta = [f.autor, f.quando ? formatarDataHora(f.quando) : null].filter(Boolean).join(' · ');
+            return (
+              <Pressable
+                key={f.chave}
+                onPress={() => setAberta(f.uri)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={`Foto ${rotulo}, ${rotuloGps(f.gps)}${meta ? `, ${meta}` : ''}. Toque para ampliar`}
+                style={styles.foto}>
+                <Image
+                  source={fonteDaImagem(f.uri)}
+                  style={[styles.miniatura, { backgroundColor: colors.surfaceSunken }]}
+                  contentFit="cover"
+                  transition={150}
+                />
+                <Badge
+                  label={rotulo}
+                  tone={TOM_ANEXO[f.tipo]}
+                  icon={f.gps === 'foto' ? 'location' : f.gps === 'ponto' ? 'pin-outline' : 'location-outline'}
+                />
+                <AppText variant="caption" tone={f.gps ? 'secondary' : 'warning'} numberOfLines={1}>
+                  {rotuloGps(f.gps)}
+                </AppText>
+                {f.autor ? (
+                  <AppText variant="caption" tone="secondary" numberOfLines={1}>
+                    {f.autor}
+                  </AppText>
+                ) : null}
+                {f.quando ? (
+                  <AppText variant="caption" tone="muted" numberOfLines={1}>
+                    {formatarDataHora(f.quando)}
+                  </AppText>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+      {/* Anexo de chamado restrito exige o token: o visualizador o manda para a nossa API. */}
       <ImageViewer uri={aberta} onClose={() => setAberta(null)} />
-    </>
+    </View>
   );
 }
 
@@ -137,7 +227,7 @@ const ICONE_EVENTO: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 /** Histórico do chamado com as notas internas destacadas (só a equipe as recebe). */
-export function HistoricoChamado({ id, versao }: { id: IdChamado; versao: number }) {
+export function HistoricoChamado({ id, versao }: { id: ChamadoFila['id']; versao: number }) {
   const colors = useColors();
   const carregar = useCallback(() => apiOperacao.eventos(id), [id]);
   const { dados, erro, tentarDeNovo } = useCarga<DefeitoEvento[]>(carregar, versao);
@@ -199,6 +289,9 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  bloco: {
+    gap: Spacing[2],
+  },
   erro: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -208,12 +301,12 @@ const styles = StyleSheet.create({
     gap: Spacing[3],
   },
   foto: {
-    width: 120,
+    width: 128,
     gap: Spacing[1],
   },
   miniatura: {
-    width: 120,
-    height: 96,
+    width: 128,
+    height: 104,
     borderRadius: Radius.md,
   },
   eventos: {

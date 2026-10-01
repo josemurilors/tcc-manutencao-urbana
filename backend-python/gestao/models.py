@@ -107,3 +107,36 @@ class AuditLog(models.Model):
         db_table = 'audit_log'
         managed = False
         ordering = ['-criado_em']
+
+
+class Convite(models.Model):
+    """
+    Convite para a equipe de quem ainda não tem conta. Fica pendente até a
+    pessoa entrar com este e-mail verificado (`servicos.aplicar_convite`).
+    """
+    id = models.AutoField(primary_key=True)
+    email = models.TextField()
+    municipio_id = models.CharField(max_length=20)
+    papel = models.TextField()
+    secretaria_id = models.IntegerField(null=True, blank=True)
+    equipe_id = models.IntegerField(null=True, blank=True)
+    token = models.TextField(unique=True)
+    convidado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='convidado_por_id',
+    )
+    criado_em = models.DateTimeField(default=timezone.now)
+    expira_em = models.DateTimeField()
+    aceito_em = models.DateTimeField(null=True, blank=True)
+    aceito_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='aceito_por_id',
+    )
+
+    class Meta:
+        db_table = 'convites'
+        managed = False
+
+    @property
+    def expirado(self):
+        return self.expira_em <= timezone.now()

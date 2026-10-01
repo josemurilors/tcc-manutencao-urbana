@@ -10,8 +10,6 @@
  */
 
 import Constants from 'expo-constants';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 
 import type { Caixa } from '@/utils/rarear';
@@ -20,7 +18,6 @@ import type {
   AuthResponse,
   Categoria,
   VisaoMunicipio,
-  Operacao,
   Defeito,
   Estatisticas,
   Municipio,
@@ -354,9 +351,6 @@ export const api = {
       publico: true,
     }),
 
-  /** Fila de operação: chamados do município do operador (403 sem vínculo). */
-  operacao: () => request<Operacao>('/api/v1/defeitos/operacao/'),
-
   updateDefeito: (id: number, data: Record<string, unknown>) =>
     request<Defeito>(`/api/v1/defeitos/${id}/`, { method: 'PATCH', body: data }),
 
@@ -462,27 +456,6 @@ export const api = {
       method: 'PATCH',
       body: { ids, status },
     }),
-
-  /**
-   * Baixa a Ordem de Serviço em PDF para o cache e abre a folha de
-   * compartilhamento do sistema (equivalente ao download do navegador).
-   */
-  gerarOS: async (id: number) => {
-    const destino = new File(Paths.cache, `OS-${id}.pdf`);
-    const arquivo = await File.downloadFileAsync(
-      `${API_URL}/api/v1/defeitos/${id}/ordem_servico/`,
-      destino,
-      { headers: baseHeaders(), idempotent: true },
-    );
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(arquivo.uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: `Ordem de Serviço #${id}`,
-        UTI: 'com.adobe.pdf',
-      });
-    }
-    return arquivo.uri;
-  },
 
   adminListUsers: () => request<User[]>('/api/v1/auth/admin/users/'),
 

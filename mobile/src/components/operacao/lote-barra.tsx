@@ -6,7 +6,8 @@
  *   triagem, programado ou em execução.
  * - Gestor+: também **Atribuir** a equipe/servidor e **Concluir** em lote
  *   (ex.: fechamento de mutirão). Rejeitar fica fora: exige motivo e é decisão
- *   chamado a chamado.
+ *   chamado a chamado. Se a prefeitura exige foto ao concluir, a folha avisa
+ *   que só fecham os que já têm a foto do depois (o backend recusa os outros).
  *
  * O backend aplica item a item e devolve `{ok, erros}`; os erros aparecem
  * numa folha com o motivo de cada um, nada fica escondido.
@@ -43,6 +44,8 @@ type Props = {
   selecionados: ChamadoFila[];
   meuId: string | null;
   gestor: boolean;
+  /** A prefeitura exige a foto do depois para concluir (padrão: sim). */
+  exigirFoto?: boolean;
   equipes: EquipeOperacao[];
   onRecarregarEquipes: () => void;
   onLimpar: () => void;
@@ -53,6 +56,7 @@ export function LoteBarra({
   selecionados,
   meuId,
   gestor,
+  exigirFoto = true,
   equipes,
   onRecarregarEquipes,
   onLimpar,
@@ -189,6 +193,12 @@ export function LoteBarra({
           </Button>
         }>
         <OpcoesRadio rotulo="Novo status" opcoes={opcoesStatus} valor={para} onChange={setPara} />
+        {para === 'concluido' && exigirFoto ? (
+          <AppText variant="caption" tone="warning">
+            A prefeitura exige a foto do serviço para concluir: só fecham os chamados que já têm a foto do
+            depois. Os outros voltam com o motivo.
+          </AppText>
+        ) : null}
       </BottomSheet>
 
       <AtribuirSheet

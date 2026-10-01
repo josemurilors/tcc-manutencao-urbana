@@ -80,6 +80,23 @@ class TestAvisosDoChamado:
         assert aviso.corpo.startswith('Entulho recolhido.')
         assert [a.tipo for a in _avisos(apoiador)] == ['status']
 
+    def test_reabertura_pede_avaliacao_de_novo(self):
+        """Avaliou, reabriu e foi resolvido de novo: o aviso volta a ser `avaliar`."""
+        cid, autor = _usuario()
+        op, _ = _usuario('operador', CIDADE)
+        gestor, _ = _usuario('gestor', CIDADE)
+        d = _chamado(cid)
+        _status(op, d['id'], status='concluido')
+        resp = cid.post(reverse('defeitos-avaliar', args=[d['id']]), {'nota': 2}, format='json')
+        assert resp.status_code == 200, resp.data
+        resp = gestor.post(reverse('defeitos-reabrir', args=[d['id']]), {'motivo': 'O buraco voltou.'}, format='json')
+        assert resp.status_code == 200, resp.data
+        Notificacao.objects.filter(usuario=autor).delete()
+
+        _status(op, d['id'], status='concluido')
+
+        assert [a.tipo for a in _avisos(autor)] == ['avaliar']
+
     def test_rejeicao_por_duplicado_explica_o_motivo(self):
         cid, autor = _usuario()
         gestor, _ = _usuario('gestor', CIDADE)

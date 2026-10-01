@@ -3,7 +3,8 @@
  *
  * Cada destino pede o que o fluxo exige e o que o mercado trata como mínimo:
  * - **Concluir**: checklist da categoria, foto do "depois" pela câmera com GPS
- *   e resposta ao cidadão (com respostas prontas);
+ *   (obrigatória só quando a prefeitura exige, `parametros.exigir_foto_conclusao`
+ *   — padrão: exige) e resposta ao cidadão (com respostas prontas);
  * - **Rejeitar** (gestor+): motivo obrigatório; "duplicado" exige escolher o
  *   chamado original (busca por protocolo ou texto) e a resposta ao cidadão;
  * - **Reabrir** (gestor+): motivo obrigatório;
@@ -53,11 +54,13 @@ type Props = {
   /** Destino; `null` = folha fechada. */
   para: string | null;
   respostas: RespostaPadrao[];
+  /** A prefeitura exige a foto do depois para concluir (padrão: sim). */
+  exigirFoto?: boolean;
   onClose: () => void;
   onFeito: (r: ResultadoTransicao) => void;
 };
 
-export function TransicaoSheet({ chamado, para, respostas, onClose, onFeito }: Props) {
+export function TransicaoSheet({ chamado, para, respostas, exigirFoto = true, onClose, onFeito }: Props) {
   if (!para) return null;
   // `key` zera o formulário a cada abertura.
   return (
@@ -66,13 +69,21 @@ export function TransicaoSheet({ chamado, para, respostas, onClose, onFeito }: P
       chamado={chamado}
       para={para}
       respostas={respostas}
+      exigirFoto={exigirFoto}
       onClose={onClose}
       onFeito={onFeito}
     />
   );
 }
 
-function Formulario({ chamado, para, respostas, onClose, onFeito }: Props & { para: string }) {
+function Formulario({
+  chamado,
+  para,
+  respostas,
+  exigirFoto = true,
+  onClose,
+  onFeito,
+}: Props & { para: string }) {
   const colors = useColors();
   const toast = useToast();
   const checklist = chamado.checklist ?? [];
@@ -93,7 +104,7 @@ function Formulario({ chamado, para, respostas, onClose, onFeito }: Props & { pa
 
   // O que falta, em frases: aparece no rodapé e explica o botão desabilitado.
   const faltando: string[] = [];
-  if (concluir && !evidencia) faltando.push('a foto do serviço concluído');
+  if (concluir && exigirFoto && !evidencia) faltando.push('a foto do serviço concluído');
   if (concluir && marcados.size < checklist.length) faltando.push('todos os itens do checklist');
   if (rejeitar && !motivo) faltando.push('o motivo');
   if (rejeitar && motivo === 'duplicado' && !original) faltando.push('o chamado original');
@@ -178,7 +189,12 @@ function Formulario({ chamado, para, respostas, onClose, onFeito }: Props & { pa
               <ChecklistCampo itens={checklist} marcados={marcados} onChange={setMarcados} />
             </View>
           ) : null}
-          <FotoCampo rotulo="Foto do depois" obrigatoria evidencia={evidencia} onChange={setEvidencia} />
+          <FotoCampo
+            rotulo="Foto do depois"
+            obrigatoria={exigirFoto}
+            evidencia={evidencia}
+            onChange={setEvidencia}
+          />
         </>
       ) : null}
 

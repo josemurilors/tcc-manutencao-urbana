@@ -3,7 +3,6 @@ import json
 from datetime import timedelta
 
 from django.db import transaction
-from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
@@ -21,7 +20,7 @@ from .serializers import (
     DefeitoCreateSerializer, DefeitoUpdateSerializer,
 )
 
-# Operar (assumir, mudar status, gerar OS) é restrito ao município a que o
+# Operar (assumir, mudar status) é restrito ao município a que o
 # operador está vinculado — sem exceção: todo operador, inclusive o super
 # admin, opera numa única cidade (`permissoes.pode_operar`). Como cidadão, o
 # mesmo usuário continua livre para reportar/apoiar onde quiser.
@@ -146,7 +145,7 @@ CAMPOS_EDITAVEIS_AUTOR = {'descricao'}
 CAMPOS_EDITAVEIS_EQUIPE = {'titulo', 'descricao', 'rua', 'bairro', 'prioridade', 'previsao_conclusao'}
 
 # Ações de listagem: não carregam as colunas BYTEA (foto e foto de resolução).
-ACOES_LISTAGEM = ('list', 'meus', 'apoiados', 'operacao', 'municipio', 'area')
+ACOES_LISTAGEM = ('list', 'meus', 'apoiados', 'municipio', 'area')
 
 
 class DefeitoViewSet(viewsets.ModelViewSet):
@@ -173,7 +172,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # A listagem é a mesma para todo mundo: o vínculo do operador com um
-        # município só restringe a *operação* (ver `operacao` e `_pode_operar`),
+        # município só restringe a *operação* (app `operacao` e `permissoes.pode_operar`),
         # nunca o que ele enxerga como cidadão.
         #
         # Exceção: chamados `restrita` (autor em quarentena, ver `regras.py`)
@@ -210,7 +209,7 @@ class DefeitoViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('create', 'apoiar', 'meus', 'apoiados', 'apoiei', 'atender', 'status',
                            'sinalizar', 'sinalizei', 'progresso',
-                           'batch_status', 'ordem_servico', 'operacao',
+                           'batch_status',
                            'update', 'partial_update', 'destroy', 'anexar',
                            'avaliar', 'reabrir', 'imagem'):
             return (permissions.IsAuthenticated(),)
@@ -296,18 +295,28 @@ class DefeitoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def apoiar(self, request, pk=None):
+        """
+        "Eu também": liga/desliga o apoio do usuário. O apoio de outra pessoa
+        que não o autor vira evento `apoio` no histórico (público, sem nome;
+        o app agrega em "N pessoas confirmaram"). Desfazer o apoio apaga o
+        evento dele, para a contagem do histórico bater com a de apoios.
+        """
         suspenso = _suspenso(request.user)
         if suspenso is not None:
             return suspenso
         defeito = self.get_object()
-        apoio, created = Apoio.objects.get_or_create(
-            usuario=request.user, defeito=defeito,
-            defaults={'criado_em': timezone.now()},
-        )
-        if not created:
-            apoio.delete()
-            return Response({'apoiado': False}, status=status.HTTP_200_OK)
-        regras.aplicar_confirmacao(defeito, request.user)
+        with transaction.atomic():
+            apoio, created = Apoio.objects.get_or_create(
+                usuario=request.user, defeito=defeito,
+                defaults={'criado_em': timezone.now()},
+            )
+            if not created:
+                apoio.delete()
+                DefeitoEvento.objects.filter(defeito=defeito, tipo='apoio', autor=request.user).delete()
+                return Response({'apoiado': False}, status=status.HTTP_200_OK)
+            if defeito.usuario_id != request.user.id:
+                fluxo.registrar_evento(defeito, 'apoio', request.user)
+            regras.aplicar_confirmacao(defeito, request.user)
         return Response({'apoiado': True}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -601,23 +610,6 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             fluxo.registrar_evento(defeito, 'anexo', user, dados={'tipo': tipo})
         return Response(self._detalhe(defeito))
 
-    @action(detail=False, methods=['get'])
-    def operacao(self, request):
-        """
-        Fila do operador: todos os chamados do município a que ele está
-        vinculado (sem paginação), mais o município em si para o cabeçalho.
-        """
-        user = request.user
-        if not permissoes.eh_equipe(user):
-            return Response({'error': 'Permissao negada'}, status=status.HTTP_403_FORBIDDEN)
-        if not user.municipio_id:
-            return Response({'error': SEM_MUNICIPIO}, status=status.HTTP_403_FORBIDDEN)
-        qs = self.get_queryset().filter(municipio_id=user.municipio_id)
-        return Response({
-            'municipio': _municipio_por_codigo(user.municipio_id),
-            'defeitos': self._lista(qs[:2000]),
-        })
-
     @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,))
     def municipio(self, request):
         """
@@ -794,7 +786,9 @@ class DefeitoViewSet(viewsets.ModelViewSet):
         raio e os resolvidos há até `PROXIMOS_RESOLVIDOS_DIAS` dias ("isso já
         foi consertado"). Raio: ?raio= (até `PROXIMOS_RAIO_MAX_M`), senão o
         `raio_duplicado_m` da prefeitura do ponto, senão `PROXIMOS_RAIO_PADRAO_M`.
-        ?categoria= aceita o id ou o nome.
+        Cada item traz `raio_duplicado_m` (o da prefeitura, mesmo com ?raio=),
+        repetido nos cabeçalhos `X-Raio-Duplicado-M` e `X-Raio-M` (raio da
+        busca) para quando a lista vem vazia. ?categoria= aceita o id ou o nome.
         """
         from django.db import connection
         from gestao.models import MunicipioConfig
@@ -811,16 +805,21 @@ class DefeitoViewSet(viewsets.ModelViewSet):
             except ValueError:
                 return Response({'detail': 'raio deve ser um número em metros.'},
                                 status=status.HTTP_400_BAD_REQUEST)
+        # Raio de duplicado da prefeitura do ponto: vai em cada item e no
+        # cabeçalho `X-Raio-Duplicado-M` (o app usa no "é o mesmo problema?"),
+        # mesmo quando ?raio= troca o raio da busca.
+        raio_duplicado = PROXIMOS_RAIO_PADRAO_M
+        municipio = municipio_do_ponto(lat, lng)
+        if municipio:
+            configurado = (
+                MunicipioConfig.objects.filter(municipio_id=municipio['codigo'])
+                .values_list('raio_duplicado_m', flat=True).first()
+            )
+            if configurado:
+                raio_duplicado = configurado
+        raio_duplicado = min(max(raio_duplicado, 1), PROXIMOS_RAIO_MAX_M)
         if raio is None:
-            raio = PROXIMOS_RAIO_PADRAO_M
-            municipio = municipio_do_ponto(lat, lng)
-            if municipio:
-                configurado = (
-                    MunicipioConfig.objects.filter(municipio_id=municipio['codigo'])
-                    .values_list('raio_duplicado_m', flat=True).first()
-                )
-                if configurado:
-                    raio = configurado
+            raio = raio_duplicado
         raio = min(max(raio, 1), PROXIMOS_RAIO_MAX_M)
 
         params = {
@@ -867,9 +866,10 @@ class DefeitoViewSet(viewsets.ModelViewSet):
                 'latitude': r[6], 'longitude': r[7],
                 'criado_em': r[8], 'resolvido_em': r[9],
                 'distancia_m': round(r[10], 1), 'total_apoios': r[11],
+                'raio_duplicado_m': raio_duplicado,
             }
             for r in linhas
-        ])
+        ], headers={'X-Raio-Duplicado-M': str(raio_duplicado), 'X-Raio-M': str(round(raio))})
 
     @action(detail=False, methods=['get'], permission_classes=(permissions.AllowAny,),
             url_path=r'protocolo/(?P<numero>[^/]+)', url_name='protocolo')
@@ -1053,18 +1053,6 @@ class DefeitoViewSet(viewsets.ModelViewSet):
     def apoiei(self, request):
         ids = Apoio.objects.filter(usuario=request.user).values_list('defeito_id', flat=True)
         return Response({'ids': [str(i) for i in ids]})
-
-    @action(detail=True, methods=['get'])
-    def ordem_servico(self, request, pk=None):
-        defeito = self.get_object()
-        if not permissoes.pode_operar(request.user, defeito):
-            return _negado(request.user)
-        from services.ordem_servico import gerar_ordem_servico
-        pdf_bytes = gerar_ordem_servico(defeito)
-        id_curto = defeito.protocolo or str(defeito.id)[:8]
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="OS-{id_curto}.pdf"'
-        return response
 
     @action(detail=False, methods=['patch'])
     def batch_status(self, request):

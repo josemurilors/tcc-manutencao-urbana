@@ -1,8 +1,12 @@
 /**
- * Aba Conta — hub de configurações: cartão de perfil no topo e submenus
- * (Meus chamados, Notificações, Conta, Preferências e, para gestor ou mais,
- * a Administração do município). Os formulários vivem
- * nas telas de `app/ajustes/`; deslogado, a aba vira o convite para entrar.
+ * Aba Conta — hub de configurações: cartão de perfil no topo e três grupos:
+ *
+ * - Minha participação: meus chamados, consultar protocolo, notificações.
+ * - Prefeitura (só equipe): operação; painel e administração para gestor+.
+ * - Conta e privacidade: dados da conta, preferências, termos e privacidade.
+ *
+ * Os formulários vivem nas telas de `app/ajustes/`; deslogado, a aba vira o
+ * convite para entrar.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -13,6 +17,7 @@ import { AuthWelcome } from '@/components/auth-welcome';
 import { ROTULO_PAPEL, TOM_PAPEL, usePapel } from '@/components/gestao/papeis';
 import { Badge } from '@/components/ui/badge';
 import { MenuRow } from '@/components/ui/menu-row';
+import { AppText } from '@/components/ui/text';
 import { Card } from '@/components/ui/screen';
 import { SubScreen } from '@/components/ui/sub-screen';
 import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
@@ -109,52 +114,6 @@ export default function ContaScreen() {
         </Card>
       </View>
 
-      <View style={styles.secao}>
-        <Card>
-          <MenuRow
-            icon="megaphone"
-            label="Meus chamados"
-            detail="Tudo que você reportou e a situação de cada um"
-            onPress={() => router.push('/meus-chamados')}
-          />
-          <MenuRow
-            icon="notifications"
-            label="Notificações"
-            detail="Avisos sobre os seus chamados"
-            onPress={() => router.push('/notificacoes' as Href)}
-          />
-          <MenuRow
-            icon="person"
-            label="Conta"
-            detail="Nome, senha, verificação e sair"
-            onPress={() => router.push('/ajustes/perfil')}
-          />
-          <MenuRow
-            icon="options"
-            label="Preferências"
-            detail="Tema e idioma"
-            onPress={() => router.push('/ajustes/preferencias')}
-          />
-        </Card>
-      </View>
-
-      {ehGestor ? (
-        <View style={styles.secao}>
-          <Card>
-            <MenuRow
-              icon="business"
-              label={
-                user?.municipio?.nome
-                  ? `Administração — ${user.municipio.nome}`
-                  : 'Administração do município'
-              }
-              detail="Equipe, secretarias, categorias e prazos, moderação e auditoria"
-              onPress={() => router.push('/admin' as Href)}
-            />
-          </Card>
-        </View>
-      ) : null}
-
       {!user?.email_verificado ? (
         <View style={styles.secao}>
           <Card style={{ borderColor: colors.gold500 }}>
@@ -168,13 +127,108 @@ export default function ContaScreen() {
           </Card>
         </View>
       ) : null}
+
+      <View style={styles.secao}>
+        <TituloSecao>Minha participação</TituloSecao>
+        <Card>
+          <MenuRow
+            icon="megaphone"
+            label="Meus chamados"
+            detail="Tudo que você reportou e a situação de cada um"
+            onPress={() => router.push('/meus-chamados')}
+          />
+          <MenuRow
+            icon="search"
+            label="Consultar protocolo"
+            detail="Acompanhe um chamado pelo número, mesmo aberto por outra pessoa ou pelo 156"
+            onPress={() => router.push('/protocolo')}
+          />
+          <MenuRow
+            icon="notifications"
+            label="Notificações"
+            detail="Avisos sobre os seus chamados"
+            onPress={() => router.push('/notificacoes' as Href)}
+          />
+        </Card>
+      </View>
+
+      {ehEquipe ? (
+        <View style={styles.secao}>
+          <TituloSecao>
+            {user?.municipio?.nome ? `Prefeitura — ${user.municipio.nome}` : 'Prefeitura'}
+          </TituloSecao>
+          <Card>
+            <MenuRow
+              icon="construct"
+              label="Operação"
+              detail="Fila de chamados para assumir e atender"
+              onPress={() => router.push('/(tabs)/operacao' as Href)}
+            />
+            {ehGestor ? (
+              <>
+                <MenuRow
+                  icon="stats-chart"
+                  label="Painel"
+                  detail="Indicadores de atendimento, prazos e satisfação"
+                  onPress={() => router.push('/(tabs)/painel' as Href)}
+                />
+                <MenuRow
+                  icon="business"
+                  label="Administração do município"
+                  detail="Equipe, secretarias, categorias e prazos, respostas-padrão, moderação e auditoria"
+                  onPress={() => router.push('/admin' as Href)}
+                />
+              </>
+            ) : null}
+          </Card>
+        </View>
+      ) : null}
+
+      <View style={styles.secao}>
+        <TituloSecao>Conta e privacidade</TituloSecao>
+        <Card>
+          <MenuRow
+            icon="person"
+            label="Conta"
+            detail="Nome, senha, verificação, seus dados e sair"
+            onPress={() => router.push('/ajustes/perfil')}
+          />
+          <MenuRow
+            icon="options"
+            label="Preferências"
+            detail="Tema e idioma"
+            onPress={() => router.push('/ajustes/preferencias')}
+          />
+          <MenuRow
+            icon="document-text"
+            label="Termos de Uso"
+            onPress={() => router.push('/termos' as Href)}
+          />
+          <MenuRow
+            icon="lock-closed"
+            label="Política de Privacidade"
+            onPress={() => router.push('/privacidade' as Href)}
+          />
+        </Card>
+      </View>
     </SubScreen>
+  );
+}
+
+function TituloSecao({ children }: { children: React.ReactNode }) {
+  return (
+    <AppText variant="label" tone="muted" accessibilityRole="header" style={styles.tituloSecao}>
+      {children}
+    </AppText>
   );
 }
 
 const styles = StyleSheet.create({
   secao: {
     gap: Spacing[2],
+  },
+  tituloSecao: {
+    paddingHorizontal: Spacing[1],
   },
   perfil: {
     flexDirection: 'row',

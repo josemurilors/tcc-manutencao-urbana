@@ -14,7 +14,10 @@ export const RAIOS_BUSCA_M = [200, 500, 1000, 2000] as const;
 export const RAIO_BUSCA_PADRAO_M = 500;
 
 /**
- * Raio em que o backend recusa um chamado da mesma categoria já aberto
- * (`DUPLICATE_CATEGORY_RADIUS_M`). O app usa o mesmo valor para avisar antes.
+ * Reserva do raio de duplicado. O valor que vale é o da prefeitura do ponto
+ * (`raio_duplicado_m`, configurável pela gestão), que o `GET /defeitos/proximos/`
+ * manda em cada item; este só é usado com backend antigo, que não o manda.
+ * É também o raio em que o backend recusa outro chamado da mesma categoria
+ * aberto (`DUPLICATE_CATEGORY_RADIUS_M`).
  */
 export const RAIO_DUPLICADO_M = 10;

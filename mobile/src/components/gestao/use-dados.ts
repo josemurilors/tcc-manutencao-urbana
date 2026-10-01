@@ -11,6 +11,7 @@
 import { useEffect, useEffectEvent, useState } from 'react';
 
 import { ehErroDeRede, mensagemDeErro } from './confirmar';
+import { useMunicipioGestao } from './municipio-gestao';
 import type { EstadoLista } from './use-lista-paginada';
 
 type Resultado<T> = { dados: T | null; estado: EstadoLista; erro: string };
@@ -21,6 +22,13 @@ export function useDados<T>(buscar: () => Promise<T>, ativo = true) {
   const [versao, setVersao] = useState(0);
 
   const buscarAgora = useEffectEvent(() => buscar());
+  // Trocar o município (super_admin) recarrega; os dados antigos saem da tela.
+  const municipio = useMunicipioGestao()?.codigo ?? '';
+  const [deMunicipio, setDeMunicipio] = useState(municipio);
+  if (deMunicipio !== municipio) {
+    setDeMunicipio(municipio);
+    setRes({ dados: null, estado: 'carregando', erro: '' });
+  }
 
   useEffect(() => {
     if (!ativo) return;
@@ -44,7 +52,7 @@ export function useDados<T>(buscar: () => Promise<T>, ativo = true) {
     return () => {
       cancelado = true;
     };
-  }, [ativo, versao]);
+  }, [ativo, versao, municipio]);
 
   return {
     dados: res.dados,

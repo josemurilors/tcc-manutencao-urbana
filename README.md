@@ -27,6 +27,7 @@
 - [Descrição do Projeto](#descrição-do-projeto)
 - [Status do Projeto](#status-do-projeto)
 - [Funcionalidades e Demonstração da Aplicação](#funcionalidades-e-demonstração-da-aplicação)
+- [Plataforma v3](#plataforma-v3)
 - [Acesso ao Projeto](#acesso-ao-projeto)
 - [App Mobile (Expo)](#app-mobile-expo)
 - [Tecnologias utilizadas](#tecnologias-utilizadas)
@@ -100,6 +101,137 @@ A aplicação está no ar e em uso contínuo em `tcc.josemurilors.com.br`. O bac
 ### Demonstração
 
 A aplicação está disponível ao vivo em: **[tcc.josemurilors.com.br](https://tcc.josemurilors.com.br)**
+
+## Plataforma v3
+
+A v3 transforma a Central num produto de zeladoria urbana para prefeituras
+(B2G): o cidadão reporta, a equipe de campo executa, a gestão acompanha
+prazos e resultados, e a cidade publica os números. O cliente da v3 é o app
+em [`mobile/`](mobile/) (iOS, Android e web); o vocabulário, o esquema e a
+API compartilhados estão em
+[`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md).
+
+### O que o produto faz, por público
+
+- `Cidadão`: abre chamado com foto e GPS e recebe um **protocolo**
+  (`AAAA-NNNNNN`); acompanha pela linha do tempo (Recebido → Em análise →
+  Programado → Em execução → Resolvido / Não procede), inclusive sem login,
+  pelo protocolo; apoia chamados de outras pessoas e sinaliza "já foi
+  resolvido" ou "não existe"; avalia o atendimento de 1 a 5 depois da
+  solução e pode reabrir em até 30 dias; exporta os próprios dados (LGPD).
+- `Operação` (equipe de campo): aba **Operação** com fila priorizada por
+  prazo e apoios, filtros (meus, da equipe, sem atribuição, vencidos), mapa
+  da fila, assumir chamado, mudar status, nota interna, resposta pública ao
+  cidadão, foto de evidência antes/depois com GPS e checklist da categoria.
+  Funciona sem rede: as ações ficam numa fila e são reenviadas com
+  `Idempotency-Key`, sem duplicar nada.
+- `Gestão`: aba **Painel** com o BI do município — recebidos, resolvidos,
+  % no prazo (SLA), lead time P50/P90, tempo da primeira resposta,
+  reabertura, CSAT e cidadãos ativos —, série histórica, distribuição por
+  categoria/secretaria/equipe/bairro, aging do backlog, produtividade por
+  operador, hotspots no mapa e satisfação, com drill-down até a lista de
+  chamados, exportação CSV e relatório mensal. A gestão atribui a equipes e
+  operadores, rejeita com motivo, marca duplicados, reabre e ajusta SLA. O
+  admin municipal configura secretarias, equipes, membros, categorias
+  (prazo, prioridade, secretaria, checklist), dados do município, moderação
+  e consulta a auditoria.
+
+### Papéis
+
+Cada servidor atua em **um** município (`users.municipio_id`). Regras em
+`backend-python/core/permissoes.py`.
+
+| Papel             | Pode                                                                     |
+| ----------------- | ------------------------------------------------------------------------ |
+| `cidadao`         | Reportar, apoiar, sinalizar, avaliar, reabrir o próprio chamado (30 dias) |
+| `operador`        | Fila, assumir, mudar status, notas, resposta pública, evidências          |
+| `gestor`          | + rejeitar, duplicado, reabrir, atribuir, SLA, BI, exportações, moderação |
+| `admin_municipal` | + equipe e papéis, secretarias, categorias, configuração, auditoria       |
+| `super_admin`     | Gere qualquer município (`?municipio=`); opera só no seu                  |
+
+### Transparência e dados abertos
+
+Sem login e sem dados pessoais:
+
+- `GET /api/v1/transparencia/<codigo_ibge>/` — indicadores dos últimos 90
+  dias, desempenho por categoria, série mensal e últimos resolvidos (tela
+  `transparencia/<codigo>` no app).
+- `GET /api/v1/dados-abertos/<codigo_ibge>/chamados.csv` e `.geojson` —
+  chamados públicos, com coordenadas de 4 casas.
+- Open311 GeoReport v2 (leitura): `/api/v1/open311/v2/services.json` e
+  `requests.json`.
+
+### Notificações
+
+Todo evento relevante do chamado vira aviso in-app (central de
+notificações) e push pelo **Expo Push** (`expo-notifications` no app):
+mudança de status, resposta da prefeitura, pedido de avaliação, marco de
+apoios, atribuição, alerta de SLA, moderação e o resumo semanal do gestor.
+Variáveis do backend: `EXPO_PUSH_ENABLED` (padrão `1`) e
+`EXPO_ACCESS_TOKEN` (só se o projeto Expo exigir token de acesso).
+
+### Agendador (alertas de SLA e resumo semanal)
+
+O serviço `scheduler` dos composes (`docker-compose.yml`,
+`docker-compose.dev.yml` e `docker-compose.host.yml`) usa a mesma imagem e
+as mesmas variáveis do backend e roda `entrypoint.sh agendador`, um loop
+shell no fuso `America/Sao_Paulo`:
+
+- **de hora em hora**: `python manage.py alertas_sla` — avisa operador,
+  equipe e gestores dos chamados que vencem em 24 h ou já venceram;
+- **às segundas, a partir das 8h**: `python manage.py resumo_semanal` —
+  resumo da semana para gestores e admins municipais (in-app e, com
+  `RESEND_API_KEY`, por e-mail).
+
+Os dois comandos não repetem aviso, então reiniciar o agendador ou rodá-los
+à mão é seguro.
+
+```bash
+docker compose up -d scheduler                 # produção (sobe junto no up -d)
+docker compose logs -f scheduler
+docker compose exec backend python manage.py alertas_sla --dry-run
+docker compose exec backend python manage.py resumo_semanal --municipio 3550308 --forcar
+```
+
+### Município de demonstração (`seed_demo`)
+
+Gera um município realista para vendas e para o BI: cidadãos fictícios,
+gestora e operadores para cada equipe, e chamados distribuídos por
+categoria e bairro em volta do centro da cidade, passando pelo ciclo de
+vida real (`defeitos/fluxo.py`): triagem, atribuição, execução, conclusão
+com resposta pública, rejeições com motivo, duplicados, reaberturas,
+avaliações com comentário, apoios e sinalizações. As datas são retroativas
+e coerentes (mais volume recente, prazos que melhoram com o tempo), e
+nenhum aviso é disparado. Tudo que é demo usa e-mail `@demo.ciu`.
+
+```bash
+# Banco de DEV, num container efêmero (sem reiniciar a stack):
+scripts/seed-demo.sh                                  # São Paulo (3550308), 600 chamados, 180 dias
+scripts/seed-demo.sh --municipio 3509502 --chamados 300 --dias 90
+scripts/seed-demo.sh --senha 'Demo@2026'              # gestora e operadores demo podem entrar
+scripts/seed-demo.sh --limpar-demo                    # remove só a demo do município
+
+# Em qualquer ambiente com o backend no ar:
+docker compose exec backend python manage.py seed_demo --municipio 3550308 --semente 42
+```
+
+Rodar de novo substitui a demo anterior do município. `--limpar-demo` apaga
+os usuários `@demo.ciu` do município e os chamados deles (com histórico,
+apoios e sinalizações); chamados reais e a estrutura da prefeitura
+(secretarias e equipes, criadas pelo `seed_gestao_demo` se faltarem) ficam.
+
+### Testes do backend
+
+`scripts/test-backend.sh` roda o pytest num container efêmero com a imagem
+do backend e um banco de teste próprio (`test_<sufixo>`), então várias
+execuções em paralelo (worktrees, agentes) não se atrapalham. Requer a
+stack dev no ar.
+
+```bash
+scripts/test-backend.sh                                   # suíte inteira
+TEST_DB_SUFFIX=bi scripts/test-backend.sh bi/tests.py     # um arquivo, banco test_bi
+scripts/test-backend.sh -k transicao                      # por nome
+```
 
 ## Acesso ao Projeto
 

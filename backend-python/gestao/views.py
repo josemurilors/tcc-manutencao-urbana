@@ -9,11 +9,15 @@ querysets já nascem filtrados e um id de outra cidade dá 404.
 Leitura e escrita têm níveis mínimos diferentes por rota (`leitura` /
 `escrita` em cada view). Toda escrita chama `core.auditoria.registrar`.
 """
+import csv
+import json
 import uuid
 from datetime import datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, Q
+from django.db.models import Case, Count, F, IntegerField, Q, Value, When
+from django.db.models.functions import Lower
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import APIException, NotFound, ParseError, PermissionDenied
@@ -30,7 +34,7 @@ from .models import AuditLog, CategoriaMunicipio, Equipe, MunicipioConfig, Secre
 from .serializers import (
     AuditLogSerializer, CategoriaRegraSerializer, EquipeSerializer, MembroAlterarSerializer,
     MembroCriarSerializer, MunicipioConfigSerializer, RemoverSerializer, RestaurarSerializer,
-    SecretariaSerializer, SuspenderSerializer, membro_dict,
+    SecretariaSerializer, SuspenderSerializer, convite_dict, membro_dict,
 )
 
 MENSAGENS_NIVEL = {
@@ -414,9 +418,16 @@ class _MembrosBase(_GestaoView):
             raise PermissionDenied('Você não pode alterar alguém com papel acima do seu.')
 
 
+class MembrosPaginacao(PageNumberPagination):
+    page_size = 30
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class MembrosView(_MembrosBase):
 
     def get(self, request):
+        """Paginado (DRF): papel mais alto primeiro, depois nome."""
         qs = self.membros()
         termo = (request.query_params.get('q') or '').strip()
         if termo:
@@ -428,13 +439,26 @@ class MembrosView(_MembrosBase):
             valor = request.query_params.get(campo)
             if valor and valor.isdigit():
                 qs = qs.filter(**{campo: int(valor)})
-        usuarios = sorted(qs, key=lambda u: (-NIVEIS.get(u.papel, 0), u.nome.lower()))
+        qs = qs.annotate(
+            ordem_nivel=Case(
+                *[When(papel=p, then=Value(n)) for p, n in NIVEIS.items()],
+                default=Value(0), output_field=IntegerField(),
+            ),
+        ).order_by('-ordem_nivel', Lower('nome'), 'id')
+        paginador = MembrosPaginacao()
+        usuarios = paginador.paginate_queryset(qs, request, view=self)
         secretarias, equipes = _nomes(self.municipio_id)
         abertos = _abertos_por_atendente([u.pk for u in usuarios])
-        return Response([membro_dict(u, secretarias, equipes, abertos.get(u.pk, 0)) for u in usuarios])
+        return paginador.get_paginated_response(
+            [membro_dict(u, secretarias, equipes, abertos.get(u.pk, 0)) for u in usuarios]
+        )
 
     def post(self, request):
-        """Vincula uma conta existente (pelo e-mail) à equipe da prefeitura."""
+        """
+        Vincula uma conta existente (pelo e-mail) à equipe da prefeitura. Sem
+        conta com este e-mail, cria (ou renova) um convite e manda por e-mail:
+        responde 201 com `{convite, email_enviado}` em vez do membro.
+        """
         from users.models import User
 
         dados = _validar(MembroCriarSerializer(data=request.data))
@@ -443,9 +467,7 @@ class MembrosView(_MembrosBase):
             raise PermissionDenied('Apenas a plataforma concede o papel de super admin.')
         alvo = User.objects.filter(email__iexact=dados['email'].strip()).first()
         if alvo is None:
-            raise NotFound(
-                'Nenhuma conta com este e-mail. Peça para a pessoa criar a conta no app e tente de novo.'
-            )
+            return self.convidar(dados)
         if alvo.pk == gestor.pk:
             raise ParseError('Você não pode alterar o próprio papel.')
         self.checar_alcance(alvo)
@@ -468,6 +490,25 @@ class MembrosView(_MembrosBase):
                        'secretaria_id': sec_id, 'equipe_id': eq_id},
         })
         return Response(self.payload(alvo), status=status.HTTP_201_CREATED)
+
+
+    def convidar(self, dados):
+        if dados['papel'] == 'super_admin':
+            raise ParseError('O papel de super admin não é concedido por convite.')
+        sec_id, eq_id = self.lotacao(dados)
+        convite, novo = servicos.salvar_convite(
+            self.municipio_id, dados['email'].strip(), dados['papel'], sec_id, eq_id, self.request.user,
+        )
+        enviado = servicos.enviar_convite(convite)
+        self.auditar('convite.criar' if novo else 'convite.reenviar', 'convite', convite.pk, {
+            'email': convite.email, 'papel': convite.papel,
+            'secretaria_id': sec_id, 'equipe_id': eq_id, 'email_enviado': enviado,
+        })
+        secretarias, equipes = _nomes(self.municipio_id)
+        return Response(
+            {'convite': convite_dict(convite, secretarias, equipes), 'email_enviado': enviado},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MembroDetalheView(_MembrosBase):
@@ -529,6 +570,53 @@ class MembroDetalheView(_MembrosBase):
                 'nome': alvo.nome, 'email': alvo.email, 'antes': antes, 'chamados_liberados': liberados,
             })
         return Response({'id': str(alvo.pk), 'papel': alvo.papel, 'chamados_liberados': liberados})
+
+
+# ---------------------------------------------------------------- convites
+
+class ConvitesView(_GestaoView):
+    """Convites pendentes (não aceitos) desta prefeitura, inclusive os vencidos."""
+
+    def get(self, request):
+        qs = servicos.convites_pendentes(self.municipio_id).select_related('convidado_por').order_by('-criado_em')
+        secretarias, equipes = _nomes(self.municipio_id)
+        return Response([convite_dict(c, secretarias, equipes) for c in qs])
+
+
+class _ConviteBase(_GestaoView):
+
+    def convite(self, pk):
+        convite = (
+            servicos.convites_pendentes(self.municipio_id)
+            .select_related('convidado_por').filter(pk=pk).first()
+        )
+        if convite is None:
+            raise NotFound('Convite não encontrado (ou já aceito).')
+        return convite
+
+
+class ConviteDetalheView(_ConviteBase):
+
+    def delete(self, request, pk):
+        """Cancela o convite: o e-mail deixa de ganhar o papel ao entrar."""
+        convite = self.convite(pk)
+        dados = {'email': convite.email, 'papel': convite.papel}
+        convite.delete()
+        self.auditar('convite.cancelar', 'convite', pk, dados)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConviteReenviarView(_ConviteBase):
+
+    def post(self, request, pk):
+        """Manda o e-mail de novo e renova o prazo (também reabre um vencido)."""
+        convite = servicos.renovar_convite(self.convite(pk))
+        enviado = servicos.enviar_convite(convite)
+        self.auditar('convite.reenviar', 'convite', convite.pk, {
+            'email': convite.email, 'papel': convite.papel, 'email_enviado': enviado,
+        })
+        secretarias, equipes = _nomes(self.municipio_id)
+        return Response({'convite': convite_dict(convite, secretarias, equipes), 'email_enviado': enviado})
 
 
 # -------------------------------------------------------------- categorias
@@ -837,6 +925,37 @@ class AuditoriaView(_GestaoView):
         if params.get('fim'):
             fim = _data(params['fim'], 'fim') + timedelta(days=1)
             qs = qs.filter(criado_em__lt=timezone.make_aware(datetime.combine(fim, time.min), fuso))
+        if (params.get('formato') or '').strip().lower() == 'csv':
+            return _auditoria_csv(qs, self.municipio_id)
         paginador = AuditoriaPaginacao()
         pagina = paginador.paginate_queryset(qs, request, view=self)
         return paginador.get_paginated_response(AuditLogSerializer(pagina, many=True).data)
+
+
+# Teto da exportação: acima disso, o filtro de período resolve.
+LIMITE_CSV_AUDITORIA = 20000
+
+
+def _auditoria_csv(qs, municipio_id):
+    """
+    Exporta a auditoria (já filtrada) em CSV para prestação de contas. `;`
+    como separador e BOM UTF-8: é o que o Excel em português abre direto.
+    """
+    resposta = HttpResponse(content_type='text/csv; charset=utf-8')
+    hoje = timezone.localdate().isoformat()
+    resposta['Content-Disposition'] = f'attachment; filename="auditoria-{municipio_id}-{hoje}.csv"'
+    resposta.write('\ufeff')
+    escritor = csv.writer(resposta, delimiter=';')
+    escritor.writerow(['data_hora', 'usuario', 'usuario_id', 'acao', 'alvo_tipo', 'alvo_id', 'ip', 'dados'])
+    for log in qs[:LIMITE_CSV_AUDITORIA]:
+        escritor.writerow([
+            timezone.localtime(log.criado_em).strftime('%Y-%m-%d %H:%M:%S'),
+            log.usuario.nome if log.usuario_id and log.usuario else 'Sistema',
+            str(log.usuario_id or ''),
+            log.acao,
+            log.alvo_tipo,
+            log.alvo_id,
+            log.ip,
+            json.dumps(log.dados or {}, ensure_ascii=False, default=str),
+        ])
+    return resposta

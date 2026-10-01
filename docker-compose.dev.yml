@@ -51,7 +51,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
+    environment: &backend-env
       - DJANGO_SETTINGS_MODULE=core.settings.production
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
@@ -70,6 +70,8 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - EXPO_PUSH_ENABLED=${EXPO_PUSH_ENABLED:-1}
+      - EXPO_ACCESS_TOKEN=${EXPO_ACCESS_TOKEN:-}
       - GOOGLE_CLIENT_ID_WEB=${GOOGLE_CLIENT_ID_WEB:-}
       - GOOGLE_CLIENT_ID_ANDROID=${GOOGLE_CLIENT_ID_ANDROID:-}
       - GOOGLE_CLIENT_ID_IOS=${GOOGLE_CLIENT_ID_IOS:-}
@@ -91,6 +93,22 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Agendador: mesma imagem do backend rodando `entrypoint.sh agendador`
+  # (alertas_sla de hora em hora; resumo_semanal às segundas, 8h, America/Sao_Paulo).
+  # Logs: docker compose logs -f scheduler
+  scheduler:
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
+    command: ["agendador"]
+    environment: *backend-env
+    networks:
+      - app-network
+    depends_on:
+      backend:
         condition: service_healthy
     restart: unless-stopped
 

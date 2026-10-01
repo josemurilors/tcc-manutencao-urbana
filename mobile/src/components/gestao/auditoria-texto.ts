@@ -28,6 +28,7 @@ const ROTULO_PRIORIDADE: Record<string, string> = {
 export const ACOES_AUDITORIA: { value: string; label: string }[] = [
   { value: '', label: 'Todas as ações' },
   { value: 'membro', label: 'Equipe (entradas, papéis, revogações)' },
+  { value: 'convite', label: 'Convites para a equipe' },
   { value: 'secretaria', label: 'Secretarias' },
   { value: 'equipe', label: 'Equipes de campo' },
   { value: 'categoria', label: 'Categorias e prazos' },
@@ -54,6 +55,10 @@ const ROTULO_ACAO: Record<string, string> = {
   'membro.vincular': 'Pessoa adicionada à equipe',
   'membro.alterar': 'Papel ou lotação alterados',
   'membro.revogar': 'Acesso revogado',
+  'convite.criar': 'Convite enviado',
+  'convite.reenviar': 'Convite reenviado',
+  'convite.cancelar': 'Convite cancelado',
+  'convite.aceitar': 'Convite aceito',
   'categoria.alterar': 'Regras da categoria alteradas',
   'moderacao.remover': 'Chamado removido pela moderação',
   'moderacao.restaurar': 'Chamado restaurado',
@@ -264,6 +269,24 @@ export function fraseDaAuditoria(r: RegistroAuditoria): string {
     }
     case 'membro.revogar':
       return `${ator} revogou o acesso de ${nomeDoAlvo(r, d, 'uma pessoa')}`;
+    case 'convite.criar':
+    case 'convite.reenviar': {
+      const email = texto(d.email) || 'um e-mail';
+      const papel = texto(d.papel);
+      const verbo = r.acao === 'convite.criar' ? 'convidou' : 'reenviou o convite para';
+      return papel
+        ? `${ator} ${verbo} ${email} como ${papelLegivel(papel)}`
+        : `${ator} ${verbo} ${email}`;
+    }
+    case 'convite.cancelar':
+      return `${ator} cancelou o convite de ${texto(d.email) || 'um e-mail'}`;
+    case 'convite.aceitar': {
+      const papel = texto(depois.papel);
+      const alvo = nomeDoAlvo(r, d, 'Uma pessoa');
+      return papel
+        ? `${alvo} aceitou o convite e entrou na equipe como ${papelLegivel(papel)}`
+        : `${alvo} aceitou o convite e entrou na equipe`;
+    }
     case 'usuario.municipio':
       return `${ator} alterou o município de ${nomeDoAlvo(r, d, 'um usuário')}`;
     case 'categoria.alterar': {
@@ -389,6 +412,8 @@ export function iconeDaAuditoria(acao: string) {
     case 'membro':
     case 'usuario':
       return 'people' as const;
+    case 'convite':
+      return 'mail' as const;
     case 'secretaria':
     case 'equipe':
       return 'business' as const;

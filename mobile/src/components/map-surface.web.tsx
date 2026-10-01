@@ -12,7 +12,7 @@ import 'leaflet/dist/leaflet.css';
 import './map-surface.web.css';
 
 import L, { type Map as LeafletMap } from 'leaflet';
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import {
   Circle,
   MapContainer,
@@ -24,9 +24,10 @@ import {
 } from 'react-leaflet';
 
 import type { LatLng } from '@/utils/geo';
+import { intensidadeDoCirculo, PARADAS_CALOR } from '@/utils/heatmap';
 import { ladoDoCluster, textoDoCluster } from '@/utils/rarear';
 
-import type { MapSurfaceHandle, MapSurfaceProps, Regiao } from './map-surface.types';
+import type { CirculoMapa, MapSurfaceHandle, MapSurfaceProps, Regiao } from './map-surface.types';
 
 // OpenStreetMap não exige chave (o Carto passou a exigir e estampa
 // "API KEY REQUIRED" nos tiles). No tema escuro, `.tiles-escuro` inverte as
@@ -143,6 +144,126 @@ function iconeUsuario(direcao: number | null) {
   });
 }
 
+type PontoCalor = { lat: number; lng: number; raio: number; intensidade: number };
+
+/** Opacidade máxima do calor: as ruas continuam legíveis por baixo. */
+const CALOR_OPACIDADE_MAX = 0.72;
+
+/** Paleta de 256 cores da rampa (índice = densidade acumulada). */
+let paletaCalor: Uint8ClampedArray | null = null;
+function paleta() {
+  if (paletaCalor) return paletaCalor;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new Uint8ClampedArray(256 * 4);
+  const grad = ctx.createLinearGradient(0, 0, 256, 0);
+  for (const [t, cor] of PARADAS_CALOR) grad.addColorStop(t, cor);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 1);
+  paletaCalor = ctx.getImageData(0, 0, 256, 1).data;
+  return paletaCalor;
+}
+
+/**
+ * Mapa de calor em canvas (o algoritmo do leaflet.heat/simpleheat, sem a
+ * dependência): cada ponto pinta uma mancha de borda difusa em tons de
+ * cinza, as manchas se somam e a densidade resultante é colorida pela rampa.
+ * O raio vem em metros e é convertido a cada zoom, então a mancha cobre a
+ * mesma área no chão. Redesenha ao fim de cada movimento; durante a animação
+ * de zoom fica escondido (`leaflet-zoom-hide`).
+ */
+function CamadaCalor({ pontos }: { pontos: PontoCalor[] }) {
+  const mapa = useMap();
+  const pontosRef = useRef(pontos);
+  const redesenharRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    const canvas = L.DomUtil.create('canvas', 'leaflet-zoom-hide camada-calor') as HTMLCanvasElement;
+    canvas.style.pointerEvents = 'none';
+    canvas.setAttribute('aria-hidden', 'true');
+    mapa.getPanes().overlayPane.appendChild(canvas);
+
+    function redesenhar() {
+      const tamanho = mapa.getSize();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(tamanho.x * dpr);
+      canvas.height = Math.round(tamanho.y * dpr);
+      canvas.style.width = `${tamanho.x}px`;
+      canvas.style.height = `${tamanho.y}px`;
+      L.DomUtil.setPosition(canvas, mapa.containerPointToLayerPoint([0, 0]));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const lista = pontosRef.current;
+      if (lista.length === 0) return;
+
+      // 1) Densidade: manchas radiais em preto com alpha, somadas.
+      for (const p of lista) {
+        const centro = mapa.latLngToContainerPoint([p.lat, p.lng]);
+        const borda = mapa.latLngToContainerPoint([p.lat + p.raio / 111_320, p.lng]);
+        const r = Math.max(Math.abs(centro.y - borda.y), 10) * dpr;
+        const x = centro.x * dpr;
+        const y = centro.y * dpr;
+        if (x < -r || y < -r || x > canvas.width + r || y > canvas.height + r) continue;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        const a = 0.25 + 0.75 * p.intensidade;
+        grad.addColorStop(0, `rgba(0,0,0,${a})`);
+        grad.addColorStop(0.45, `rgba(0,0,0,${a * 0.6})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 2) Cor: a densidade (alpha) vira índice na rampa.
+      const imagem = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const px = imagem.data;
+      const cores = paleta();
+      for (let i = 3; i < px.length; i += 4) {
+        const alpha = px[i];
+        if (!alpha) continue;
+        const j = alpha * 4;
+        px[i - 3] = cores[j];
+        px[i - 2] = cores[j + 1];
+        px[i - 1] = cores[j + 2];
+        px[i] = Math.min(alpha * 1.4, 255 * CALOR_OPACIDADE_MAX);
+      }
+      ctx.putImageData(imagem, 0, 0);
+    }
+
+    redesenharRef.current = redesenhar;
+    redesenhar();
+    mapa.on('moveend zoomend resize viewreset', redesenhar);
+    return () => {
+      mapa.off('moveend zoomend resize viewreset', redesenhar);
+      canvas.remove();
+      redesenharRef.current = () => {};
+    };
+  }, [mapa]);
+
+  useEffect(() => {
+    pontosRef.current = pontos;
+    redesenharRef.current();
+  }, [pontos]);
+
+  return null;
+}
+
+/** Separa os círculos de calor (camada canvas) dos demais (círculos comuns). */
+function separarCalor(circulos: CirculoMapa[]) {
+  const comuns: CirculoMapa[] = [];
+  const calor: PontoCalor[] = [];
+  for (const c of circulos) {
+    const intensidade = intensidadeDoCirculo(c);
+    if (intensidade == null) comuns.push(c);
+    else calor.push({ lat: c.centro.latitude, lng: c.centro.longitude, raio: c.raio, intensidade });
+  }
+  return { comuns, calor };
+}
+
 /** Tira o "Leaflet" da atribuição: sobra só a dos dados, que é a obrigatória. */
 function PrefixoAtribuicao() {
   const mapa = useMap();
@@ -204,6 +325,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
   ref,
 ) {
   const mapRef = useRef<LeafletMap | null>(null);
+  const { comuns, calor } = useMemo(() => separarCalor(circulos), [circulos]);
 
   useImperativeHandle(ref, () => ({
     animarPara(regiao) {
@@ -242,7 +364,9 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
         onRegiaoMudou={onRegiaoMudou}
       />
 
-      {circulos.map((circulo) => (
+      {calor.length ? <CamadaCalor pontos={calor} /> : null}
+
+      {comuns.map((circulo) => (
         <Circle
           key={circulo.key}
           center={[circulo.centro.latitude, circulo.centro.longitude]}

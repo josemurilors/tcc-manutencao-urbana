@@ -243,3 +243,151 @@ def pode_moderar_usuario(gestor, alvo, municipio_id):
     if str(alvo.municipio_id or '') == str(municipio_id):
         return True
     return Defeito.objects.filter(usuario=alvo, municipio_id=str(municipio_id)).exists()
+
+
+# ----------------------------------------------------------------- convites
+
+# Validade do convite: passa disso, o gestor reenvia (o que renova o prazo).
+CONVITE_VALIDADE = timedelta(days=14)
+
+ROTULO_PAPEL = {
+    'operador': 'Operador',
+    'gestor': 'Gestor',
+    'admin_municipal': 'Administrador',
+    'super_admin': 'Plataforma',
+}
+
+
+def convites_pendentes(municipio_id):
+    from .models import Convite
+
+    return Convite.objects.filter(municipio_id=str(municipio_id), aceito_em__isnull=True)
+
+
+def salvar_convite(municipio_id, email, papel, secretaria_id, equipe_id, autor):
+    """
+    Cria o convite ou, se este e-mail já tem um pendente nesta prefeitura,
+    atualiza o papel/lotação e renova o prazo (convidar de novo não duplica).
+    Devolve `(convite, novo)`.
+    """
+    import secrets
+
+    from .models import Convite
+
+    agora = timezone.now()
+    convite = convites_pendentes(municipio_id).filter(email__iexact=email).order_by('-criado_em').first()
+    novo = convite is None
+    if novo:
+        convite = Convite(email=email.lower(), municipio_id=str(municipio_id), criado_em=agora)
+    convite.papel = papel
+    convite.secretaria_id = secretaria_id
+    convite.equipe_id = equipe_id
+    convite.token = secrets.token_urlsafe(24)
+    convite.convidado_por = autor
+    convite.expira_em = agora + CONVITE_VALIDADE
+    convite.save()
+    return convite, novo
+
+
+def renovar_convite(convite):
+    import secrets
+
+    convite.token = secrets.token_urlsafe(24)
+    convite.expira_em = timezone.now() + CONVITE_VALIDADE
+    convite.save(update_fields=['token', 'expira_em'])
+    return convite
+
+
+def _convite_html(nome_prefeitura, papel, expira_em):
+    from html import escape
+
+    validade = timezone.localtime(expira_em).strftime('%d/%m/%Y')
+    return (
+        '<div style="font-family:sans-serif;max-width:480px;margin:0 auto">'
+        '<h2>Voce foi convidado para a equipe da prefeitura</h2>'
+        f'<p>A prefeitura de <strong>{escape(nome_prefeitura)}</strong> convidou voce para atender '
+        f'os chamados de zeladoria no aplicativo Central de Inteligencia Urbana, com o papel de '
+        f'<strong>{escape(ROTULO_PAPEL.get(papel, papel))}</strong>.</p>'
+        '<p>Para aceitar, baixe o aplicativo e crie sua conta (ou entre) usando <strong>este mesmo '
+        'e-mail</strong>. Assim que o e-mail for confirmado, o acesso da equipe e liberado '
+        'automaticamente.</p>'
+        f'<p>O convite vale ate {validade}.</p>'
+        '<p>Se voce nao esperava este convite, ignore este e-mail.</p>'
+        '<p style="color:#888;font-size:12px">Central de Inteligencia Urbana</p>'
+        '</div>'
+    )
+
+
+def enviar_convite(convite):
+    """
+    Manda o e-mail do convite pelo `services.email_service` (Resend). Sem
+    RESEND_API_KEY o envio é pulado e fica no log; falha de envio não desfaz
+    o convite (o gestor pode reenviar). Devolve True se o e-mail saiu.
+    """
+    import asyncio
+    import logging
+
+    from municipios.models import Municipio
+    from services import email_service
+
+    from .models import MunicipioConfig
+
+    config = MunicipioConfig.objects.filter(pk=convite.municipio_id).first()
+    mun = Municipio.objects.filter(codigo=convite.municipio_id).values('nome', 'uf_sigla').first() or {}
+    nome = (config.nome_exibicao if config and config.nome_exibicao else '') or (
+        f"{mun.get('nome', '')} - {mun.get('uf_sigla', '')}".strip(' -') or 'seu município'
+    )
+    try:
+        resultado = asyncio.run(email_service._send_email(
+            to=convite.email,
+            subject='Convite para a equipe da prefeitura - Central de Inteligencia Urbana',
+            html=_convite_html(nome, convite.papel, convite.expira_em),
+        ))
+    except Exception:
+        logging.getLogger(__name__).exception('falha ao enviar convite para %s', convite.email)
+        return False
+    return bool(resultado and not resultado.get('fallback'))
+
+
+def aplicar_convite(user):
+    """
+    Ao entrar com e-mail verificado, quem tem convite pendente (e válido) vira
+    membro da equipe com o papel e a lotação do convite. Chamado pelo fluxo de
+    login/verificação (`users/views.py`). Quem já é da equipe não é alterado:
+    o convite fica pendente para o gestor resolver. Devolve o convite aceito
+    ou None.
+    """
+    from core import auditoria
+
+    from .models import Convite, Equipe, Secretaria
+
+    if not user or not getattr(user, 'email_verified', 0) or permissoes.eh_equipe(user):
+        return None
+    agora = timezone.now()
+    convite = (
+        Convite.objects.filter(email__iexact=user.email, aceito_em__isnull=True, expira_em__gt=agora)
+        .order_by('-criado_em').first()
+    )
+    if convite is None:
+        return None
+    mun = convite.municipio_id
+    # Lotação desativada (ou apagada) depois do convite: entra sem ela.
+    sec_id = convite.secretaria_id if Secretaria.objects.filter(
+        pk=convite.secretaria_id, municipio_id=mun, ativo=True).exists() else None
+    eq_id = convite.equipe_id if Equipe.objects.filter(
+        pk=convite.equipe_id, municipio_id=mun, ativo=True).exists() else None
+    with transaction.atomic():
+        antes = {'papel': user.papel, 'municipio_id': user.municipio_id}
+        user.papel = convite.papel
+        user.municipio_id = mun
+        user.secretaria_id = sec_id
+        user.equipe_id = eq_id
+        user.save(update_fields=['papel', 'municipio_id', 'secretaria_id', 'equipe_id'])
+        convite.aceito_em = agora
+        convite.aceito_por = user
+        convite.save(update_fields=['aceito_em', 'aceito_por'])
+        auditoria.registrar(user, 'convite.aceitar', 'usuario', user.pk, dados={
+            'nome': user.nome, 'email': user.email, 'convite_id': convite.pk, 'antes': antes,
+            'depois': {'papel': user.papel, 'municipio_id': mun, 'secretaria_id': sec_id, 'equipe_id': eq_id},
+        }, municipio_id=mun)
+    return convite

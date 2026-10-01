@@ -312,7 +312,17 @@ class TestFila:
         assert resp.data == {
             'abertos': 4, 'meus': 1, 'vencidos': 1, 'vencem_24h': 1,
             'sem_atribuicao': 3, 'sinalizados': 1, 'concluidos_hoje': 1,
+            'parametros': {'exigir_foto_conclusao': True, 'raio_evidencia_m': 150},
         }
+
+    def test_resumo_traz_parametros_da_prefeitura(self):
+        op, _ = _usuario('operador')
+        MunicipioConfig.objects.create(
+            municipio_id=CIDADE, parametros={'exigir_foto_conclusao': False, 'raio_evidencia_m': None})
+        resp = op.get(_url('resumo'))
+        assert resp.status_code == 200
+        # O que a prefeitura não definiu (ou zerou com null) volta ao padrão.
+        assert resp.data['parametros'] == {'exigir_foto_conclusao': False, 'raio_evidencia_m': 150}
 
 
 class TestTransicaoEEvidencia:
@@ -573,6 +583,25 @@ class TestOrdemDeServico:
         assert 'Isolar &lt;área&gt;' in html
         assert capturado['callback']('http://interno/x', None) == ''
         assert capturado['callback']('data:image/png;base64,AAA', None).startswith('data:')
+
+    def test_permissoes_e_nome_do_arquivo(self, monkeypatch):
+        from services import ordem_servico
+
+        def falso_pdf(html, dest, encoding, link_callback):
+            dest.write(b'%PDF-falso')
+
+        monkeypatch.setattr(ordem_servico.pisa, 'CreatePDF', falso_pdf)
+        d = _defeito()
+        alheio = _defeito(OUTRA)
+        op, _ = _usuario('operador')
+        cidadao, _ = _usuario()
+        resp = op.get(_url('ordem-servico', d.id))
+        assert resp.status_code == 200
+        assert resp['Content-Disposition'] == f'attachment; filename="OS-{d.protocolo or str(d.id)[:8]}.pdf"'
+        assert cidadao.get(_url('ordem-servico', d.id)).status_code == 403
+        assert APIClient().get(_url('ordem-servico', d.id)).status_code == 401
+        assert op.get(_url('ordem-servico', alheio.id)).status_code == 403
+        assert op.get(_url('ordem-servico', uuid.uuid4())).status_code == 404
 
     def test_pdf_real_gera(self):
         from services.ordem_servico import gerar_ordem_servico

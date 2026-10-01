@@ -35,13 +35,14 @@ export function HistoricoChamado({
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [tentativa, setTentativa] = useState(0);
   const id = defeito.id;
-  // Recarrega quando algo que gera evento muda (status, resposta, avaliação...).
+  // Recarrega quando algo que gera evento muda (status, resposta, avaliação, apoios...).
   const chave = [
     id,
     defeito.status,
     defeito.resposta_publica ?? '',
     defeito.avaliado_em ?? '',
     defeito.reaberturas ?? 0,
+    defeito.total_apoios ?? 0,
     defeito.atualizado_em ?? '',
     tentativa,
   ].join('|');

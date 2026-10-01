@@ -4,9 +4,17 @@ App universal (iOS, Android e web) do TCC, escrito em **Expo SDK 57 +
 React Native 0.86 + Expo Router**. Consome a **mesma API Django** do frontend
 web.
 
-O frontend web (`../frontend`, React 19 + Vite) continua sendo a versão de
-produção em [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br). Este
-app é um cliente adicional, não um substituto.
+O frontend web (`../frontend`, React 19 + Vite) continua no ar em
+[tcc.josemurilors.com.br](https://tcc.josemurilors.com.br), mas é legado:
+as funcionalidades da **Plataforma v3** (operação de campo, painel de BI,
+gestão da prefeitura, transparência, notificações push) existem só neste
+app. O que o produto faz por público e os papéis estão na seção
+[Plataforma v3 do README principal](../README.md#plataforma-v3); o contrato
+de API, em [`docs/arquitetura/contrato-v3.md`](../docs/arquitetura/contrato-v3.md).
+
+Para ter dados realistas no painel e na fila durante o desenvolvimento,
+gere o município de demonstração (`scripts/seed-demo.sh`, na raiz — ver
+[Município de demonstração](../README.md#município-de-demonstração-seed_demo)).
 
 ## Índice
 
@@ -130,6 +138,11 @@ curl -i -H "Origin: http://192.168.1.3:8081" http://192.168.1.3:8000/api/v1/defe
 Nada disso afeta o app **nativo**: Expo Go não passa por CORS, mas continua
 precisando do IP em `ALLOWED_HOSTS`.
 
+O backend libera, além dos cabeçalhos padrão, o `Idempotency-Key` usado nas
+ações da operação feitas offline (`CORS_ALLOW_HEADERS` em
+`backend-python/core/settings/base.py`). Se o preflight barrar uma ação no
+web, confira se o backend em execução já tem essa configuração.
+
 ## Estrutura
 
 ```
@@ -142,16 +155,26 @@ mobile/
 │   │   ├── login.tsx
 │   │   ├── registro.tsx
 │   │   ├── novo.tsx       # novo chamado (modal)
-│   │   ├── admin/usuarios.tsx
-│   │   └── (tabs)/        # mapa · chamados · painel · conta
+│   │   ├── chamado/[id].tsx       # detalhe + linha do tempo
+│   │   ├── protocolo/     # consulta por protocolo (sem login)
+│   │   ├── notificacoes.tsx       # central de notificações
+│   │   ├── transparencia/[codigo].tsx  # página pública do município
+│   │   ├── painel/[dimensao].tsx  # drill-down do BI
+│   │   ├── admin/         # gestão: município, secretarias, equipe, categorias, moderação, auditoria
+│   │   └── (tabs)/        # mapa · chamados · operação · painel · conta
 │   ├── components/        # UI compartilhada (charts, sheet, header, ui/*)
+│   │   ├── operacao/      # fila, filtros, transições, evidências, sync offline
+│   │   ├── bi/            # cartões e gráficos do painel
+│   │   ├── gestao/        # telas de administração
+│   │   ├── chamado/       # histórico e ações do cidadão
+│   │   ├── transparencia/ # página pública: indicadores e últimos resolvidos
 │   │   ├── map-surface.tsx      # mapa nativo (react-native-maps)
 │   │   ├── map-surface.web.tsx  # mapa web (Leaflet)
 │   │   └── map-surface.types.ts # contrato comum às duas
 │   ├── constants/         # tokens de tema, status, estilo do mapa
 │   ├── context/           # auth, tema, toasts
-│   ├── hooks/             # sincronização offline
-│   ├── services/          # api, storage, fila offline
+│   ├── hooks/             # sincronização offline, push, não lidas, localização
+│   ├── services/          # api + api-<área>.ts (operacao, bi, gestao, ...), storage, filas offline
 │   └── utils/             # geo, heatmap, formatação, jwt, imagens
 └── assets/images/         # ícone, splash, favicon
 ```
@@ -268,16 +291,17 @@ executaria o Leaflet no Node, onde não há `window`.
 
 ## Limitações conhecidas
 
-- **Notificações push não estão implementadas.** O backend usa Web Push
-  (VAPID), que é uma API de navegador e não funciona em app nativo. Habilitar
-  push aqui exigiria adicionar FCM/APNs ao backend e usar
-  `expo-notifications` — está fora do escopo desta entrega.
+- **Push** usa `expo-notifications` + Expo Push API (backend:
+  `notificacoes/push.py`, variáveis `EXPO_PUSH_ENABLED`/`EXPO_ACCESS_TOKEN`)
+  e só funciona em build nativo (EAS); no web e no Expo Go fica só a central
+  de notificações in-app. Alertas de SLA e o resumo semanal dependem do
+  serviço `scheduler` dos composes.
 - **Foto de perfil** segue apenas como inicial do nome, como no web (o backend
   ainda não expõe upload de avatar).
-- **2FA e exclusão de conta** continuam como "em desenvolvimento", igual ao web.
+- **2FA** continua fora do app; a exclusão de conta fica em Ajustes → Perfil.
 - O **web** aqui é para desenvolvimento e demonstração. Quem está em produção
-  em `tcc.josemurilors.com.br` continua sendo o frontend Vite (`../frontend`),
-  que tem PWA, service worker e Web Push — coisas que este app não replica.
+  em `tcc.josemurilors.com.br` continua sendo o frontend Vite (`../frontend`,
+  legado, com PWA, service worker e Web Push), que não recebe as telas da v3.
 
 ## Build de produção
 

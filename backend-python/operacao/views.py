@@ -67,16 +67,22 @@ def _erro(mensagem, codigo=status.HTTP_400_BAD_REQUEST):
     return Response({'detail': mensagem}, status=codigo)
 
 
+def _parametros(municipio_id):
+    """Parâmetros da prefeitura que a operação usa, com o padrão no que faltar."""
+    salvos = {}
+    if municipio_id:
+        salvos = (
+            MunicipioConfig.objects.filter(municipio_id=str(municipio_id))
+            .values_list('parametros', flat=True).first()
+        ) or {}
+    return {
+        nome: padrao if salvos.get(nome) is None else salvos[nome]
+        for nome, padrao in PARAMETROS_PADRAO.items()
+    }
+
+
 def _parametro(municipio_id, nome):
-    padrao = PARAMETROS_PADRAO[nome]
-    if not municipio_id:
-        return padrao
-    parametros = (
-        MunicipioConfig.objects.filter(municipio_id=str(municipio_id))
-        .values_list('parametros', flat=True).first()
-    ) or {}
-    valor = parametros.get(nome, padrao)
-    return padrao if valor is None else valor
+    return _parametros(municipio_id)[nome]
 
 
 def _base():
@@ -276,6 +282,9 @@ def resumo_view(request):
         'sem_atribuicao': abertos.filter(atendente__isnull=True, equipe__isnull=True).count(),
         'sinalizados': sinalizados.count(),
         'concluidos_hoje': base.filter(status='concluido', resolvido_em__gte=inicio_do_dia).count(),
+        # Regras da prefeitura que o app aplica antes de enviar (ex.: a folha
+        # de concluir só cobra a foto quando a cidade exige).
+        'parametros': _parametros(user.municipio_id),
     })
 
 

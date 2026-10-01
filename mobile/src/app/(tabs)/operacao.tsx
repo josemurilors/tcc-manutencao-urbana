@@ -9,10 +9,13 @@
  *   sinalizados) funciona como atalho de filtro; abaixo, busca, ordenação
  *   (prioridade/prazo/distância...) e filtros.
  * - Cartões com SLA restante colorido, score, apoios e sinalizações. Toque abre
- *   a ficha de atendimento; toque longo seleciona para ação em lote.
+ *   a ficha de atendimento. Ação em lote: botão "Selecionar" (funciona no web,
+ *   onde não há toque longo) ou toque longo no cartão.
  * - Visão de mapa com o **roteiro do dia**, que sobrevive a fechar o app.
  * - **Offline**: sem rede, a tela mostra a última fila salva e as ações vão
  *   para uma fila idempotente que sincroniza depois (faixa de pendências).
+ *   A drenagem é global (`OperacaoSyncProvider` no layout raiz): segue
+ *   funcionando com o app em outra aba.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -30,7 +33,6 @@ import { ehGestor, identificador, MOTIVOS_PULO, nomeCategoria } from '@/componen
 import { atalhoAtivo, filtrosDoAtalho, ResumoFilaBar } from '@/components/operacao/resumo-fila';
 import { useCatalogos } from '@/components/operacao/use-catalogos';
 import { FILTROS_PADRAO, useFila } from '@/components/operacao/use-fila';
-import { useSyncOperacao } from '@/components/operacao/use-sync-operacao';
 import { OperacaoSheet } from '@/components/operacao-sheet';
 import type { Roteiro } from '@/components/roteiro-panel';
 import { Button } from '@/components/ui/button';
@@ -41,9 +43,11 @@ import { AppText } from '@/components/ui/text';
 import { statusFechado } from '@/constants/status';
 import { Layout, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useSyncOperacao } from '@/context/offline-sync-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { useLocalizacao } from '@/hooks/use-localizacao';
+import { exigeFotoAoConcluir } from '@/services/api-operacao';
 import {
   executarOuEnfileirar,
   lerRoteiro,
@@ -98,11 +102,18 @@ export default function OperacaoScreen() {
   const fila = useFila(posicao);
   const catalogos = useCatalogos();
   const { carregar: carregarFila, recarregarResumo, atualizarItem, carregarMais } = fila;
-  const sync = useSyncOperacao(() => carregarFila());
+  const sync = useSyncOperacao();
+  const { aoEnviar } = sync;
+  // O que estava na fila offline chegou ao servidor: a fila na tela recarrega.
+  useEffect(() => aoEnviar(() => carregarFila()), [aoEnviar, carregarFila]);
 
   const [visao, setVisao] = useState<Visao>('lista');
   const [aberto, setAberto] = useState<ChamadoFila | null>(null);
   const [selecao, setSelecao] = useState<Set<string>>(new Set());
+  // Modo seleção ligado pelo botão "Selecionar" (no web não há toque longo).
+  // Com algo marcado a seleção está ativa de qualquer jeito.
+  const [modoSelecao, setModoSelecao] = useState(false);
+  const selecionando = modoSelecao || selecao.size > 0;
   const [roteiro, setRoteiro] = useState<Roteiro | null>(null);
 
   // No mapa, a primeira página (20) não basta para montar um roteiro: busca
@@ -202,11 +213,22 @@ export default function OperacaoScreen() {
 
   const tocar = useCallback(
     (c: ChamadoFila) => {
-      if (selecao.size > 0) alternarSelecao(c);
+      if (selecionando) alternarSelecao(c);
       else setAberto(c);
     },
-    [selecao.size, alternarSelecao],
+    [selecionando, alternarSelecao],
   );
+
+  const sairDaSelecao = useCallback(() => {
+    setSelecao(new Set());
+    setModoSelecao(false);
+  }, []);
+
+  // Trocar para o mapa encerra a seleção (a barra de lote é só da lista).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reação à troca de visão
+    if (visao !== 'lista') sairDaSelecao();
+  }, [visao, sairDaSelecao]);
 
   function aposLote(e: EfeitoLote) {
     e.ids.forEach((id) => {
@@ -214,7 +236,9 @@ export default function OperacaoScreen() {
       if (c) atualizarItem(c.id, e.patch);
     });
     // Ficam selecionados só os que falharam, para a pessoa ver e decidir.
-    setSelecao((prev) => new Set([...prev].filter((id) => !e.ids.includes(id))));
+    const restantes = [...selecao].filter((id) => !e.ids.includes(id));
+    setSelecao(new Set(restantes));
+    if (restantes.length === 0) setModoSelecao(false);
     recarregarResumo();
   }
 
@@ -246,6 +270,9 @@ export default function OperacaoScreen() {
     () => fila.itens.filter((c) => selecao.has(String(c.id))),
     [fila.itens, selecao],
   );
+  const visiveis = fila.estado === 'pronto' ? fila.itens : [];
+  const todosMarcados = visiveis.length > 0 && visiveis.every((c) => selecao.has(String(c.id)));
+  const exigirFoto = exigeFotoAoConcluir(fila.resumo);
   const ativo = atalhoAtivo(fila.filtros);
   const proximaParada = roteiro?.paradas[roteiro.atual];
 
@@ -271,7 +298,7 @@ export default function OperacaoScreen() {
           style={styles.visao}
         />
       </View>
-      <FaixaOffline sync={sync} cacheDe={fila.cacheDe} />
+      <FaixaOffline cacheDe={fila.cacheDe} />
     </View>
   );
 
@@ -314,10 +341,39 @@ export default function OperacaoScreen() {
           </View>
         </Card>
       ) : null}
-      <AppText variant="caption" tone="muted" style={styles.margem}>
-        {fila.count === 1 ? '1 chamado' : `${fila.count} chamados`}
-        {selecao.size === 0 ? ' · toque longo para selecionar vários' : ''}
-      </AppText>
+      <View style={[styles.linha, styles.margem]}>
+        <AppText variant="caption" tone="muted" style={styles.flex}>
+          {fila.count === 1 ? '1 chamado' : `${fila.count} chamados`}
+          {selecionando ? ` · ${selecao.size} ${selecao.size === 1 ? 'marcado' : 'marcados'}` : ''}
+        </AppText>
+        {selecionando ? (
+          <>
+            {visiveis.length > 0 ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() =>
+                  setSelecao(todosMarcados ? new Set() : new Set(visiveis.map((c) => String(c.id))))
+                }
+                accessibilityHint="Marca ou desmarca os chamados carregados na lista">
+                {todosMarcados ? 'Desmarcar todos' : 'Marcar todos'}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="secondary" onPress={sairDaSelecao}>
+              Cancelar
+            </Button>
+          </>
+        ) : visiveis.length > 0 ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => setModoSelecao(true)}
+            accessibilityHint="Liga a seleção de vários chamados para agir em lote"
+            icon={<Ionicons name="checkbox-outline" size={16} color={colors.textPrimary} />}>
+            Selecionar
+          </Button>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -374,9 +430,9 @@ export default function OperacaoScreen() {
 
       {visao === 'lista' ? (
         <FlatList
-          data={fila.estado === 'pronto' ? fila.itens : []}
+          data={visiveis}
           keyExtractor={(c) => String(c.id)}
-          extraData={[selecao, sync.idsPendentes]}
+          extraData={[selecao, selecionando, sync.idsPendentes]}
           ListHeaderComponent={cabecalhoLista}
           ListEmptyComponent={corpoVazio()}
           contentContainerStyle={[styles.lista, { paddingBottom: Spacing[6] + (selecao.size > 0 ? 160 : 0) }]}
@@ -388,7 +444,7 @@ export default function OperacaoScreen() {
                 icone={catalogos.icones.get(nomeCategoria(item))}
                 meuId={meuId}
                 pendente={sync.idsPendentes.has(String(item.id))}
-                modoSelecao={selecao.size > 0}
+                modoSelecao={selecionando}
                 selecionado={selecao.has(String(item.id))}
                 onPress={tocar}
                 onLongPress={alternarSelecao}
@@ -448,7 +504,8 @@ export default function OperacaoScreen() {
           gestor={gestor}
           equipes={catalogos.equipes}
           onRecarregarEquipes={catalogos.recarregar}
-          onLimpar={() => setSelecao(new Set())}
+          exigirFoto={exigirFoto}
+          onLimpar={sairDaSelecao}
           onAplicado={aposLote}
         />
       ) : null}
@@ -457,6 +514,7 @@ export default function OperacaoScreen() {
         chamado={aberto}
         catalogos={catalogos}
         pendente={aberto ? sync.idsPendentes.has(String(aberto.id)) : false}
+        exigirFoto={exigirFoto}
         origem={posicao}
         onClose={() => setAberto(null)}
         onAtualizado={aoAtualizar}

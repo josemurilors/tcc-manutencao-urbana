@@ -14,6 +14,7 @@ import MapView, { Circle, Marker, Polyline } from 'react-native-maps';
 
 import { MAPA_ESTILO_ESCURO } from '@/constants/map-style';
 import { Radius } from '@/constants/theme';
+import { ANEIS_CALOR, corNaRampa, intensidadeDoCirculo } from '@/utils/heatmap';
 import { ladoDoCluster, textoDoCluster } from '@/utils/rarear';
 
 import type {
@@ -119,16 +120,32 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
       toolbarEnabled={false}
       userInterfaceStyle={escuro ? 'dark' : 'light'}
       customMapStyle={escuro ? MAPA_ESTILO_ESCURO : []}>
-      {circulos.map((circulo) => (
-        <Circle
-          key={circulo.key}
-          center={circulo.centro}
-          radius={circulo.raio}
-          strokeColor={circulo.corBorda ?? 'transparent'}
-          strokeWidth={circulo.larguraBorda ?? 0}
-          fillColor={circulo.corPreenchimento}
-        />
-      ))}
+      {circulos.map((circulo) => {
+        const calor = intensidadeDoCirculo(circulo);
+        if (calor == null) {
+          return (
+            <Circle
+              key={circulo.key}
+              center={circulo.centro}
+              radius={circulo.raio}
+              strokeColor={circulo.corBorda ?? 'transparent'}
+              strokeWidth={circulo.larguraBorda ?? 0}
+              fillColor={circulo.corPreenchimento}
+            />
+          );
+        }
+        // Calor: anéis concêntricos translúcidos (degradê radial), ver utils/heatmap.
+        return ANEIS_CALOR.map((anel, i) => (
+          <Circle
+            key={`${circulo.key}-${i}`}
+            center={circulo.centro}
+            radius={circulo.raio * anel.raio}
+            strokeColor="transparent"
+            strokeWidth={0}
+            fillColor={corNaRampa(calor * anel.rampa, anel.alpha)}
+          />
+        ));
+      })}
 
       {linhas.map((linha) => (
         <Polyline

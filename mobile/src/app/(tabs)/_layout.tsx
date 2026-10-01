@@ -1,6 +1,6 @@
 /**
  * Abas principais. Substituem o header + dropdown de usuário do web:
- * mapa, lista de chamados, painel e operação. A conta saiu da barra — vive
+ * mapa, operação e painel. A conta saiu da barra — vive
  * atrás do botão de menu no topo do mapa. Com uma aba só (visitante ou
  * cidadão: apenas o mapa) a barra inteira some.
  *
@@ -54,15 +54,6 @@ export default function TabsLayout() {
           // Mapa de trabalho do operador: fila, meus atendimentos, finalizar.
           // Separado do mapa do cidadão para nenhum dos dois virar uma mistura.
           href: ehEquipe ? undefined : null,
-        }}
-      />
-      <Tabs.Screen
-        name="chamados"
-        options={{
-          title: 'Chamados',
-          // Fora da barra: a lista geral segue existindo como rota (/chamados),
-          // mas o dia a dia do cidadão é o mapa + Conta > Meus chamados.
-          href: null,
         }}
       />
       <Tabs.Screen

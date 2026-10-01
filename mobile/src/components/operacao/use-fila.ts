@@ -9,9 +9,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '@/context/auth-context';
-import { apiOperacao, ehErroDeRede } from '@/services/api-operacao';
+import { apiOperacao, ehErroDeRede, type ResumoOperacao } from '@/services/api-operacao';
 import { lerCacheFila, salvarCacheFila } from '@/services/operacao-offline';
-import type { ChamadoFila, Coordenada, FiltrosFila, ResumoFila } from '@/types/operacao';
+import type { ChamadoFila, Coordenada, FiltrosFila } from '@/types/operacao';
 
 import { sinalizado, venceEm24h } from './regras';
 
@@ -43,7 +43,7 @@ export function useFila(posicao: Coordenada | null) {
   const [itens, setItens] = useState<ChamadoFila[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
-  const [resumo, setResumo] = useState<ResumoFila | null>(null);
+  const [resumo, setResumo] = useState<ResumoOperacao | null>(null);
   const [estado, setEstado] = useState<EstadoFila>('carregando');
   const [erro, setErro] = useState<string | null>(null);
   /** Quando a tela mostra o cache: a hora em que ele foi salvo. */

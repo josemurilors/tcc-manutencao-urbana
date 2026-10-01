@@ -5,7 +5,8 @@
  * Cada linha vira uma frase ("Ana alterou o SLA de Buraco para 5 dias"),
  * montada em `components/gestao/auditoria-texto.ts`. Filtra por família de
  * ação, período e pessoa — tocar num registro mostra o antes → depois e
- * oferece "ver só as ações de Ana".
+ * oferece "ver só as ações de Ana". O botão do topo exporta em CSV o que os
+ * filtros mostram (`?formato=csv`), para anexar a um processo ou planilha.
  * Só administrador do município.
  */
 
@@ -21,6 +22,7 @@ import {
   mudancasDaAuditoria,
   rotuloDaAcao,
 } from '@/components/gestao/auditoria-texto';
+import { mensagemDeErro } from '@/components/gestao/confirmar';
 import { EstadoCarga } from '@/components/gestao/estado-carga';
 import { GestaoShell } from '@/components/gestao/gestao-shell';
 import { useListaPaginada } from '@/components/gestao/use-lista-paginada';
@@ -34,6 +36,7 @@ import { StateView } from '@/components/ui/state-view';
 import { AppText } from '@/components/ui/text';
 import { Layout, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
+import { useToast } from '@/context/toast-context';
 import { apiGestao } from '@/services/api-gestao';
 import type { RegistroAuditoria } from '@/types/gestao';
 import { formatarDataHora } from '@/utils/format';
@@ -64,6 +67,8 @@ export default function AuditoriaScreen() {
   const [periodo, setPeriodo] = useState<Periodo>('tudo');
   const [pessoa, setPessoa] = useState<{ id: string; nome: string } | null>(null);
   const [aberto, setAberto] = useState<RegistroAuditoria | null>(null);
+  const [exportando, setExportando] = useState(false);
+  const toast = useToast();
 
   const inicio = inicioDoPeriodo(periodo);
   const lista = useListaPaginada<RegistroAuditoria>(
@@ -74,11 +79,32 @@ export default function AuditoriaScreen() {
 
   const filtrando = !!acao || !!pessoa || periodo !== 'tudo';
 
+  async function exportar() {
+    if (exportando) return;
+    setExportando(true);
+    const aviso = toast.info('Gerando o CSV da auditoria…');
+    try {
+      await apiGestao.exportarAuditoria({ acao: acao || undefined, usuario_id: pessoa?.id, inicio });
+      toast.dismiss(aviso);
+      toast.success(filtrando ? 'CSV exportado com os filtros atuais' : 'CSV exportado');
+    } catch (err) {
+      toast.dismiss(aviso);
+      toast.error(`Não foi possível exportar: ${mensagemDeErro(err)}`);
+    } finally {
+      setExportando(false);
+    }
+  }
+
   return (
     <GestaoShell
       title="Auditoria"
       subtitle={lista.estado === 'pronto' ? `${lista.total} registros` : undefined}
-      minimo="admin_municipal">
+      minimo="admin_municipal"
+      acao={{
+        icon: exportando ? 'hourglass-outline' : 'download-outline',
+        label: filtrando ? 'Exportar CSV com os filtros atuais' : 'Exportar CSV',
+        onPress: exportar,
+      }}>
       <View style={styles.filtros}>
         <Select
           label="Ação"

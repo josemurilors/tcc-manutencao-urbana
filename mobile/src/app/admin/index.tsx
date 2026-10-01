@@ -15,6 +15,7 @@ import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GestaoShell } from '@/components/gestao/gestao-shell';
+import { useMunicipioGestao } from '@/components/gestao/municipio-gestao';
 import { NIVEL, ROTULO_PAPEL, usePapel } from '@/components/gestao/papeis';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -59,6 +60,14 @@ const AREAS: Area[] = [
     descricao: 'Prazo de atendimento, prioridade, secretaria e checklist por tipo de problema.',
     icone: 'pricetags',
     rota: '/admin/categorias',
+    minimo: 'gestor',
+  },
+  {
+    chave: 'respostas',
+    titulo: 'Respostas-padrão',
+    descricao: 'Textos prontos que a equipe usa ao responder e concluir chamados.',
+    icone: 'chatbubbles',
+    rota: '/admin/respostas',
     minimo: 'gestor',
   },
   {
@@ -116,6 +125,12 @@ async function buscarContadores(nivel: number): Promise<Record<string, Contador>
         tom: semPrazo ? 'warning' : undefined,
       };
     },
+    respostas: async () => {
+      const r = await apiGestao.respostasPadrao();
+      return r.length
+        ? { valor: plural(r.length, 'resposta', 'respostas') }
+        : { valor: 'Nenhuma ainda', tom: 'warning' };
+    },
     moderacao: async () => {
       const m = await apiGestao.moderacao();
       const pendentes = m.contagens.sinalizados;
@@ -165,6 +180,7 @@ async function buscarContadores(nivel: number): Promise<Record<string, Contador>
 export default function AdminHubScreen() {
   const { user } = useAuth();
   const { papel, nivel } = usePapel();
+  const escolhido = useMunicipioGestao();
   const insets = useSafeAreaInsets();
   const [contadores, setContadores] = useState<Record<string, Contador>>({});
   const [atualizando, setAtualizando] = useState(false);
@@ -182,16 +198,18 @@ export default function AdminHubScreen() {
     return () => {
       cancelado = true;
     };
-  }, [nivel, versao]);
+  }, [nivel, versao, escolhido?.codigo]);
 
   function atualizar() {
     setAtualizando(true);
     setVersao((v) => v + 1);
   }
 
-  const municipio = user?.municipio?.nome
-    ? `${user.municipio.nome} - ${user.municipio.uf_sigla}`
-    : 'Seu município';
+  const municipio = escolhido
+    ? `${escolhido.nome} - ${escolhido.uf_sigla}`
+    : user?.municipio?.nome
+      ? `${user.municipio.nome} - ${user.municipio.uf_sigla}`
+      : 'Seu município';
 
   return (
     <GestaoShell title="Administração" subtitle={municipio} minimo="gestor">

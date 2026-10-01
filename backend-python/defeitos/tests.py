@@ -869,46 +869,6 @@ class TestBatchStatus:
         assert obj.resolvido_em and obj.fechado_em
 
 
-class TestOrdemServico:
-
-    URL = 'defeitos-ordem-servico'
-
-    def test_ordem_servico_pdf(self, admin_client):
-        created = _create_defeito(admin_client, titulo='Buraco na Avenida')
-        resp = admin_client.get(reverse(self.URL, args=[created['id']]))
-        assert resp.status_code == 200
-        assert resp['Content-Type'] == 'application/pdf'
-        assert 'attachment' in resp['Content-Disposition']
-        assert resp['Content-Disposition'].startswith('attachment; filename="OS-')
-        assert b'%PDF' in resp.content
-
-    def test_ordem_servico_contains_defeito_titulo(self, admin_client):
-        from pypdf import PdfReader
-        import io
-        created = _create_defeito(admin_client, titulo='Buraco gigante no centro')
-        resp = admin_client.get(reverse(self.URL, args=[created['id']]))
-        assert resp.status_code == 200
-        reader = PdfReader(io.BytesIO(resp.content))
-        texto = ' '.join(page.extract_text() for page in reader.pages)
-        assert 'Buraco gigante no centro' in texto
-
-    def test_ordem_servico_denied_for_plain_user(self, client, admin_client):
-        created = _create_defeito(admin_client)
-        other = _new_user_client(client)
-        resp = other.get(reverse(self.URL, args=[created['id']]))
-        assert resp.status_code == 403
-
-    def test_ordem_servico_unauthenticated(self, client, admin_client):
-        created = _create_defeito(admin_client)
-        resp = client.get(reverse(self.URL, args=[created['id']]))
-        assert resp.status_code == 401
-
-    def test_ordem_servico_nonexistent(self, admin_client):
-        import uuid
-        resp = admin_client.get(reverse(self.URL, args=[uuid.uuid4()]))
-        assert resp.status_code == 404
-
-
 class TestMeus:
 
     URL = 'defeitos-meus'
@@ -1097,7 +1057,7 @@ class TestVisaoMunicipio:
 
 class TestOperacaoPorMunicipio:
     """
-    Operador vinculado a um município só opera (fila, assumir, status, OS,
+    Operador vinculado a um município só opera (assumir, status,
     lote) nos chamados que caíram nele. Como cidadão, vê e reporta em
     qualquer lugar.
     """
@@ -1141,20 +1101,6 @@ class TestOperacaoPorMunicipio:
         # Longe de qualquer outra cidade de teste.
         return _create_defeito(auth_client, latitude=-27.0 + passo, longitude=-52.0 - passo)
 
-    def test_fila_so_do_municipio(self, client, auth_client):
-        self._cidade()
-        dentro = self._dentro(auth_client)
-        self._fora(auth_client)
-        op = self._operador(client, self.CIDADE)
-        resp = op.get(reverse('defeitos-operacao'))
-        assert resp.status_code == 200, resp.data
-        assert resp.data['municipio'] == {'codigo': self.CIDADE, 'nome': 'Cidade Operacao', 'uf_sigla': 'SP'}
-        assert [d['id'] for d in resp.data['defeitos']] == [dentro['id']]
-
-    def test_sem_municipio_nao_opera(self, client):
-        op = self._operador(client, None)
-        assert op.get(reverse('defeitos-operacao')).status_code == 403
-
     def test_assumir_so_no_seu_municipio(self, client, auth_client):
         self._cidade()
         dentro = self._dentro(auth_client)
@@ -1163,13 +1109,12 @@ class TestOperacaoPorMunicipio:
         assert op.patch(reverse('defeitos-atender', args=[fora['id']])).status_code == 403
         assert op.patch(reverse('defeitos-atender', args=[dentro['id']])).status_code == 200
 
-    def test_status_e_os_so_no_seu_municipio(self, client, auth_client):
+    def test_status_so_no_seu_municipio(self, client, auth_client):
         self._cidade()
         fora = self._fora(auth_client)
         op = self._operador(client, self.CIDADE)
         resp = op.patch(reverse('defeitos-status', args=[fora['id']]), {'status': 'em_andamento'}, format='json')
         assert resp.status_code == 403
-        assert op.get(reverse('defeitos-ordem-servico', args=[fora['id']])).status_code == 403
 
     def test_lote_ignora_outros_municipios(self, client, auth_client):
         self._cidade()

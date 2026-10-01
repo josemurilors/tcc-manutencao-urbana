@@ -55,6 +55,18 @@ def _enviar(funcao, email, code):
         logger.exception('falha ao enviar e-mail de código para %s', email)
 
 
+def _aplicar_convite(user):
+    """
+    Convite pendente para este e-mail (gestão da prefeitura) vira papel na
+    equipe ao entrar com o e-mail verificado. Falha aqui não impede o login.
+    """
+    try:
+        from gestao.servicos import aplicar_convite
+        aplicar_convite(user)
+    except Exception:
+        logger.exception('falha ao aplicar convite para %s', getattr(user, 'email', ''))
+
+
 def verificar_id_token_google(token):
     """Valida o ID token do Google e devolve as claims.
 
@@ -161,6 +173,7 @@ class GoogleLoginView(APIView):
             user.codigo_2fa = None
             user.codigo_2fa_expira = None
             user.save(update_fields=['email_verified', 'codigo_2fa', 'codigo_2fa_expira'])
+        _aplicar_convite(user)
 
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
@@ -187,6 +200,7 @@ class LoginView(TokenObtainPairView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         user = serializer.user
+        _aplicar_convite(user)
         from .serializers import UserSerializer
         user_serializer = UserSerializer(user)
         return Response({
@@ -337,6 +351,7 @@ class VerifyEmailView(APIView):
         user.codigo_2fa = None
         user.codigo_2fa_expira = None
         user.save(update_fields=['email_verified', 'codigo_2fa', 'codigo_2fa_expira'])
+        _aplicar_convite(user)
         return Response({'message': 'Email verificado com sucesso'})
 
 

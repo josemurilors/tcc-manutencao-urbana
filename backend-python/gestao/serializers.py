@@ -155,6 +155,24 @@ def membro_dict(user, nomes_secretarias, nomes_equipes, abertos=0):
     }
 
 
+def convite_dict(convite, nomes_secretarias, nomes_equipes):
+    """Convite pendente (o `token` não sai daqui: o aceite é pelo e-mail verificado)."""
+    autor = convite.convidado_por if convite.convidado_por_id else None
+    return {
+        'id': convite.id,
+        'email': convite.email,
+        'papel': convite.papel,
+        'secretaria_id': convite.secretaria_id,
+        'secretaria_nome': nomes_secretarias.get(convite.secretaria_id),
+        'equipe_id': convite.equipe_id,
+        'equipe_nome': nomes_equipes.get(convite.equipe_id),
+        'convidado_por_nome': autor.nome if autor else None,
+        'criado_em': convite.criado_em,
+        'expira_em': convite.expira_em,
+        'expirado': convite.expirado,
+    }
+
+
 # -------------------------------------------------------------- categorias
 
 class CategoriaRegraSerializer(serializers.Serializer):

@@ -6,13 +6,17 @@
  * últimos 90 dias (`GET /transparencia/<codigo>/`, contrato v3 §7.5) — quantos
  * resolveu, quanto no prazo, em quanto tempo e com que satisfação —, o
  * desempenho por tipo e os últimos resolvidos. As outras abas são os rankings
- * de abertos de antes, com os dados de `GET /defeitos/municipio/`.
+ * de abertos de antes, com os dados de `GET /defeitos/municipio/`. O rodapé
+ * leva ao portal público completo (`/transparencia/<codigo>`), a página
+ * compartilhável com gráfico mensal, dados abertos e Open311.
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Button } from '@/components/ui/button';
 import { FilterChips } from '@/components/ui/chips';
 import { IconButton } from '@/components/ui/icon-button';
 import { StateView } from '@/components/ui/state-view';
@@ -232,6 +236,19 @@ export function MunicipioPanel({ visao, icones, onSelecionar, onAbrirChamado, on
               ))
             )}
           </ScrollView>
+
+          <View style={styles.rodape}>
+            <Button
+              size="sm"
+              variant="secondary"
+              block
+              // Rota nova: o tipo gerado das rotas só a conhece depois que o Metro a regenera.
+              onPress={() => router.push(`/transparencia/${encodeURIComponent(codigo)}` as Href)}
+              icon={<Ionicons name="open-outline" size={16} color={colors.textPrimary} />}
+              accessibilityHint="Abre a página pública com indicadores, gráficos e dados abertos da cidade">
+              Ver portal de transparência
+            </Button>
+          </View>
         </>
       )}
     </View>
@@ -399,6 +416,9 @@ const styles = StyleSheet.create({
   },
   estado: {
     paddingVertical: Spacing[4],
+  },
+  rodape: {
+    paddingHorizontal: Spacing[3],
   },
   linha: {
     flexDirection: 'row',

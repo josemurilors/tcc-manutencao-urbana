@@ -186,6 +186,9 @@ class DefeitoEventoSerializer(serializers.ModelSerializer):
         nome = obj.autor.nome if obj.autor_id and obj.autor else ''
         if self.context.get('equipe'):
             return nome
+        if obj.tipo == 'apoio':
+            # Confirmação é anônima para o público: só conta quantos.
+            return ''
         if obj.papel == 'cidadao':
             return mascarar_nome(nome)
         if obj.papel in permissoes.PAPEIS_EQUIPE:

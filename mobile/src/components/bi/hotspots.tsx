@@ -3,22 +3,20 @@
  * (mesmo problema voltando na mesma rua). Lista, não mapa: o gestor quer
  * saber "onde" em texto para mandar a equipe; o mapa é um toque adiante.
  *
- * "Ver no mapa" abre o ponto no app de mapas do aparelho. O mapa do próprio
- * app só sabe abrir um chamado (`?abrir=<id>`), não uma coordenada solta —
- * quando aceitar `?lat=&lng=`, troque `abrirCoordenada` por uma rota interna.
+ * "Ver no mapa" abre o mapa do próprio app enquadrando a área
+ * (`/(tabs)/mapa?lat=&lng=`), com os chamados em volta.
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import * as Linking from 'expo-linking';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui/text';
 import { Layout, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
-import { useToast } from '@/context/toast-context';
 import type { BiHotspots } from '@/types/bi';
 
 import { fmtNumero } from './formato';
+import { abrirCoordenada } from './navegar';
 
 type Reincidencia = BiHotspots['reincidencia'][number];
 
@@ -31,7 +29,6 @@ type Props = {
 
 export function ListaHotspots({ dados, onAbrirReincidencia, limite = 5 }: Props) {
   const colors = useColors();
-  const toast = useToast();
 
   // Célula com um chamado só não é concentração: é ruído no topo da lista.
   const celulas = [...(dados.celulas ?? [])]
@@ -41,14 +38,6 @@ export function ListaHotspots({ dados, onAbrirReincidencia, limite = 5 }: Props)
   const reincidencia = [...(dados.reincidencia ?? [])]
     .sort((a, b) => b.ocorrencias - a.ocorrencias)
     .slice(0, limite);
-
-  async function abrirCoordenada(lat: number, lng: number) {
-    try {
-      await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Não foi possível abrir o mapa.');
-    }
-  }
 
   return (
     <View style={styles.raiz}>

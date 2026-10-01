@@ -3,10 +3,13 @@
  * com que papel. Substitui a antiga "Gerenciar usuários", que listava todas as
  * contas do sistema e promovia com um toque, sem confirmar.
  *
- * - Busca por nome/e-mail (300 ms de espera) e filtro por papel, paginado.
+ * - Busca por nome/e-mail (300 ms de espera) e filtro por papel, paginada
+ *   no servidor com rolagem infinita.
  * - Gestor consulta; só o administrador convida, muda papel/lotação e revoga.
- * - Convidar vincula uma conta que já existe (a pessoa cria a conta no app
- *   antes); toda alteração pede confirmação e cai na auditoria do backend.
+ * - Convidar um e-mail com conta vincula na hora; sem conta, vira convite
+ *   enviado por e-mail, que aparece em "Convites pendentes" (reenviar ou
+ *   cancelar) até a pessoa entrar no app com esse e-mail verificado.
+ * - Toda alteração pede confirmação e cai na auditoria do backend.
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -42,7 +45,15 @@ import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
 import { apiGestao } from '@/services/api-gestao';
-import type { AlteracaoMembro, Equipe, Membro, PapelEquipe, Secretaria } from '@/types/gestao';
+import type {
+  AlteracaoMembro,
+  Convite,
+  Equipe,
+  Membro,
+  PapelEquipe,
+  Secretaria,
+} from '@/types/gestao';
+import { formatarData } from '@/utils/format';
 
 type FiltroPapel = 'todos' | PapelEquipe;
 
@@ -97,8 +108,13 @@ export default function EquipeScreen() {
   const secretarias = lotacao.dados?.[0] ?? [];
   const equipes = lotacao.dados?.[1] ?? [];
 
+  // Convites pendentes: acessório da lista; falhou, a equipe aparece igual.
+  const convites = useDados(apiGestao.convites);
+  const pendentes = convites.dados ?? [];
+
   const [selecionado, setSelecionado] = useState<Membro | null>(null);
   const [convidando, setConvidando] = useState(false);
+  const [conviteAberto, setConviteAberto] = useState<Convite | null>(null);
 
   const filtrando = !!q || filtro !== 'todos';
 
@@ -142,7 +158,21 @@ export default function EquipeScreen() {
           onEndReached={lista.carregarMais}
           onEndReachedThreshold={0.4}
           refreshControl={
-            <RefreshControl refreshing={lista.atualizando} onRefresh={lista.atualizar} />
+            <RefreshControl
+              refreshing={lista.atualizando}
+              onRefresh={() => {
+                lista.atualizar();
+                convites.atualizar();
+              }}
+            />
+          }
+          ListHeaderComponent={
+            !filtrando && pendentes.length ? (
+              <ConvitesPendentes
+                convites={pendentes}
+                onAbrir={ehAdmin ? setConviteAberto : undefined}
+              />
+            ) : null
           }
           ListEmptyComponent={
             filtrando ? (
@@ -166,7 +196,7 @@ export default function EquipeScreen() {
                 title="Ainda não há equipe"
                 description={
                   ehAdmin
-                    ? 'Convide os servidores que vão atender os chamados. Eles precisam ter criado a conta no app.'
+                    ? 'Convide os servidores que vão atender os chamados. Quem ainda não tem conta recebe o convite por e-mail.'
                     : 'O administrador do município ainda não convidou ninguém.'
                 }
                 action={ehAdmin ? { label: 'Convidar pessoa', onPress: () => setConvidando(true) } : undefined}
@@ -209,14 +239,25 @@ export default function EquipeScreen() {
           secretarias={secretarias}
           equipes={equipes}
           onFechar={() => setConvidando(false)}
-          onConvidado={lista.recarregar}
+          onConvidado={(tipo) => {
+            if (tipo === 'membro') lista.recarregar();
+            convites.atualizar();
+          }}
+        />
+      ) : null}
+      {conviteAberto ? (
+        <ConvitePendenteSheet
+          key={conviteAberto.id}
+          convite={conviteAberto}
+          onFechar={() => setConviteAberto(null)}
+          onAlterado={convites.atualizar}
         />
       ) : null}
     </GestaoShell>
   );
 }
 
-function lotacaoDe(m: Membro) {
+function lotacaoDe(m: Pick<Membro, 'secretaria_nome' | 'equipe_nome'>) {
   return [m.secretaria_nome, m.equipe_nome].filter(Boolean).join(' · ');
 }
 
@@ -480,7 +521,8 @@ function ConviteSheet({
   secretarias: Secretaria[];
   equipes: Equipe[];
   onFechar: () => void;
-  onConvidado: () => void;
+  /** `membro` = conta existente vinculada; `convite` = e-mail sem conta. */
+  onConvidado: (tipo: 'membro' | 'convite') => void;
 }) {
   const toast = useToast();
   const [email, setEmail] = useState('');
@@ -498,19 +540,32 @@ function ConviteSheet({
     if (!emailOk) return;
     setEnviando(true);
     try {
-      await apiGestao.convidarMembro({
+      const r = await apiGestao.convidarMembro({
         email: email.trim().toLowerCase(),
         papel,
         secretaria_id: paraId(secretariaId),
         equipe_id: paraId(equipeId),
       });
-      toast.success(`${email.trim()} agora faz parte da equipe como ${ROTULO_PAPEL[papel]}`);
-      onConvidado();
+      if (r && 'convite' in r) {
+        // Sem conta com este e-mail: virou convite pendente.
+        if (r.email_enviado) {
+          toast.success(
+            `Convite enviado para ${r.convite.email}. O acesso entra quando a pessoa criar a conta.`,
+          );
+        } else {
+          toast.warning(
+            `Convite criado, mas o e-mail não saiu. Avise ${r.convite.email} para criar a conta no app com este e-mail.`,
+          );
+        }
+        onConvidado('convite');
+      } else {
+        toast.success(`${email.trim()} agora faz parte da equipe como ${ROTULO_PAPEL[papel]}`);
+        onConvidado('membro');
+      }
       onFechar();
     } catch (err) {
-      // O backend só vincula conta existente: a mensagem dele (ex.: "nenhuma
-      // conta com este e-mail") diz o que fazer.
-      toast.error(`Não foi possível adicionar: ${mensagemDeErro(err)}`);
+      // A mensagem do backend (ex.: "já atua em outro município") diz o que fazer.
+      toast.error(`Não foi possível convidar: ${mensagemDeErro(err)}`);
     } finally {
       setEnviando(false);
     }
@@ -521,14 +576,14 @@ function ConviteSheet({
       visible
       onClose={onFechar}
       title="Convidar para a equipe"
-      description="A pessoa precisa ter criado a conta no app com este e-mail."
+      description="Quem já tem conta entra na equipe na hora. Quem não tem recebe um convite por e-mail e ganha o acesso ao criar a conta com este e-mail."
       footer={
         <>
           <Button variant="secondary" onPress={onFechar} style={styles.botao}>
             Cancelar
           </Button>
           <Button onPress={enviar} loading={enviando} style={styles.botao}>
-            Adicionar
+            Convidar
           </Button>
         </>
       }>
@@ -573,7 +628,148 @@ function ConviteSheet({
   );
 }
 
+function validadeDoConvite(c: Convite) {
+  return c.expirado ? 'Convite vencido' : `Vale até ${formatarData(c.expira_em)}`;
+}
+
+function ConvitesPendentes({
+  convites,
+  onAbrir,
+}: {
+  convites: Convite[];
+  /** Só o administrador reenvia/cancela; sem isto, a lista é só leitura. */
+  onAbrir?: (c: Convite) => void;
+}) {
+  return (
+    <View style={styles.convites}>
+      <AppText variant="label" accessibilityRole="header">
+        Convites pendentes ({convites.length})
+      </AppText>
+      {convites.map((c) => {
+        const papel = ehPapel(c.papel) ? c.papel : 'operador';
+        return (
+          <ListItem
+            key={c.id}
+            title={c.email}
+            subtitle={[lotacaoDe(c), validadeDoConvite(c)].filter(Boolean).join(' · ')}
+            leading="mail"
+            onPress={onAbrir ? () => onAbrir(c) : undefined}
+            accessibilityLabel={`Convite para ${c.email}, ${ROTULO_PAPEL[papel]}, ${validadeDoConvite(c)}`}
+            accessibilityHint={onAbrir ? 'Abre as opções de reenviar ou cancelar' : undefined}
+            trailing={
+              <View style={styles.selos}>
+                <Badge label={ROTULO_PAPEL[papel]} tone={TOM_PAPEL[papel]} icon={null} />
+                {c.expirado ? <Badge label="Vencido" tone="warning" /> : null}
+              </View>
+            }
+          />
+        );
+      })}
+      <AppText variant="label" accessibilityRole="header" style={styles.tituloMembros}>
+        Na equipe
+      </AppText>
+    </View>
+  );
+}
+
+function ConvitePendenteSheet({
+  convite,
+  onFechar,
+  onAlterado,
+}: {
+  convite: Convite;
+  onFechar: () => void;
+  onAlterado: () => void;
+}) {
+  const colors = useColors();
+  const toast = useToast();
+  const [reenviando, setReenviando] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const papel = ehPapel(convite.papel) ? convite.papel : 'operador';
+  const lotacao = lotacaoDe(convite);
+
+  async function reenviar() {
+    setReenviando(true);
+    try {
+      const r = await apiGestao.reenviarConvite(convite.id);
+      if (r?.email_enviado) toast.success(`Convite reenviado para ${convite.email}`);
+      else toast.warning('Prazo renovado, mas o e-mail não saiu. Avise a pessoa por outro meio.');
+      onAlterado();
+      onFechar();
+    } catch (err) {
+      toast.error(`Não foi possível reenviar: ${mensagemDeErro(err)}`);
+    } finally {
+      setReenviando(false);
+    }
+  }
+
+  async function cancelar() {
+    const ok = await confirmar({
+      titulo: 'Cancelar convite?',
+      mensagem: `${convite.email} não vai mais entrar na equipe ao criar a conta. Você pode convidar de novo depois.`,
+      confirmar: 'Cancelar convite',
+      destrutivo: true,
+    });
+    if (!ok) return;
+    setCancelando(true);
+    try {
+      await apiGestao.cancelarConvite(convite.id);
+      toast.success('Convite cancelado');
+      onAlterado();
+      onFechar();
+    } catch (err) {
+      toast.error(`Não foi possível cancelar: ${mensagemDeErro(err)}`);
+    } finally {
+      setCancelando(false);
+    }
+  }
+
+  return (
+    <BottomSheet
+      visible
+      onClose={onFechar}
+      title={convite.email}
+      description={`Convite para ${ROTULO_PAPEL[papel]}${lotacao ? ` · ${lotacao}` : ''}`}
+      footer={
+        <>
+          <Button
+            variant="danger"
+            onPress={cancelar}
+            loading={cancelando}
+            disabled={reenviando}
+            icon={<Ionicons name="close-circle" size={16} color={colors.danger} />}
+            style={styles.botao}>
+            Cancelar convite
+          </Button>
+          <Button onPress={reenviar} loading={reenviando} disabled={cancelando} style={styles.botao}>
+            Reenviar
+          </Button>
+        </>
+      }>
+      <AppText variant="bodySm" tone="secondary">
+        {convite.expirado
+          ? 'O prazo deste convite acabou. Reenviar manda o e-mail de novo e renova o prazo.'
+          : `${validadeDoConvite(convite)}. A pessoa ganha o acesso quando criar a conta (ou entrar) com este e-mail e confirmá-lo.`}
+      </AppText>
+      {convite.convidado_por_nome ? (
+        <AppText variant="caption" tone="muted">
+          {`Convidado por ${convite.convidado_por_nome}${
+            convite.criado_em ? ` em ${formatarData(convite.criado_em)}` : ''
+          }.`}
+        </AppText>
+      ) : null}
+    </BottomSheet>
+  );
+}
+
 const styles = StyleSheet.create({
+  convites: {
+    gap: Spacing[1],
+    paddingBottom: Spacing[2],
+  },
+  tituloMembros: {
+    paddingTop: Spacing[3],
+  },
   filtros: {
     gap: Spacing[2],
     paddingBottom: Spacing[2],

@@ -10,6 +10,15 @@
 const androidMapsKey = process.env.GOOGLE_MAPS_API_KEY_ANDROID;
 const iosMapsKey = process.env.GOOGLE_MAPS_API_KEY_IOS;
 
+/**
+ * Links universais: `https://tcc.josemurilors.com.br/chamado/<id>` (o link que
+ * o app compartilha, `linkPublicoDoChamado`) abre direto no app instalado; sem
+ * o app, cai no site. A verificação depende dos arquivos servidos pelo domínio
+ * em `/.well-known/` (modelos e passo a passo em `docs/deep-links/`): sem eles
+ * o Android mostra o seletor "abrir com" e o iOS abre o navegador.
+ */
+const DOMINIO_LINKS = process.env.CIU_DOMINIO_LINKS || 'tcc.josemurilors.com.br';
+
 const mapsPlugin =
   androidMapsKey || iosMapsKey
     ? [
@@ -36,6 +45,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.ciu.mobile',
+      associatedDomains: [`applinks:${DOMINIO_LINKS}`],
       infoPlist: {
         NSPhotoLibraryUsageDescription:
           'Permite anexar fotos dos defeitos urbanos aos seus chamados.',
@@ -55,6 +65,14 @@ module.exports = {
       permissions: [
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
+      ],
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [{ scheme: 'https', host: DOMINIO_LINKS, pathPrefix: '/chamado/' }],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
       ],
     },
     web: {

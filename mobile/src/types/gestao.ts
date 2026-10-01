@@ -54,6 +54,49 @@ export type ConviteMembro = {
   equipe_id?: number | null;
 };
 
+/**
+ * Convite pendente para quem ainda não tem conta (GET `convites/`). O papel
+ * entra sozinho quando a pessoa entra no app com o e-mail verificado.
+ */
+export type Convite = {
+  id: number;
+  email: string;
+  papel: PapelEquipe;
+  secretaria_id?: number | null;
+  secretaria_nome?: string | null;
+  equipe_id?: number | null;
+  equipe_nome?: string | null;
+  convidado_por_nome?: string | null;
+  criado_em?: string;
+  expira_em: string;
+  /** Passou do prazo: só vale de novo se reenviar. */
+  expirado?: boolean;
+};
+
+/** POST `membros/` com e-mail sem conta, e POST `convites/<id>/reenviar/`. */
+export type ConviteResposta = {
+  convite: Convite;
+  /** `false` = e-mail não configurado ou falhou; o convite vale assim mesmo. */
+  email_enviado: boolean;
+};
+
+/** Resposta-padrão da operação (`operacao/respostas-padrao/`, escrita gestor+). */
+export type RespostaPadraoGestao = {
+  id: number;
+  titulo: string;
+  texto: string;
+  /** `null` = vale para qualquer categoria. */
+  categoria_id?: number | null;
+  ativo?: boolean;
+  criado_em?: string;
+};
+
+export type RespostaPadraoEntrada = {
+  titulo: string;
+  texto: string;
+  categoria_id?: number | null;
+};
+
 export type AlteracaoMembro = {
   papel?: PapelEquipe;
   secretaria_id?: number | null;

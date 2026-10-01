@@ -1,13 +1,15 @@
 /**
  * Ficha de atendimento do chamado para a **equipe da prefeitura** (aba Operação).
  *
- * Mostra o mesmo conteúdo do detalhe do cidadão (`DefectDetail`) mais o que a
- * operação precisa: SLA restante, score, sinalizações, quem atende, evidências
- * antes/depois, notas internas — e as ações conforme papel e status, sempre
+ * Mostra o mesmo conteúdo do detalhe do cidadão (status, andamento, histórico,
+ * pela moldura `FichaDetalhe`) mais o que a operação precisa: SLA restante,
+ * score, sinalizações, quem atende, um bloco único de fotos (do cidadão, antes
+ * e depois, com GPS e autor) — e as ações conforme papel e status, sempre
  * pelas rotas dedicadas de `api/v1/operacao/` (contrato v3 §7.1):
  *
  * - todos da equipe: assumir/devolver, triar, programar, iniciar, concluir
- *   (checklist + foto do depois com GPS + resposta), foto do antes, nota
+ *   (checklist + foto do depois com GPS, se a prefeitura exige + resposta),
+ *   foto do antes, nota
  *   interna, resposta ao cidadão, Ordem de Serviço;
  * - gestor+: atribuir a equipe/servidor, prazo (SLA), prioridade, rejeitar
  *   (motivo obrigatório; duplicado aponta o original) e reabrir.
@@ -20,7 +22,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { DefectDetail } from '@/components/defect-detail';
 import { AtribuirSheet, PrioridadeSheet, SlaSheet } from '@/components/operacao/gestao-sheets';
 import {
   ehGestor,
@@ -33,7 +34,8 @@ import {
   transicoesPermitidas,
   VERBO_TRANSICAO,
 } from '@/components/operacao/regras';
-import { EvidenciasChamado } from '@/components/operacao/registros-chamado';
+import { FichaDetalhe } from '@/components/operacao/ficha-detalhe';
+import { FotosChamado } from '@/components/operacao/registros-chamado';
 import { TextoSheet, type ModoTexto } from '@/components/operacao/texto-sheet';
 import { TransicaoSheet, type ResultadoTransicao } from '@/components/operacao/transicao-sheet';
 import type { Catalogos } from '@/components/operacao/use-catalogos';
@@ -46,7 +48,6 @@ import { corDoTom, Radius, Spacing, type Tom } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useToast } from '@/context/toast-context';
-import { API_URL } from '@/services/api';
 import { apiOperacao } from '@/services/api-operacao';
 import { executarOuEnfileirar, type AcaoOperacao } from '@/services/operacao-offline';
 import type { Defeito } from '@/types';
@@ -60,6 +61,8 @@ type Props = {
   catalogos: Catalogos;
   /** Há ação deste chamado esperando rede. */
   pendente: boolean;
+  /** A prefeitura exige a foto do depois para concluir (padrão: sim). */
+  exigirFoto?: boolean;
   /** Posição do servidor, origem da navegação externa. */
   origem?: { latitude: number; longitude: number } | null;
   onClose: () => void;
@@ -75,7 +78,15 @@ export function OperacaoSheet(props: Props) {
   return <Ficha key={String(props.chamado.id)} {...props} chamado={props.chamado} />;
 }
 
-function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: Props & { chamado: ChamadoFila }) {
+function Ficha({
+  chamado,
+  catalogos,
+  pendente,
+  exigirFoto = true,
+  origem,
+  onClose,
+  onAtualizado,
+}: Props & { chamado: ChamadoFila }) {
   const colors = useColors();
   const toast = useToast();
   const { user } = useAuth();
@@ -106,7 +117,6 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
   // A fila é a fonte mais nova (recebe as respostas das ações); o detalhe
   // completa descrição e fotos.
   const c: ChamadoFila = { ...(detalhe ?? {}), ...chamado };
-  const fotoCidadao = c.imagem_thumbnail ?? (c.imagem_url?.startsWith('/') ? `${API_URL}${c.imagem_url}` : c.imagem_url);
 
   const gestor = ehGestor(user);
   const meuId = user?.id != null ? String(user.id) : null;
@@ -340,12 +350,7 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
   );
 
   return (
-    <DefectDetail
-      defeito={{ ...c, imagem_thumbnail: fotoCidadao ?? null }}
-      onClose={onClose}
-      rotuloApoios="apoios"
-      visao="operacao"
-      destaque={destaque}>
+    <FichaDetalhe defeito={c} onClose={onClose} destaque={destaque} fotos={<FotosChamado chamado={c} versao={versao} />}>
       <View style={styles.corpo}>
         <Grupo titulo="Registro">
           {!fechado ? (
@@ -437,17 +442,13 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
             ) : null}
           </Grupo>
         ) : null}
-
-        <Grupo titulo="Evidências da equipe (com GPS)" bloco>
-          <EvidenciasChamado id={c.id} versao={versao} />
-        </Grupo>
-
       </View>
 
       <TransicaoSheet
         chamado={c}
         para={para}
         respostas={catalogos.respostas}
+        exigirFoto={exigirFoto}
         onClose={() => setPara(null)}
         onFeito={aposTransicao}
       />
@@ -490,17 +491,17 @@ function Ficha({ chamado, catalogos, pendente, origem, onClose, onAtualizado }: 
           onSalvar={(p) => gerencial('prioridade', () => apiOperacao.prioridade(c.id, p), 'Prioridade atualizada.')}
         />
       ) : null}
-    </DefectDetail>
+    </FichaDetalhe>
   );
 }
 
-function Grupo({ titulo, bloco, children }: { titulo: string; bloco?: boolean; children: React.ReactNode }) {
+function Grupo({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
     <View style={styles.grupo}>
       <AppText variant="caption" tone="secondary" weight="600" accessibilityRole="header">
         {titulo.toUpperCase()}
       </AppText>
-      <View style={bloco ? styles.bloco : styles.botoes}>{children}</View>
+      <View style={styles.botoes}>{children}</View>
     </View>
   );
 }
@@ -549,9 +550,6 @@ const styles = StyleSheet.create({
   botoes: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing[2],
-  },
-  bloco: {
     gap: Spacing[2],
   },
 });
