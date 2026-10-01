@@ -1,9 +1,12 @@
 /** Blocos de layout reaproveitados pelas telas internas. */
 
-import { ActivityIndicator, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { FontSize, FontWeight, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
+
+import { Card } from './card';
+import { StateView } from './state-view';
 
 /** Container de tela com o fundo do tema. */
 export function Screen({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
@@ -16,7 +19,9 @@ export function PageHeading({ title, subtitle }: { title: string; subtitle?: str
   const colors = useColors();
   return (
     <View style={styles.heading}>
-      <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+      <Text accessibilityRole="header" style={[styles.title, { color: colors.textPrimary }]}>
+        {title}
+      </Text>
       {subtitle ? (
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitle}</Text>
       ) : null}
@@ -28,7 +33,9 @@ export function SectionHeading({ title, subtitle }: { title: string; subtitle?: 
   const colors = useColors();
   return (
     <View style={styles.sectionHeading}>
-      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{title}</Text>
+      <Text accessibilityRole="header" style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+        {title}
+      </Text>
       {subtitle ? (
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitle}</Text>
       ) : null}
@@ -36,39 +43,31 @@ export function SectionHeading({ title, subtitle }: { title: string; subtitle?: 
   );
 }
 
+/** Atalho antigo para `<StateView kind="loading" skeleton={0} />`. */
 export function LoadingState({ label = 'Carregando...' }: { label?: string }) {
-  const colors = useColors();
-  return (
-    <View style={styles.centro}>
-      <ActivityIndicator color={colors.gold500} />
-      <Text style={[styles.subtitle, { color: colors.textMuted }]}>{label}</Text>
-    </View>
-  );
+  return <StateView kind="loading" skeleton={0} title={label} />;
 }
 
-export function EmptyState({ label }: { label: string }) {
-  const colors = useColors();
-  return (
-    <View style={styles.centro}>
-      <Text style={[styles.subtitle, { color: colors.textMuted }]}>{label}</Text>
-    </View>
-  );
+/**
+ * Atalho antigo para `<StateView kind="empty" />`. Prefira passar `icon`,
+ * `description` e `action`: vazio bom diz o que fazer em seguida.
+ */
+export function EmptyState({
+  label,
+  description,
+  icon,
+  action,
+}: {
+  label: string;
+  description?: string;
+  icon?: React.ComponentProps<typeof StateView>['icon'];
+  action?: { label: string; onPress: () => void };
+}) {
+  return <StateView kind="empty" title={label} description={description} icon={icon} action={action} />;
 }
 
-/** Cartão com borda, base visual das listas e blocos de conteúdo. */
-export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  const colors = useColors();
-  return (
-    <View
-      style={[
-        styles.card,
-        { backgroundColor: colors.bgSurface, borderColor: colors.borderDefault },
-        style,
-      ]}>
-      {children}
-    </View>
-  );
-}
+/** O cartão mora em `card.tsx`; reexportado aqui pelos imports antigos. */
+export { Card };
 
 const styles = StyleSheet.create({
   screen: {
@@ -82,6 +81,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FontSize.lg,
+    lineHeight: 24,
     fontWeight: FontWeight.bold,
   },
   sectionHeading: {
@@ -93,15 +93,5 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: FontSize.xs,
-  },
-  centro: {
-    paddingVertical: Spacing[12],
-    alignItems: 'center',
-    gap: Spacing[2],
-  },
-  card: {
-    borderWidth: 1,
-    padding: Spacing[4],
-    gap: Spacing[2],
   },
 });

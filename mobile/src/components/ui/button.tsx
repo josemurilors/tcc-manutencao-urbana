@@ -1,9 +1,16 @@
-/** Botão — porte de `frontend/src/components/ui/button.jsx`. */
+/**
+ * Botão — porte de `frontend/src/components/ui/button.jsx`.
+ *
+ * Alturas são mínimas (crescem com a fonte do sistema) e os tamanhos menores
+ * que 44 px ganham `hitSlop` até o alvo de toque mínimo.
+ */
 
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
-import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { FontSize, Layout, Radius, Spacing } from '@/constants/theme';
 import { useColors } from '@/context/theme-context';
+
+import { AppText } from './text';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'xs' | 'sm' | 'md';
@@ -20,13 +27,14 @@ type Props = {
   icon?: React.ReactNode;
   style?: ViewStyle;
   accessibilityLabel?: string;
+  accessibilityHint?: string;
 };
 
-const HEIGHTS: Record<ButtonSize, number> = { xs: 28, sm: 36, md: 48 };
-const PADDINGS: Record<ButtonSize, number> = { xs: Spacing[2], sm: Spacing[3], md: Spacing[6] };
+const HEIGHTS: Record<ButtonSize, number> = { xs: 36, sm: 40, md: 48 };
+const PADDINGS: Record<ButtonSize, number> = { xs: Spacing[3], sm: Spacing[3], md: Spacing[6] };
 const FONT_SIZES: Record<ButtonSize, number> = {
   xs: FontSize.xs,
-  sm: FontSize.xs,
+  sm: FontSize.sm,
   md: FontSize.sm,
 };
 
@@ -41,33 +49,58 @@ export function Button({
   icon,
   style,
   accessibilityLabel,
+  accessibilityHint,
 }: Props) {
   const colors = useColors();
   const inativo = disabled || loading;
 
-  const paleta: Record<ButtonVariant, { bg: string; fg: string; border: string }> = {
-    primary: { bg: colors.gold500, fg: colors.textInverse, border: colors.gold500 },
-    secondary: { bg: 'transparent', fg: colors.textPrimary, border: colors.borderDefault },
-    danger: { bg: 'rgba(207,68,68,0.12)', fg: colors.error, border: colors.error },
-    ghost: { bg: 'transparent', fg: colors.textSecondary, border: 'transparent' },
+  const paleta: Record<ButtonVariant, { bg: string; fg: string; border: string; pressed: string }> = {
+    primary: {
+      bg: colors.primary,
+      fg: colors.onPrimary,
+      border: colors.primary,
+      pressed: colors.primaryPressed,
+    },
+    secondary: {
+      bg: 'transparent',
+      fg: colors.textPrimary,
+      border: colors.borderStrong,
+      pressed: colors.surfacePressed,
+    },
+    danger: {
+      bg: colors.dangerSubtle,
+      fg: colors.danger,
+      border: colors.danger,
+      pressed: colors.dangerSubtle,
+    },
+    ghost: {
+      bg: 'transparent',
+      fg: colors.textSecondary,
+      border: 'transparent',
+      pressed: colors.surfacePressed,
+    },
   };
-  const { bg, fg, border } = paleta[variant];
+  const { bg, fg, border, pressed: corPressionado } = paleta[variant];
+  // Só folga vertical: botões lado a lado não podem disputar o mesmo toque.
+  const folga = Math.ceil(Math.max(0, Layout.minTouch - HEIGHTS[size]) / 2);
 
   return (
     <Pressable
       onPress={onPress}
       disabled={inativo}
+      hitSlop={{ top: folga, bottom: folga }}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: !!inativo, busy: !!loading }}
       style={({ pressed }) => [
         styles.base,
         {
-          height: HEIGHTS[size],
+          minHeight: HEIGHTS[size],
           paddingHorizontal: PADDINGS[size],
-          backgroundColor: bg,
+          backgroundColor: pressed && !inativo ? corPressionado : bg,
           borderColor: border,
-          opacity: inativo ? 0.5 : pressed ? 0.8 : 1,
+          opacity: inativo ? 0.5 : 1,
           alignSelf: block ? 'stretch' : 'flex-start',
         },
         style,
@@ -77,7 +110,12 @@ export function Button({
       ) : (
         <View style={styles.conteudo}>
           {icon}
-          <Text style={[styles.label, { color: fg, fontSize: FONT_SIZES[size] }]}>{children}</Text>
+          <AppText
+            variant="label"
+            inControl
+            style={{ color: fg, fontSize: FONT_SIZES[size], lineHeight: FONT_SIZES[size] + 6 }}>
+            {children}
+          </AppText>
         </View>
       )}
     </Pressable>
@@ -90,13 +128,11 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: Spacing[1],
   },
   conteudo: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[2],
-  },
-  label: {
-    fontWeight: FontWeight.semibold,
   },
 });
