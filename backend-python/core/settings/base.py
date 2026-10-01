@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'categorias',
     'gestao',
     'notificacoes',
+    'operacao',
 ]
 
 MIDDLEWARE = [

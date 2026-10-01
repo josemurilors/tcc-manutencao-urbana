@@ -17,5 +17,6 @@ urlpatterns = [
     path('api/v1/defeitos/', include('defeitos.urls')),
     path('api/v1/municipios/', include('municipios.urls')),
     path('api/v1/categorias/', include('categorias.urls')),
+    path('api/v1/operacao/', include('operacao.urls')),
     path('admin/', admin.site.urls),
 ]

@@ -249,6 +249,33 @@ equipe_id, equipe_nome, total_apoios, total_resolvido, total_nao_existe,
 checklist: string[]`. `score` (0–100) pondera prioridade, SLA restante,
 apoios, idade e sinalizações; a fórmula fica documentada em `operacao/fila.py`.
 
+Detalhes da implementação (`backend-python/operacao/`):
+
+- `fila/`: `status` aceita lista separada por vírgula e os grupos `abertos`
+  (padrão), `fechados`, `todos`; `page_size` até 100 (padrão 20). Além dos
+  campos acima, `ChamadoFila` traz `score_motivos: string[]` (o que mais pesou,
+  em texto para o servidor). `distancia_m` só vem preenchido com `lat`/`lng`.
+- As ações que devolvem "detalhe" usam o detalhe de defeitos mais os campos de
+  `ChamadoFila`.
+- `transicao/` para `concluido` exige foto (`foto` no multipart, ou uma
+  evidência `depois` enviada antes por `evidencia/` desde a última reabertura)
+  enquanto `municipio_config.parametros.exigir_foto_conclusao` não for `false`.
+  A foto do ato vira anexo `depois` (ou `antes`, em outras transições).
+  `checklist` aceita `string[]` (itens feitos), `[{item, feito}]` ou esse JSON
+  como texto; é gravado normalizado em `dados.checklist` do evento de status.
+- Evidências viram JPEG ≤ 1280 px sem EXIF; o evento `anexo` guarda
+  `distancia_m` até o ponto e `fora_do_local: true` acima de
+  `parametros.raio_evidencia_m` (padrão 150) — aceita, mas sinaliza.
+- `atribuir/`: operador não toma chamado já assumido por outra pessoa (403);
+  gestor reatribui. `liberar/` aceita `{motivo?}`; só o atendente ou gestor+.
+- `anexos/` e `anexos/<id>/imagem/` são abertos para chamado público e
+  ativo (restrito: equipe e autor); fora da equipe, `autor_nome` sai
+  "Prefeitura" (antes/depois) ou mascarado (cidadão).
+- `lote/` não leva foto: concluir em lote obedece à mesma exigência acima.
+- Extra: GET `chamados/<id>/ordem-servico/` → PDF da OS (protocolo, equipe,
+  responsável, prazo e checklist da categoria), substituto de
+  `defeitos/<id>/ordem_servico/`.
+
 ### 7.2 Cidadão — `api/v1/defeitos/`
 
 | método e rota | corpo / query | resposta |
