@@ -88,8 +88,6 @@ services:
       context: ./backend-python
       dockerfile: Dockerfile
     # SECURITY: Port removed — backend accessible only via nginx reverse proxy
-    ports:
-      - "8000:8000"
     logging:
       driver: "json-file"
       options:
