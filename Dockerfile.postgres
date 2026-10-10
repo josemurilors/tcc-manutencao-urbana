@@ -1,0 +1,14 @@
+# PostGIS nativo: postgres:16 (multi-arch) + pacote postgis do repo PGDG.
+# Substitui postgis/postgis:16-3.4, que só existe em amd64 (quebrou o boot
+# do banco num host ARM quando a emulação qemu ficou indisponível).
+FROM postgres:16
+
+RUN set -eux; \
+    . /etc/os-release; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-16-postgis-3; \
+    rm -rf /var/lib/apt/lists/*
