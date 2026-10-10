@@ -322,6 +322,8 @@ equivalência tela a tela com o frontend web e limitações conhecidas estão em
 
 ## Arquitetura
 
+Diagramas da stack, do pipeline de deploy e da sequência de atendimento: [docs/arquitetura/diagramas.md](docs/arquitetura/diagramas.md)
+
 | Camada | Stack |
 |---|---|
 | Frontend | React 19 + Vite 8 + Phosphor Icons + Framer Motion + Leaflet |
