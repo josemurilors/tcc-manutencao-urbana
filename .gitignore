@@ -98,3 +98,7 @@ coverage/
 *.temp
 *.log
 .eslintcache
+
+# Memoria local de agentes
+.claude/
+.claude-mem.md
