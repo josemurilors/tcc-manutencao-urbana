@@ -68,6 +68,8 @@ jobs:
             set -e
             cd /opt/tcc-manutencao-urbana
             git pull origin master
+            export GIT_SHA=$(git rev-parse --short HEAD)
+            export BUILD_DATE=$(git log -1 --format=%cd --date='format:%d/%m/%Y %H:%M UTC')
             docker compose build
             docker compose up -d postgres
             docker compose exec -T postgres psql -U urbana -d manutencao_urbana -c "

@@ -120,9 +120,16 @@ export default function Landing() {
       </main>
 
       {/* Footer */}
-      <footer className="text-center px-5 py-6" style={{ borderTop: '1px solid var(--color-border-default)', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+      <footer className="text-center px-5 py-6" style={{ position: 'relative', borderTop: '1px solid var(--color-border-default)', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
         <p>Central de Inteligência Urbana</p>
         <p className="mt-1">Design System: AMOLED Dark Premium / Gold Accent</p>
+        <span
+          className="absolute bottom-2 right-3 font-mono"
+          style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)' }}
+          title="Commit e data do último deploy (automação GitHub Actions)"
+        >
+          {import.meta.env.VITE_GIT_SHA || 'dev'} · {import.meta.env.VITE_BUILD_DATE || 'dev'}
+        </span>
       </footer>
     </div>
   );

@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: nginx.Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-dev}
+        - BUILD_DATE=${BUILD_DATE:-dev}
     ports:
       - "80:80"
       - "443:443"
