@@ -83,27 +83,20 @@ function AppHeader({ onToggleTheme, onOpenCmd, theme }) {
       <div className="flex items-center gap-2">
         <SyncIndicator />
         {isAuthenticated && (
-          <button onClick={onOpenCmd} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors"
-            style={{ color: 'var(--color-text-secondary)', background: 'transparent' }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          <button onClick={onOpenCmd} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors bg-transparent hover:bg-[var(--color-bg-hover)]"
+            style={{ color: 'var(--color-text-secondary)' }}
             aria-label="Buscar (Cmd+K)">
             <MagnifyingGlass size={14} />
             <span className="hidden sm:inline opacity-60">Cmd+K</span>
           </button>
         )}
-        <button onClick={onToggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
+        <button onClick={onToggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-bg-hover)]"
           style={{ color: 'var(--color-text-secondary)' }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           aria-label={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}>
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
         {isAuthenticated ? <UserDropdown /> : (
-          <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors"
-            style={{ color: 'var(--color-text-secondary)' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+          <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]">
             Entrar
           </button>
         )}

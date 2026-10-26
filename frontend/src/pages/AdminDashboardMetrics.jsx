@@ -9,6 +9,7 @@ import { useToast } from '../components/toast-context';
 import { getStatusColor, getStatusLabel } from '../components/ui/status-utils';
 import { KpiCard } from '../components/ui/kpi-card';
 import { StatusBadge } from '../components/ui/status-badge';
+import { Card } from '../components/ui/card';
 const GOLD = '#D4AF37', GOLD_DARK = '#AA7C11', SUCCESS = '#4CAF7D', ERROR = '#CF4444';
 
 const impactoLabel = { alta: 'Alto', media: 'Médio', baixa: 'Baixo' };
@@ -74,7 +75,7 @@ export default function AdminDashboardMetrics() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        <Card className="p-5">
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Chamados por Status</h3>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
@@ -84,14 +85,14 @@ export default function AdminDashboardMetrics() {
               <Tooltip /><Legend />
             </PieChart>
           </ResponsiveContainer>
-        </div>
-        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        </Card>
+        <Card className="p-5">
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Comparativo Mensal</h3>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={mesesComparativo}><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis /><Tooltip /><Bar dataKey="total" fill={GOLD} radius={[4,4,0,0]} /></BarChart>
           </ResponsiveContainer>
-        </div>
-        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        </Card>
+        <Card className="p-5">
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Chamados por Categoria</h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={catData} margin={{ bottom: 60 }}>
@@ -99,8 +100,8 @@ export default function AdminDashboardMetrics() {
               <YAxis /><Tooltip /><Bar dataKey="total" fill={GOLD} radius={[4,4,0,0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        </Card>
+        <Card className="p-5">
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Variação por Categoria</h3>
           <div className="space-y-2">
             {catData.filter(c => c.variacao != null).slice(0, 8).map(c => (
@@ -114,14 +115,14 @@ export default function AdminDashboardMetrics() {
               <p className="text-xs text-center py-6" style={{ color: 'var(--color-text-muted)' }}>Dados insuficientes para comparação mensal.</p>
             )}
           </div>
-        </div>
+        </Card>
       </div>
 
       {tendenciaData.length > 1 && (
         <div className="mb-6">
           <h2 className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-primary)' }}><ChartLineUp size={18} /> Tendência Mensal (12 meses)</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>Volume de chamados por mês</p>
-          <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <Card className="p-5">
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={tendenciaData}>
                 <XAxis dataKey="mes" tick={{ fontSize: 11 }} /><YAxis />
@@ -129,7 +130,7 @@ export default function AdminDashboardMetrics() {
                 <Line type="monotone" dataKey="total" stroke={GOLD} strokeWidth={2} dot={{ fill: GOLD, r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -172,7 +173,7 @@ export default function AdminDashboardMetrics() {
       {slaCatData.length > 0 && (
         <div className="mb-6">
           <h2 className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-primary)' }}><Timer size={18} /> Tempo Médio por Categoria</h2>
-          <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <Card className="p-5">
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={slaCatData} layout="vertical" margin={{ left: 100 }}>
                 <XAxis type="number" /><YAxis type="category" dataKey="categoria" tick={{ fontSize: 11 }} width={90} />
@@ -180,7 +181,7 @@ export default function AdminDashboardMetrics() {
                 <Bar dataKey="sla_medio_minutos" fill={GOLD_DARK} radius={[0,4,4,0]} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </Card>
         </div>
       )}
 

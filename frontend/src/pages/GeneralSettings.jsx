@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Card } from '../components/ui/card';
 
 export default function GeneralSettings() {
   const { isAuthenticated } = useAuth();
@@ -10,9 +11,9 @@ export default function GeneralSettings() {
     <div className="p-5 max-w-2xl mx-auto">
       <h1 className="text-lg font-bold mb-1" style={{ color: 'var(--color-text-primary)' }}>Configurações Gerais</h1>
       <p className="text-sm mb-6" style={{ color: 'var(--color-text-muted)' }}>Preferências do sistema</p>
-      <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+      <Card className="p-6">
         <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Em desenvolvimento.</p>
-      </div>
+      </Card>
     </div>
   );
 }

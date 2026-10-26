@@ -5,8 +5,10 @@ import { Camera, CheckCircle, WarningCircle, User, Lock, Bell, Sliders, Trash } 
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { api } from '../services/api';
+import { cn } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import SearchableSelect from '../components/ui/searchable-select';
+import { Card } from '../components/ui/card';
 
 const navItems = [
   { id: 'conta', icon: User, label: 'Minha Conta' },
@@ -98,12 +100,11 @@ export default function ProfileSettings() {
           <nav className="flex flex-col gap-1" style={{ minWidth: '12rem' }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => setActiveSection(item.id)}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors"
-                style={activeSection === item.id
-                  ? { background: 'var(--color-gold-muted)', color: 'var(--color-gold-text)' }
-                  : { color: 'var(--color-text-secondary)' }}
-                onMouseEnter={e => { if (activeSection !== item.id) { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
-                onMouseLeave={e => { if (activeSection !== item.id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}>
+                aria-current={activeSection === item.id ? 'page' : undefined}
+                className={cn('flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
+                  activeSection === item.id
+                    ? 'bg-[var(--color-gold-muted)] text-[var(--color-gold-text)]'
+                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]')}>
                 <item.icon size={16} />
                 {item.label}
               </button>
@@ -113,7 +114,7 @@ export default function ProfileSettings() {
           {/* Content */}
           <div style={{ flex: 1, minWidth: '300px' }}>
           {activeSection === 'conta' && (
-          <div className="rounded-md border p-6 space-y-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <Card className="p-6 space-y-6">
             <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Perfil</h2>
             <p className="text-xs -mt-4" style={{ color: 'var(--color-text-muted)' }}>Informações da sua conta</p>
             <div className="flex items-center gap-4">
@@ -216,11 +217,11 @@ export default function ProfileSettings() {
             <Button variant="ghost" onClick={() => navigate('/mapa')}>Cancelar</Button>
             <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : 'Salvar Alterações'}</Button>
           </div>
-          </div>
+          </Card>
           )}
 
           {activeSection === 'seguranca' && (
-            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <Card className="p-6">
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Segurança</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Gerencie sua senha e autenticação</p>
               <div className="flex flex-col">
@@ -239,11 +240,11 @@ export default function ProfileSettings() {
                   <Button variant="ghost" size="sm" onClick={() => addToast('Função em desenvolvimento.', 'info')}>Gerenciar</Button>
                 </div>
               </div>
-            </div>
+            </Card>
           )}
 
           {activeSection === 'notificacoes' && (
-            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <Card className="p-6">
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Notificações</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Controle como você recebe alertas</p>
               <div className="flex flex-col">
@@ -262,11 +263,11 @@ export default function ProfileSettings() {
                   <Button variant="ghost" size="sm" onClick={() => addToast('Função em desenvolvimento.', 'info')}>Gerenciar</Button>
                 </div>
               </div>
-            </div>
+            </Card>
           )}
 
           {activeSection === 'preferencias' && (
-            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <Card className="p-6">
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Preferências</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Personalize sua experiência</p>
               <div className="flex flex-col">
@@ -278,7 +279,7 @@ export default function ProfileSettings() {
                   <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Português (BR)</span>
                 </div>
               </div>
-            </div>
+            </Card>
           )}
 
           {activeSection === 'conta' && (

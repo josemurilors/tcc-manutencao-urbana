@@ -7,7 +7,9 @@ import { useToast } from '../components/toast-context';
 import { StatusBadge } from '../components/ui/status-badge';
 import { STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import { Timeline } from '../components/ui/timeline';
+import { cn } from '../lib/utils';
 import { Button } from '../components/ui/button';
+import { FilterChips } from '../components/ui/filter-chips';
 import { getTimelineItems } from '../utils/timeline';
 
 export default function DefectList() {
@@ -246,18 +248,10 @@ export default function DefectList() {
       <h1 className="text-lg font-bold mb-1" style={{ color: 'var(--color-text-primary)' }}>Lista de Chamados</h1>
       <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>Acompanhe todos os chamados de serviços públicos</p>
 
-      <div className="flex items-center gap-1 mb-4 flex-wrap">
-        {[['todos','Todos'],['abertos','Abertos'],['encerrados','Encerrados'],['vinculados','Vinculados'],['meus','Meus Chamados']].map(([k,l]) => (
-          (isAuthenticated || k !== 'meus') && (isAdmin || k !== 'vinculados') ? (
-            <button key={k} onClick={() => setFiltro(k)}
-              className="px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap"
-              style={filtro === k ? { background: 'var(--color-gold-500)', color: 'var(--color-on-primary)', border: '1px solid var(--color-gold-500)' }
-                : { border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)', background: 'transparent' }}>
-              {l}
-            </button>
-          ) : null
-        ))}
-      </div>
+      <FilterChips label="Filtrar chamados" className="mb-4" value={filtro} onChange={setFiltro}
+        options={[['todos','Todos'],['abertos','Abertos'],['encerrados','Encerrados'],['vinculados','Vinculados'],['meus','Meus Chamados']]
+          .filter(([k]) => (isAuthenticated || k !== 'meus') && (isAdmin || k !== 'vinculados'))
+          .map(([value, label]) => ({ value, label }))} />
 
       {loading ? (
         <div className="h-40 rounded-md border animate-pulse" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }} />
@@ -346,10 +340,8 @@ export default function DefectList() {
                   <td className="px-3 py-3 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
                       <button onClick={() => handleApoiar(d.id)} disabled={apoiando === d.id}
-                        className="w-7 h-7 rounded-md flex items-center justify-center transition-colors disabled:opacity-50"
+                        className="w-7 h-7 rounded-md flex items-center justify-center transition-colors disabled:opacity-50 hover:bg-[var(--color-bg-hover)]"
                         style={{ color: apoiei.has(d.id) ? 'var(--color-gold-500)' : 'var(--color-text-muted)' }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                         title={apoiei.has(d.id) ? 'Remover apoio' : 'Apoiar'}>
                         <ThumbsUp size={13} weight={apoiei.has(d.id) ? 'fill' : 'regular'} />
                       </button>
@@ -369,19 +361,15 @@ export default function DefectList() {
                         </Button>
                       )}
                       <button onClick={() => handleAnexarClick(d.id)}
-                        className="w-7 h-7 rounded-md flex items-center justify-center transition-colors"
+                        className="w-7 h-7 rounded-md flex items-center justify-center transition-colors hover:bg-[var(--color-bg-hover)]"
                         style={{ color: 'var(--color-text-muted)' }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                         title="Anexar imagem">
                         <Camera size={13} />
                       </button>
                       {isAdmin && (
                         <button onClick={e => handleGerarOS(d.id, e)} disabled={gerandoOS === d.id}
-                          className="w-7 h-7 rounded-md flex items-center justify-center transition-colors disabled:opacity-50"
+                          className="w-7 h-7 rounded-md flex items-center justify-center transition-colors disabled:opacity-50 hover:bg-[var(--color-bg-hover)]"
                           style={{ color: 'var(--color-text-muted)' }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                           title="Gerar Ordem de Serviço (PDF)">
                           {gerandoOS === d.id ? '...' : <FilePdf size={13} />}
                         </button>
@@ -404,17 +392,8 @@ export default function DefectList() {
             {selectedIds.size} selecionado{selectedIds.size === 1 ? '' : 's'}
           </span>
           <span className="w-px h-5" style={{ background: 'var(--color-border-default)' }} />
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {BATCH_STATUS_OPTIONS.map(([valor, rotulo]) => (
-              <button key={valor} onClick={() => setBatchStatusPending(valor)} disabled={enviandoBatch}
-                className="px-2.5 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
-                style={batchStatusPending === valor
-                  ? { background: 'var(--color-gold-500)', color: 'var(--color-on-primary)', border: '1px solid var(--color-gold-500)' }
-                  : { border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)', background: 'transparent' }}>
-                {rotulo}
-              </button>
-            ))}
-          </div>
+          <FilterChips label="Novo status do lote" value={batchStatusPending} onChange={setBatchStatusPending} disabled={enviandoBatch}
+            options={BATCH_STATUS_OPTIONS.map(([value, label]) => ({ value, label }))} />
           {batchStatusPending && (
             <div className="flex items-center gap-1.5">
               <span className="w-px h-5" style={{ background: 'var(--color-border-default)' }} />
@@ -430,10 +409,7 @@ export default function DefectList() {
           )}
           <span className="w-px h-5" style={{ background: 'var(--color-border-default)' }} />
           <button onClick={() => { setSelectedIds(new Set()); setBatchStatusPending(null); }}
-            className="text-xs font-medium whitespace-nowrap transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-error)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
+            className="text-xs font-medium whitespace-nowrap transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
             Cancelar
           </button>
         </div>
@@ -462,10 +438,8 @@ export default function DefectList() {
                     </span>
                   </div>
                 </div>
-                <button onClick={() => setSelectedDefect(null)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors"
-                  style={{ color: 'var(--color-text-muted)' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <button onClick={() => setSelectedDefect(null)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[var(--color-bg-hover)]"
+                  style={{ color: 'var(--color-text-muted)' }}>
                   <X size={14} />
                 </button>
               </div>
@@ -514,25 +488,16 @@ export default function DefectList() {
                     <FilePdf size={14} /> {gerandoOS === selectedDefect.id ? '...' : 'Gerar OS'}
                   </Button>
                 )}
-                <button onClick={() => handleApoiar(selectedDefect.id)} disabled={apoiando === selectedDefect.id}
-                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                  style={{
-                    background: apoiei.has(selectedDefect.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
-                    color: 'var(--color-gold-text)',
-                    border: apoiei.has(selectedDefect.id) ? '1px solid var(--color-gold-500)' : 'none',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,160,23,0.2)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = apoiei.has(selectedDefect.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)'; }}>
-                  {apoiei.has(selectedDefect.id) ? <ThumbsUp size={14} weight="fill" /> : <ThumbsUp size={14} />}
+                <Button variant="secondary" onClick={() => handleApoiar(selectedDefect.id)} disabled={apoiando === selectedDefect.id}
+                  aria-pressed={apoiei.has(selectedDefect.id)}
+                  className={cn('flex-1', apoiei.has(selectedDefect.id) && 'bg-[var(--color-gold-muted)]')}>
+                  <ThumbsUp size={14} weight={apoiei.has(selectedDefect.id) ? 'fill' : 'regular'} />
                   {apoiando === selectedDefect.id ? '...' : apoiei.has(selectedDefect.id) ? 'Apoiado' : 'Apoiar'}
-                </button>
-                <button onClick={() => handleAnexarClick(selectedDefect.id)} disabled={anexando === selectedDefect.id}
-                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                  style={{ background: 'transparent', border: '1px solid var(--color-border-default)', color: 'var(--color-text-secondary)' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-gold-500)'; e.currentTarget.style.color = 'var(--color-gold-500)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-default)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+                </Button>
+                <Button variant="outline" onClick={() => handleAnexarClick(selectedDefect.id)} disabled={anexando === selectedDefect.id}
+                  className="flex-1">
                   <Camera size={14} /> {anexando === selectedDefect.id ? 'Enviando...' : 'Anexar'}
-                </button>
+                </Button>
                 <input ref={anexarRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
                   onChange={async e => {
                     const f = e.target.files?.[0];

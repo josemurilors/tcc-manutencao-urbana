@@ -111,10 +111,8 @@ export default function SearchableSelect({ options = [], value, onChange, placeh
                   const item = row.item;
                   return (
                     <button key={row.key} type="button" onClick={() => { onChange(item.value); setOpen(false); setSearch(''); }}
-                      className="absolute left-0 right-0 flex items-center px-3 text-sm text-left transition-colors"
-                      style={{ top, height: ROW_ITEM, color: 'var(--color-text-secondary)' }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+                      className="absolute left-0 right-0 flex items-center px-3 text-sm text-left transition-colors text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+                      style={{ top, height: ROW_ITEM }}>
                       <span className="flex-1">{item.label}</span>
                       {item.value === value && <Check size={14} weight="bold" style={{ color: 'var(--color-gold-text)' }} />}
                     </button>

@@ -6,6 +6,8 @@ import { MapContainer, TileLayer, Marker, Polygon, Circle, useMapEvents, useMap 
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { api } from '../services/api';
+import { Button } from '../components/ui/button';
+import { cn } from '../lib/utils';
 import { StatusBadge } from '../components/ui/status-badge';
 import { STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import UserDropdown from '../components/ui/user-dropdown';
@@ -560,27 +562,20 @@ export default function MapPage() {
           <div className="flex items-center gap-2">
             <SyncIndicator />
             {isAuthenticated && (
-              <button onClick={() => setCmdOpen(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors"
-                style={{ color: 'var(--color-text-secondary)', background: 'transparent' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              <button onClick={() => setCmdOpen(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors bg-transparent hover:bg-[var(--color-bg-hover)]"
+                style={{ color: 'var(--color-text-secondary)' }}
                 aria-label="Buscar (Cmd+K)">
                 <MagnifyingGlass size={14} />
                 <span className="hidden sm:inline opacity-60">Cmd+K</span>
               </button>
             )}
-            <button onClick={toggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
+            <button onClick={toggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-bg-hover)]"
               style={{ color: 'var(--color-text-secondary)' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               aria-label={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}>
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             </button>
             {isAuthenticated ? <UserDropdown /> : (
-              <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors"
-                style={{ color: 'var(--color-text-secondary)' }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+              <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]">
                 Entrar
               </button>
             )}
@@ -699,10 +694,8 @@ export default function MapPage() {
                     <option value={500}>500m</option>
                     <option value={1000}>1km</option>
                   </select>
-                  <button onClick={desativarPertoDeMim} className="flex items-center justify-center w-6 h-6 rounded-full transition-colors"
+                  <button onClick={desativarPertoDeMim} className="flex items-center justify-center w-6 h-6 rounded-full transition-colors hover:bg-[var(--color-bg-hover)]"
                     style={{ color: 'var(--color-text-secondary)' }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     aria-label="Desativar filtro Perto de Mim">
                     <X size={14} />
                   </button>
@@ -710,10 +703,8 @@ export default function MapPage() {
               </>
             ) : (
               <button onClick={ativarPertoDeMim}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-full border text-xs font-semibold transition-colors select-none"
-                style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)', color: 'var(--color-text-secondary)' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-gold-500)'; e.currentTarget.style.color = 'var(--color-gold-500)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-default)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+                className="flex items-center gap-1.5 h-8 px-3 rounded-full border text-xs font-semibold transition-colors select-none text-[var(--color-text-secondary)] border-[var(--color-border-default)] hover:border-[var(--color-gold-500)] hover:text-[var(--color-gold-500)]"
+                style={{ background: 'var(--color-bg-surface)' }}>
                 <Crosshair size={14} /> Perto de Mim
               </button>
             )}
@@ -816,10 +807,8 @@ export default function MapPage() {
                 </div>
               )}
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-2 px-4 h-11 rounded-md border text-sm cursor-pointer transition-colors"
-                  style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-muted)' }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--color-gold-500)'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--color-border-default)'}>
+                <label className="flex items-center gap-2 px-4 h-11 rounded-md border text-sm cursor-pointer transition-colors border-[var(--color-border-default)] hover:border-[var(--color-gold-500)]"
+                  style={{ color: 'var(--color-text-muted)' }}>
                   <Camera size={16} /> {file ? file.name.slice(0, 20) : 'Foto (obrigatória)'}
                   {/* `capture` abre a câmera direto no celular; no desktop o navegador ignora e abre o seletor. */}
                   <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
@@ -861,10 +850,8 @@ export default function MapPage() {
                     </span>
                   </div>
                 </div>
-                <button onClick={() => setSelected(null)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors"
-                  style={{ color: 'var(--color-text-muted)' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <button onClick={() => setSelected(null)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[var(--color-bg-hover)]"
+                  style={{ color: 'var(--color-text-muted)' }}>
                   <X size={14} />
                 </button>
               </div>
@@ -889,40 +876,27 @@ export default function MapPage() {
               </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 {user?.admin && !selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
-                  <button onClick={e => handleAtender(selected.id, e)} disabled={atendendo === selected.id}
-                    className="w-full sm:w-auto h-9 px-4 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                    style={{ background: 'rgba(59,130,246,0.12)', color: '#3B82F6' }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(59,130,246,0.12)'}>
+                  <Button variant="secondary" onClick={e => handleAtender(selected.id, e)} disabled={atendendo === selected.id}
+                    className="w-full sm:w-auto">
                     <Handshake size={14} /> {atendendo === selected.id ? '...' : 'Atender Chamado'}
-                  </button>
+                  </Button>
                 )}
                 {user?.admin && selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
-                  <button onClick={e => handleFinalizarMap(selected.id, e)} disabled={finalizando === selected.id}
-                    className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                    style={{ background: 'var(--color-error)', color: 'var(--color-on-danger)' }}>
+                  <Button variant="danger" onClick={e => handleFinalizarMap(selected.id, e)} disabled={finalizando === selected.id}
+                    className="flex-1">
                     {finalizando === selected.id ? '...' : 'Finalizar'}
-                  </button>
+                  </Button>
                 )}
-                <button onClick={() => handleApoiar(selected.id)} disabled={apoiando === selected.id}
-                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                  style={{
-                    background: apoiei.has(selected.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
-                    color: 'var(--color-gold-text)',
-                    border: apoiei.has(selected.id) ? '1px solid var(--color-gold-500)' : 'none',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,160,23,0.2)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = apoiei.has(selected.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)'; }}>
-                  {apoiei.has(selected.id) ? <ThumbsUp size={14} weight="fill" /> : <ThumbsUp size={14} />}
+                <Button variant="secondary" onClick={() => handleApoiar(selected.id)} disabled={apoiando === selected.id}
+                  aria-pressed={apoiei.has(selected.id)}
+                  className={cn('flex-1', apoiei.has(selected.id) && 'bg-[var(--color-gold-muted)]')}>
+                  <ThumbsUp size={14} weight={apoiei.has(selected.id) ? 'fill' : 'regular'} />
                   {apoiando === selected.id ? '...' : apoiei.has(selected.id) ? 'Apoiado' : 'Apoiar'}
-                </button>
-                <button onClick={() => anexarRef.current?.click()} disabled={anexando === selected.id}
-                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                  style={{ background: 'transparent', border: '1px solid var(--color-border-default)', color: 'var(--color-text-secondary)' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-gold-500)'; e.currentTarget.style.color = 'var(--color-gold-500)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-default)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+                </Button>
+                <Button variant="outline" onClick={() => anexarRef.current?.click()} disabled={anexando === selected.id}
+                  className="flex-1">
                   <Camera size={14} /> {anexando === selected.id ? '...' : 'Anexar'}
-                </button>
+                </Button>
                 <input ref={anexarRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
                   onChange={async e => {
                     const f = e.target.files?.[0];
@@ -999,20 +973,18 @@ function MapControlsDropdown({ filtro, setFiltro, heatmap, setHeatmap, direction
           className={`${dropdownPos} min-w-[180px] rounded-md border p-1.5 shadow-lg z-[3000]`}
           style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-default)' }}>
           <button onClick={() => { setHeatmap(h => !h); setOpen(false); }}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors"
-            style={{ color: heatmap ? 'var(--color-gold-500)' : 'var(--color-text-secondary)' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = heatmap ? 'var(--color-gold-500)' : 'var(--color-text-secondary)'; }}>
+            aria-pressed={heatmap}
+            className={cn('flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors hover:bg-[var(--color-bg-hover)]',
+              heatmap ? 'text-[var(--color-gold-text)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]')}>
             <Fire size={16} weight={heatmap ? 'fill' : 'regular'} /> Mapa de Calor
           </button>
           <div className="h-px mx-2 my-1" style={{ background: 'var(--color-border-default)' }} />
           <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Filtros</p>
           {['todos','abertos','encerrados', 'meus'].map(f => (
             <button key={f} onClick={() => { setFiltro(f); setOpen(false); }}
-              className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors"
-              style={{ color: filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)' }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)'; }}>
+              aria-pressed={filtro === f}
+              className={cn('flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors hover:bg-[var(--color-bg-hover)]',
+                filtro === f ? 'text-[var(--color-gold-text)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]')}>
               {activeDot(filtro === f)}
               {f === 'todos' ? 'Todos' : f === 'abertos' ? 'Abertos' : f === 'encerrados' ? 'Encerrados' : 'Meus Chamados'}
             </button>
