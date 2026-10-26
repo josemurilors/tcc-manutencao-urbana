@@ -152,6 +152,13 @@ export const api = {
     return paginated(`/api/v1/defeitos/${qs ? '?' + qs : ''}`);
   },
 
+  // Público: chamados abertos da cidade onde o ponto cai, com contagem por categoria.
+  resumoMunicipio: (lat, lng) =>
+    request(`/api/v1/defeitos/municipio/?lat=${lat}&lng=${lng}`),
+
+  consultarProtocolo: (numero) =>
+    request(`/api/v1/defeitos/protocolo/${encodeURIComponent(numero.trim())}/`),
+
   createDefeito: uploadDefeito,
 
   updateDefeito: (id, data) =>

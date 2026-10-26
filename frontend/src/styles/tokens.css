@@ -25,8 +25,8 @@
   /* Text */
   --color-text-primary: #ffffff;
   --color-text-secondary: #a0a0a0;
-  --color-text-muted: #555555;
-  --color-text-tertiary: #555555;
+  --color-text-muted: #8A8A8A;
+  --color-text-tertiary: #8A8A8A;
   --color-text-inverse: #000000;
 
   /* Borders */
@@ -94,8 +94,8 @@
   --color-bg-hover: #E8E3D8;
   --color-text-primary: #1A1A14;
   --color-text-secondary: #8B7A4E;
-  --color-text-muted: #C8B890;
-  --color-text-tertiary: #C8B890;
+  --color-text-muted: #7A6A42;
+  --color-text-tertiary: #7A6A42;
   --color-text-inverse: #FFFFFF;
   --color-border-default: #D8D0C0;
   --color-border-hover: #C8B890;
