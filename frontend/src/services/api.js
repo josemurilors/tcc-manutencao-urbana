@@ -234,7 +234,7 @@ export const api = {
     const headers = {
       ...(token && { Authorization: `Bearer ${token}` }),
     };
-    const res = await fetch(`${API_URL}/api/v1/defeitos/${id}/ordem_servico/`, { headers });
+    const res = await fetch(`${API_URL}/api/v1/operacao/chamados/${id}/ordem-servico/`, { headers });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro ao gerar OS' }));
       throw new Error(err.error || 'Erro ao gerar OS');

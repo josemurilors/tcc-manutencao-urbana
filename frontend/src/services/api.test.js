@@ -166,7 +166,7 @@ describe('api.gerarOS', () => {
     const blob = await apiModule.api.gerarOS('abc-123');
 
     const [url, opts] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/v1/defeitos/abc-123/ordem_servico/');
+    expect(url).toBe('/api/v1/operacao/chamados/abc-123/ordem-servico/');
     expect(opts.method ?? 'GET').toBe('GET');
     expect(opts.headers.Authorization).toBe('Bearer tok123');
     expect(blob.type).toBe('application/pdf');
