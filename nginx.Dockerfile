@@ -1,13 +1,13 @@
-FROM node:20-alpine AS frontend-build
+# O site é o build web do app Expo (mobile/): a mesma interface de quem
+# instala o app no celular. Páginas estáticas da loja (privacidade e exclusão
+# de conta) vêm de mobile/public/.
+FROM node:22-alpine AS app-build
 WORKDIR /build
-# Versão exibida no rodapé da Landing (injetada pelo deploy; ver deploy.yml)
-ARG GIT_SHA=dev
-ARG BUILD_DATE=dev
-COPY frontend/package*.json ./
+COPY mobile/package*.json ./
 RUN npm ci
-COPY frontend/ ./
-RUN VITE_GIT_SHA=$GIT_SHA VITE_BUILD_DATE=$BUILD_DATE npm run build
+COPY mobile/ ./
+RUN npx expo export --platform web --output-dir dist
 
 FROM nginx:alpine-slim
-COPY --from=frontend-build /build/dist /usr/share/nginx/html
+COPY --from=app-build /build/dist /usr/share/nginx/html
 COPY nginx.prod.conf /etc/nginx/conf.d/default.conf

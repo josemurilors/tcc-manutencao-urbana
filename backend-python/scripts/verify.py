@@ -17,7 +17,7 @@ os.environ['DB_NAME'] = 'test'
 os.environ['DB_USER'] = 'test'
 os.environ['DB_PASSWORD'] = 'test'
 os.environ['DB_HOST'] = 'localhost'
-os.environ['FRONTEND_URL'] = 'http://localhost:5173'
+os.environ['FRONTEND_URL'] = 'http://localhost:8081'
 os.environ['VAPID_PUBLIC_KEY'] = ''
 os.environ['VAPID_PRIVATE_KEY'] = ''
 

@@ -1,5 +1,5 @@
 /**
- * Cliente HTTP da API — porte de `frontend/src/services/api.js`.
+ * Cliente HTTP da API.
  *
  * Diferenças em relação ao web:
  * - token vem do SecureStore (cache síncrono) e não do localStorage;
@@ -64,6 +64,10 @@ function resolverApiUrl() {
     const host = hostDeDesenvolvimento();
     if (host) return `http://${host}:${porta}`;
   }
+
+  // Servido como site, o nginx que entrega o app também faz o proxy de /api:
+  // a própria origem vale em qualquer domínio (tcc., lab., www.) e sem CORS.
+  if (Platform.OS === 'web' && typeof window !== 'undefined') return window.location.origin;
 
   return API_URL_PRODUCAO;
 }

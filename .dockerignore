@@ -1,0 +1,8 @@
+# Contexto "." do nginx e do postgres: não levar dependências nem segredos locais.
+**/node_modules
+**/.venv
+**/.env
+**/.env*.local
+**/dist
+**/.expo
+.git

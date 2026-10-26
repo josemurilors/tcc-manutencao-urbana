@@ -27,7 +27,7 @@ REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = (
     'rest_framework.renderers.BrowsableAPIRenderer',
 )
 
-CORS_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://localhost:8000', 'http://localhost']
+CORS_ALLOWED_ORIGINS = ['http://localhost:8081', 'http://localhost:8000', 'http://localhost']
 
 EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 

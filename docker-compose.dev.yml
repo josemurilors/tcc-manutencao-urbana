@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.dev.yml up -d backend redis
 #   docker compose -f docker-compose.dev.yml --profile ia up -d ia
 #   docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
-#   cd frontend && npm run dev
+#   cd mobile && npm run web        # site e app: http://localhost:8081
 services:
   postgres:
     image: postgis/postgis:16-3.4
@@ -57,7 +57,7 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL}
       - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:?SUPER_ADMIN_PASSWORD is required}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8081}
       - IA_URL=http://ia:8000
       - REDIS_URL=redis://redis:6379/0
       - DB_HOST=postgres

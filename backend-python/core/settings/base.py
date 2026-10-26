@@ -117,7 +117,7 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = os.environ.get(
-    'FRONTEND_URL', 'http://localhost:5173'
+    'FRONTEND_URL', 'http://localhost:8081'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 # Padrões do django-cors-headers + o `Idempotency-Key` das ações da operação
@@ -147,7 +147,7 @@ PASSWORD_HASHERS = [
 
 ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', '')
 SUPER_ADMIN_EMAIL = os.environ.get('SUPER_ADMIN_EMAIL', '')
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:8081')
 IA_URL = os.environ.get('IA_URL', 'http://ia:8000')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
 

@@ -1,5 +1,5 @@
 /**
- * Seletor com busca — porte de `frontend/src/components/ui/searchable-select.jsx`.
+ * Seletor com busca.
  *
  * O web precisava do @tanstack/react-virtual para dar conta dos ~5.500
  * municípios; aqui a FlatList já é virtualizada, então a lista é montada como

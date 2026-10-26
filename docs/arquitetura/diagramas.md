@@ -9,7 +9,7 @@ Gerado a partir de `docker-compose.yml`, `nginx.prod.conf`, `Dockerfile.postgres
 ```mermaid
 flowchart TB
     subgraph clientes["Clientes"]
-        W["Navegador PWA<br/>(frontend React/Vite)"]
+        W["Navegador<br/>(build web do app Expo)"]
         M["App móvel<br/>(Expo/React Native)"]
     end
 
@@ -60,7 +60,7 @@ no host** desde `e91b2b4` — só nginx alcança `backend:8000` pela rede intern
 flowchart LR
     PUSH["git push master"] --> GL["gitleaks<br/>scan de segredos"]
     GL --> BUILD["docker compose build<br/>(CI amd64, mesma Dockerfile)"]
-    BUILD --> TEST["PostgreSQL efêmero +<br/>pytest (Django) + lint/build frontend"]
+    BUILD --> TEST["PostgreSQL efêmero +<br/>pytest (Django) + lint/tipos do app"]
     TEST -->|tudo verde| SSH["appleboy/ssh-action<br/>deploy_user@VPS (chave ed25519)"]
     SSH --> PULL["cd /opt/tcc-manutencao-urbana<br/>git pull origin master"]
     PULL --> DEP["compose build + up postgres +<br/>migracão PostGIS (GIN/geom) +<br/>up -d --build + image prune"]

@@ -113,5 +113,5 @@ Não usa localização em segundo plano, não usa acessibilidade, não usa
 ## Deploy do site
 
 As páginas `privacidade.html` e `excluir-conta.html` ficam em
-`frontend/public/` e são servidas na raiz do domínio após o próximo deploy
-do frontend. Confirmar com `curl -I https://tcc.josemurilors.com.br/privacidade.html`.
+`mobile/public/` e são servidas na raiz do domínio após o próximo deploy
+do site. Confirmar com `curl -I https://tcc.josemurilors.com.br/privacidade.html`.

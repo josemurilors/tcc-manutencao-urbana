@@ -1,14 +1,12 @@
 # Central de Inteligência Urbana — App Mobile (Expo)
 
 App universal (iOS, Android e web) do TCC, escrito em **Expo SDK 57 +
-React Native 0.86 + Expo Router**. Consome a **mesma API Django** do frontend
-web.
+React Native 0.86 + Expo Router**, que consome a API Django.
 
-O frontend web (`../frontend`, React 19 + Vite) continua no ar em
-[tcc.josemurilors.com.br](https://tcc.josemurilors.com.br), mas é legado:
-as funcionalidades da **Plataforma v3** (operação de campo, painel de BI,
-gestão da prefeitura, transparência, notificações push) existem só neste
-app. O que o produto faz por público e os papéis estão na seção
+É o único cliente do sistema: o build web deste app é o site em
+[tcc.josemurilors.com.br](https://tcc.josemurilors.com.br) (servido pelo nginx,
+ver `nginx.Dockerfile`), então quem usa no navegador do computador ou do
+celular tem a mesma interface de quem instalou o app. O que o produto faz por público e os papéis estão na seção
 [Plataforma v3 do README principal](../README.md#plataforma-v3); o contrato
 de API, em [`docs/arquitetura/contrato-v3.md`](../docs/arquitetura/contrato-v3.md).
 
@@ -24,7 +22,7 @@ gere o município de demonstração (`scripts/seed-demo.sh`, na raiz — ver
 - [Mapa em modo de navegação](#mapa-em-modo-de-navegação)
 - [Suporte a web](#suporte-a-web)
 - [Estrutura](#estrutura)
-- [Equivalência com o frontend web](#equivalência-com-o-frontend-web)
+- [Funcionalidades](#funcionalidades)
 - [Decisões de porte](#decisões-de-porte)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Build de produção](#build-de-produção)
@@ -110,7 +108,7 @@ Abrindo em `http://localhost:8081`, o padrão já basta. Abrindo de outro
 aparelho na rede (ou pelo IP da máquina), adicione esse IP nas duas:
 
 ```
-FRONTEND_URL=http://localhost:5173,http://localhost:8081,http://192.168.1.3:8081
+FRONTEND_URL=http://localhost:8081,http://192.168.1.3:8081
 ALLOWED_HOSTS=localhost,backend,192.168.1.3
 ```
 
@@ -179,26 +177,9 @@ mobile/
 └── assets/images/         # ícone, splash, favicon
 ```
 
-## Equivalência com o frontend web
+## Funcionalidades
 
-| Web (`frontend/src`)         | Mobile (`mobile/src`)                | Observação                                            |
-| ---------------------------- | ------------------------------------ | ----------------------------------------------------- |
-| `pages/MapPage.jsx`          | `app/(tabs)/mapa.tsx` + `app/novo.tsx` | Formulário de criação virou tela modal                |
-| `pages/DefectList.jsx`       | `app/(tabs)/chamados.tsx`            | Tabela → cartões; seleção em lote por toque longo     |
-| `pages/AdminDashboardMetrics.jsx` | `app/(tabs)/painel.tsx`         | Recharts → `components/charts.tsx` (react-native-svg) |
-| `pages/SuperAdmin.jsx`       | `app/admin/usuarios.tsx`             | —                                                     |
-| `pages/ProfileSettings.jsx`  | `app/(tabs)/conta.tsx`               | Somada ao menu do `UserDropdown`                      |
-| `pages/Login/Register.jsx`   | `app/login.tsx` / `app/registro.tsx` | Senha ou Google; sem CPF/município                    |
-| `context/AuthContext.jsx`    | `context/auth-context.tsx`           | SecureStore no lugar do localStorage                  |
-| `context/ThemeContext.jsx`   | `context/theme-context.tsx`          | —                                                     |
-| `components/Toast.jsx`       | `context/toast-context.tsx`          | —                                                     |
-| `services/api.js`            | `services/api.ts`                    | Mesmos endpoints, tipado                              |
-| `hooks/useOfflineSync.js`    | `hooks/use-offline-sync.ts`          | AsyncStorage no lugar do IndexedDB                    |
-| `styles/tokens.css`          | `constants/theme.ts`                 | Mesmos valores de cor/espaçamento                     |
-| `pages/Landing.jsx`          | —                                    | Página de marketing; não faz sentido no app           |
-| `pages/Settings/GeneralSettings.jsx` | —                            | Eram stubs "em desenvolvimento" no web                |
-
-Funcionalidades portadas: mapa de navegação por GPS (qualquer cidade), mapa de
+O que o app cobre: mapa de navegação por GPS (qualquer cidade), mapa de
 calor, filtros (todos/pendentes/atendidos/meus), "Perto de Mim" com raio
 ajustável, criação de chamado com foto obrigatória (só câmera) e GPS, detalhe com histórico e imagens,
 apoio (upvote), anexos, atender/responder/finalizar, alteração de status em
@@ -254,7 +235,7 @@ Metro através da extensão do arquivo:
 | Arquivo                 | Plataforma | Biblioteca         |
 | ----------------------- | ---------- | ------------------ |
 | `map-surface.tsx`       | iOS/Android| react-native-maps  |
-| `map-surface.web.tsx`   | web        | Leaflet + react-leaflet (mesmos tiles CartoDB do frontend Vite) |
+| `map-surface.web.tsx`   | web        | Leaflet + react-leaflet (tiles CartoDB) |
 | `map-surface.types.ts`  | —          | contrato comum     |
 
 A tela (`app/(tabs)/mapa.tsx`) importa só `@/components/map-surface` e não
@@ -296,12 +277,13 @@ executaria o Leaflet no Node, onde não há `window`.
   e só funciona em build nativo (EAS); no web e no Expo Go fica só a central
   de notificações in-app. Alertas de SLA e o resumo semanal dependem do
   serviço `scheduler` dos composes.
-- **Foto de perfil** segue apenas como inicial do nome, como no web (o backend
-  ainda não expõe upload de avatar).
+- **Foto de perfil** segue apenas como inicial do nome (o backend ainda não
+  expõe upload de avatar).
 - **2FA** continua fora do app; a exclusão de conta fica em Ajustes → Perfil.
-- O **web** aqui é para desenvolvimento e demonstração. Quem está em produção
-  em `tcc.josemurilors.com.br` continua sendo o frontend Vite (`../frontend`,
-  legado, com PWA, service worker e Web Push), que não recebe as telas da v3.
+- No **web** (o site) não há push do navegador nem service worker: o site é
+  instalável (manifesto em `public/`), mas não abre sem internet e os avisos
+  ficam na central in-app. O antigo frontend Vite tinha Web Push (VAPID); o
+  backend ainda guarda essas inscrições.
 
 ## Build de produção
 
@@ -345,7 +327,8 @@ eas build --platform ios --profile production
 Materiais da Play Store (descrições, feature graphic, respostas do
 formulário de segurança de dados e checklist) estão em `docs/play-store/`.
 A política de privacidade e a página de exclusão de conta exigidas pela
-loja ficam em `frontend/public/` e são servidas na raiz do domínio.
+loja ficam em `public/` e são servidas na raiz do domínio, junto com o
+manifesto e os ícones do site (`public/index.html` é o template do HTML).
 
 O primeiro build gera a keystore Android na conta Expo. Pegue o SHA-1 com
 `eas credentials --platform android` e cadastre no client ID Android do Google

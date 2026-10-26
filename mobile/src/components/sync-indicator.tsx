@@ -1,5 +1,5 @@
 /**
- * Indicador da fila offline — porte de `frontend/src/components/ui/sync-indicator.jsx`.
+ * Indicador da fila offline.
  *
  * - `SyncIndicator`: pílula "N na fila" / "N falharam" / "Offline". Tocar abre
  *   a folha da fila.

@@ -2,8 +2,7 @@
  * Superfície do mapa — implementação web (Leaflet).
  *
  * O Metro resolve este arquivo no lugar de `map-surface.tsx` quando a
- * plataforma é web. Usa Leaflet + react-leaflet, o mesmo stack do frontend
- * Vite, porque `react-native-maps` depende de `codegenNativeComponent`, que
+ * plataforma é web. Usa Leaflet + react-leaflet porque `react-native-maps` depende de `codegenNativeComponent`, que
  * não existe no react-native-web.
  */
 

@@ -1,8 +1,7 @@
 /**
  * Tokens de design do app.
  *
- * Nasceram do porte de `frontend/src/styles/tokens.css` e agora têm duas
- * camadas: as cores (primitivos + semânticos por tema) moram em `palette.ts`,
+ * Têm duas camadas: as cores (primitivos + semânticos por tema) moram em `palette.ts`,
  * conferidas pelo `scripts/check-contrast.mjs`; aqui ficam tipografia,
  * espaçamento, forma, elevação e movimento.
  *

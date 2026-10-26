@@ -1,5 +1,5 @@
 /**
- * Toasts v2 — nasceu do porte de `frontend/src/components/Toast.jsx`.
+ * Toasts v2.
  *
  * API retrocompatível: `const addToast = useToast(); addToast('Salvo')` continua
  * valendo. Além disso o mesmo objeto expõe `show({...})` com ação opcional

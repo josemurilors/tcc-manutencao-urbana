@@ -1,5 +1,5 @@
 /**
- * Estado da fila offline — porte de `frontend/src/hooks/useOfflineSync.js`.
+ * Estado da fila offline.
  *
  * No web o service worker drenava a fila via Background Sync. Aqui quem drena
  * é o `OfflineSyncProvider`, montado uma vez no layout raiz; este hook só lê o

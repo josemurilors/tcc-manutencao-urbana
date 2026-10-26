@@ -1,5 +1,5 @@
 /**
- * Botão — porte de `frontend/src/components/ui/button.jsx`.
+ * Botão.
  *
  * Alturas são mínimas (crescem com a fonte do sistema) e os tamanhos menores
  * que 44 px ganham `hitSlop` até o alvo de toque mínimo.

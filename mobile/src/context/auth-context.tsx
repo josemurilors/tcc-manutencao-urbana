@@ -1,5 +1,5 @@
 /**
- * Autenticação — porte de `frontend/src/context/AuthContext.jsx`.
+ * Autenticação.
  *
  * Diferenças em relação ao web:
  * - a sessão é hidratada de forma assíncrona do SecureStore no boot;

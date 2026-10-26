@@ -1,5 +1,5 @@
 /**
- * Tema claro/escuro — porte de `frontend/src/context/ThemeContext.jsx`.
+ * Tema claro/escuro.
  *
  * A preferência tem três valores: `sistema` (padrão), `claro` e `escuro`. Na
  * primeira versão o primeiro toque no toggle fixava o tema para sempre, sem

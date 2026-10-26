@@ -1,7 +1,7 @@
 /**
  * Política de Privacidade dentro do app, em linguagem simples.
  *
- * Segue a política publicada no site (`frontend/public/privacidade.html`) e
+ * Segue a política publicada no site (`public/privacidade.html`) e
  * acrescenta o que o app passou a fazer depois dela: notificações no
  * celular, central de avisos e exportação dos dados. Ao mudar uma, mude a
  * outra — a Play Store confere que as duas dizem o mesmo.

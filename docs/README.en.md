@@ -17,18 +17,18 @@ results.
 **Deployed at:** [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br) —
 Hetzner (Nuremberg) ARM64, behind a Cloudflare Tunnel.
 
-**Stack:** React 19 + Vite 8 · Expo/React Native · Django 5.2/DRF ·
+**Stack:** Expo/React Native (Android, iOS and web) · Django 5.2/DRF ·
 PostgreSQL 16/PostGIS 3.4 · ONNX Runtime (FastAPI) · Redis
 
-> **Requirements:** Node.js ≥ 22.12 (Vite 8) · Python 3.12–3.14 (the Docker
+> **Requirements:** Node.js ≥ 22 (Expo SDK 57) · Python 3.12–3.14 (the Docker
 > image uses `python:3.13-slim`) · Docker + Compose v2 · GDAL on the host only
 > to run Django outside Docker · `uv` optional for recreating `.venv`.
 
 ## Project Status
 
 🚧 In production, in continuous use. The Django backend is the official
-backend; the app in [`mobile/`](../mobile/) is the v3 client; the web frontend
-in [`frontend/`](../frontend/) is legacy. New features keep shipping
+backend; the app in [`mobile/`](../mobile/) is the only client: the same
+code builds the Android/iOS app and the website (Expo web build served by nginx). New features keep shipping
 incrementally.
 
 ## Features
@@ -50,10 +50,11 @@ incrementally.
   rejection, Gaussian blur on uploaded photos (privacy)
 - **Accounts:** e-mail-only entry (verification code), Google sign-in,
   optional TOTP 2FA, e-mail verification, hierarchical user management
-- **Notifications:** Web Push (VAPID) in the PWA and Expo Push in the app,
-  plus the in-app center
-- **Platform:** PWA with service worker, light/dark theme, WCAG AA, keyboard
-  shortcuts, mobile-first (details in [`docs/frontend.md`](frontend.md))
+- **Notifications:** Expo Push in the installed app and the in-app center on
+  every platform (no browser push on the website yet)
+- **Platform:** one app for Android, iOS and web (installable as a PWA),
+  light/dark theme, WCAG AA contrast checked by a script, layout that adapts
+  from phone to desktop
 
 ### Demo
 
@@ -154,7 +155,7 @@ docker compose -f docker-compose.dev.yml up -d backend redis   # pulls postgres 
 docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
 docker compose -f docker-compose.dev.yml --profile ia up -d ia # (optional) IA service
 
-cd frontend && npm run dev
+cd mobile && npm install && npm run web   # site and app at http://localhost:8081
 ```
 
 ### Quick Start (Production)
@@ -205,8 +206,7 @@ Stack, deploy pipeline and service-request sequence diagrams:
 
 | Layer | Stack |
 |---|---|
-| Mobile | Expo SDK 57 + React Native 0.86 + Expo Router + react-native-maps (Leaflet on web) |
-| Frontend | React 19 + Vite 8 + Leaflet + Framer Motion + Phosphor Icons |
+| App and website | Expo SDK 57 + React Native 0.86 + Expo Router + react-native-maps (Leaflet on web) |
 | Backend | Django 5.2 + DRF (Gunicorn) + Redis |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | IA | FastAPI + ONNX Runtime — paraphrase-multilingual-MiniLM-L12-v2 |

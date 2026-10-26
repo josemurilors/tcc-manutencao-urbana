@@ -1,4 +1,4 @@
-/** Cabeçalho do app — porte do `AppHeader` de `frontend/src/App.jsx`. */
+/** Cabeçalho do app. */
 
 import { Image } from 'expo-image';
 import { router, type Href } from 'expo-router';

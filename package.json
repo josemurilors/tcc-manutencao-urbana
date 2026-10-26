@@ -1,11 +1,11 @@
 {
   "name": "tcc-manutencao-urbana",
   "version": "1.1.0",
-  "description": "Central de Inteligência Urbana — full-stack PWA (React + Django + PostGIS + IA ONNX)",
+  "description": "Central de Inteligência Urbana — app universal Expo (Android, iOS e web) + Django + PostGIS + IA ONNX",
   "private": true,
   "scripts": {
-    "lint:md": "markdownlint-cli2 '**/*.md' '!node_modules/**/*.md' '!frontend/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**'",
-    "lint:md:fix": "markdownlint-cli2 '**/*.md' '!node_modules/**/*.md' '!frontend/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**' --fix",
+    "lint:md": "markdownlint-cli2 '**/*.md' '!node_modules/**/*.md' '!mobile/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**'",
+    "lint:md:fix": "markdownlint-cli2 '**/*.md' '!node_modules/**/*.md' '!mobile/node_modules/**/*.md' '!docs/superpowers/**/*.md' '!.superpowers/**/*.md' '!**/.venv/**' --fix",
     "lint:links": "lychee '*.md' '**/*.md'",
     "lint:secrets": "gitleaks detect --source . -v --config .gitleaks.toml",
     "lint:secrets:staged": "gitleaks detect --source . -v --config .gitleaks.toml",

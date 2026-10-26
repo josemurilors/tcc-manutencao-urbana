@@ -1,4 +1,4 @@
-/** Selo de status — porte de `frontend/src/components/ui/status-badge.jsx`. */
+/** Selo de status. */
 
 import { StyleSheet, Text, View } from 'react-native';
 

@@ -44,11 +44,10 @@ jobs:
       - name: Run backend tests (pytest)
         run: docker compose -f docker-compose.yml run --rm -e DJANGO_SETTINGS_MODULE=core.settings.local backend python -m pytest
 
-      - name: Build frontend
-        run: docker run --rm -v ${{ github.workspace }}/frontend:/app -w /app node:20-alpine sh -c "npm install --silent && npm run lint && npm run build"
-
-      - name: Build nginx with frontend
-        run: docker build -t nginx-frontend:latest -f nginx.Dockerfile .
+      # O site é o build web do app (mobile/); o nginx.Dockerfile já o gera no
+      # "Build Docker images". Aqui só lint e tipos do app.
+      - name: Lint e typecheck do app
+        run: docker run --rm -v ${{ github.workspace }}/mobile:/app -w /app node:22-alpine sh -c "npm ci --silent && npm run lint && npm run typecheck"
 
       - name: Stop services
         run: docker compose -f docker-compose.yml down
@@ -68,8 +67,6 @@ jobs:
             set -e
             cd /opt/tcc-manutencao-urbana
             git pull origin master
-            export GIT_SHA=$(git rev-parse --short HEAD)
-            export BUILD_DATE=$(git log -1 --format=%cd --date='format:%d/%m/%Y %H:%M UTC')
             docker compose build
             docker compose up -d --build
             docker image prune -f

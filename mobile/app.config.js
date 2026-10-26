@@ -81,6 +81,10 @@ module.exports = {
       // ganho de SEO num app autenticado.
       output: 'single',
       favicon: './assets/images/favicon.png',
+      // O app também é o site: leitor de tela em português e cor da barra do navegador.
+      lang: 'pt-BR',
+      themeColor: '#000000',
+      description: 'Abertura e acompanhamento de chamados de manutenção urbana.',
     },
     plugins: [
       'expo-router',

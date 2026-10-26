@@ -1,6 +1,5 @@
 /**
- * Utilidades geoespaciais — porte de `frontend/src/utils/map-heatmap.js` e do
- * `pointInPolygon` embutido no MapPage do web.
+ * Utilidades geoespaciais (mapa de calor, raio e ponto no polígono).
  */
 
 import type { Defeito } from '@/types';

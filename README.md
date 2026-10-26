@@ -31,19 +31,19 @@ resultados.
 **Deploy:** [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br) —
 Hetzner (Nuremberg) ARM64, atrás de Cloudflare Tunnel.
 
-**Stack:** React 19 + Vite 8 · Expo/React Native · Django 5.2/DRF ·
+**Stack:** Expo/React Native (Android, iOS e web) · Django 5.2/DRF ·
 PostgreSQL 16/PostGIS 3.4 · ONNX Runtime (FastAPI) · Redis
 
-> **Requisitos:** Node.js ≥ 22.12 (Vite 8) · Python 3.12–3.14 (a imagem usa
+> **Requisitos:** Node.js ≥ 22 (Expo SDK 57) · Python 3.12–3.14 (a imagem usa
 > `python:3.13-slim`) · Docker + Compose v2 · GDAL no host (`libgdal-dev`) só
 > para rodar o Django fora do Docker · `uv` opcional para recriar o `.venv`.
 
 ## Status do Projeto
 
 🚧 Em produção, em uso contínuo. O backend Django é o backend oficial; o app
-em [`mobile/`](mobile/) é o cliente da v3; o frontend web está em
-[`frontend/`](frontend/) e é legado. Novas entregas seguem de forma
-incremental.
+em [`mobile/`](mobile/) é o único cliente: o mesmo código vira o app Android/iOS
+e o site (build web do Expo servido pelo nginx), com a mesma interface no
+computador e no celular. Novas entregas seguem de forma incremental.
 
 ## Funcionalidades
 
@@ -56,19 +56,19 @@ incremental.
   [`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md))
 - **Mapas:** mapa de calor, clusters com ações em lote, perímetro municipal
   validado com PostGIS (`ST_Within` + tolerância de ~1 km na borda)
-- **Painéis:** admin com KPIs e export CSV (web); BI completo por público na
-  aba **Painel** do app
+- **Painéis:** BI completo por público na aba **Painel** (KPIs, séries,
+  hotspots e export CSV)
 - **Apoio e sinalização cidadã:** upvotes, "já foi resolvido"/"não existe",
   gamificação (nível, EXP e ranking por cidade)
 - **Moderação:** quarentena anti-spam por strikes, recusa de reports
   implausíveis, ofuscação Gaussiana das fotos enviadas (privacidade)
 - **Contas:** entrada por e-mail (código de verificação), login com Google,
   2FA TOTP opcional, verificação de e-mail, gestão de usuários por hierarquia
-- **Notificações:** Web Push (VAPID) no PWA e Expo Push no app, além da
-  central in-app
-- **Plataforma:** PWA com service worker, tema claro/escuro, WCAG AA,
-  atalhos de teclado, mobile-first (detalhes em
-  [`docs/frontend.md`](docs/frontend.md))
+- **Notificações:** Expo Push no app instalado e central in-app em todas
+  as plataformas (no site ainda não há push do navegador)
+- **Plataforma:** um app para Android, iOS e web (instalável como PWA),
+  tema claro/escuro, contraste WCAG AA verificado por script e layout que se
+  adapta do celular ao computador
 
 ### Demonstração
 
@@ -171,7 +171,7 @@ docker compose -f docker-compose.dev.yml up -d backend redis   # puxa o postgres
 docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
 docker compose -f docker-compose.dev.yml --profile ia up -d ia # (opcional) serviço de IA
 
-cd frontend && npm run dev
+cd mobile && npm install && npm run web   # site e app em http://localhost:8081
 ```
 
 ### Quick Start (Produção)
@@ -221,15 +221,14 @@ Diagramas da stack, do pipeline de deploy e da sequência de atendimento:
 
 | Camada | Stack |
 |---|---|
-| Mobile | Expo SDK 57 + React Native 0.86 + Expo Router + react-native-maps (Leaflet no web) |
-| Frontend | React 19 + Vite 8 + Leaflet + Framer Motion + Phosphor Icons |
+| App e site | Expo SDK 57 + React Native 0.86 + Expo Router + react-native-maps (Leaflet no web) |
 | Backend | Django 5.2 + DRF (Gunicorn) + Redis |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | IA | FastAPI + ONNX Runtime — paraphrase-multilingual-MiniLM-L12-v2 |
 | Auth | simplejwt + BCrypt + login Google |
 | Borda | Cloudflare (WAF/TLS) + Tunnel → nginx → backend |
 
-O nginx serve o build da SPA e faz reverse-proxy de `/api/*` e `/uploads` para
+O nginx serve o build web do app e faz reverse-proxy de `/api/*` e `/uploads` para
 o Django; o serviço de IA roda ao lado (profile `ia`), consumido pelo backend;
 scheduler e backup (profiles próprios) usam a mesma imagem do backend. CI/CD:
 GitHub Actions (`.github/workflows/deploy.yml`) — gitleaks, build, testes,
