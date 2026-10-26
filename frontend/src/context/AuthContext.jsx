@@ -44,6 +44,7 @@ export function AuthProvider({ children }) {
         email: userData.email || payload.email,
         municipio_id: userData.municipio_id || null,
         admin: userData.admin || false,
+        papel: userData.papel || 'cidadao',
         municipio: userData.municipio || null,
         nome: userData.nome || '',
         cpf: userData.cpf || null,

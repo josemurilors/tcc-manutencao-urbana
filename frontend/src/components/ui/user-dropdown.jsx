@@ -92,11 +92,13 @@ export default function UserDropdown() {
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
                   <ChartBar size={16} /> Métricas
                 </button>
-                <button onClick={() => handleNav('/admin/usuarios')} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors" style={{ color: 'var(--color-text-secondary)' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
-                  <Users size={16} /> Usuários
-                </button>
+                {['admin_municipal', 'super_admin'].includes(user?.papel) && (
+                  <button onClick={() => handleNav('/admin/usuarios')} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors" style={{ color: 'var(--color-text-secondary)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
+                    <Users size={16} /> Usuários
+                  </button>
+                )}
               </>
             )}
 

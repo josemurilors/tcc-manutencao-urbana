@@ -150,8 +150,11 @@ class TestReabrir:
         )
         resp = _reabrir(autor_cli, criado['id'], motivo='O buraco voltou depois da chuva')
         assert resp.status_code == 200, resp.data
+        # Cidadão não recebe SLA (`sla_*` é da equipe); o prazo renovado
+        # aparece em `prazo_em` e é o que prova que a reabertura nasceu prazo.
         assert resp.data['sla_vencido'] is False
-        assert resp.data['sla_restante_horas'] > 0
+        assert resp.data['sla_restante_horas'] is None
+        assert Defeito.objects.get(id=criado['id']).prazo_em > timezone.now()
 
     def test_motivo_obrigatorio(self):
         autor_cli, _, _, criado = _concluido()

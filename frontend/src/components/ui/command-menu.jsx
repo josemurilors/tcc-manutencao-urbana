@@ -8,11 +8,11 @@ const pages = [
   { path: '/lista', icon: List, label: 'Lista de Chamados', keywords: 'chamados lista defeitos' },
   { path: '/conta', icon: User, label: 'Configurações da Conta', keywords: 'conta perfil configuracoes' },
   { path: '/admin/dashboard', icon: ChartBar, label: 'Métricas', keywords: 'metricas dashboard graficos', admin: true },
-  { path: '/admin/usuarios', icon: Users, label: 'Gerenciar Usuários', keywords: 'usuarios admin', admin: true },
+  { path: '/admin/usuarios', icon: Users, label: 'Gerenciar Usuários', keywords: 'usuarios admin', adminMunicipal: true },
   { path: '/configuracoes', icon: GearSix, label: 'Configurações Gerais', keywords: 'configuracoes gerais' },
 ];
 
-export function CommandMenu({ open, onClose, isAdmin }) {
+export function CommandMenu({ open, onClose, isAdmin, isAdminMunicipal }) {
   const navigate = useNavigate();
   const inputRef = useRef(null);
   const [query, setQuery] = useState('');
@@ -20,6 +20,7 @@ export function CommandMenu({ open, onClose, isAdmin }) {
 
   const filtered = pages.filter(p => {
     if (p.admin && !isAdmin) return false;
+    if (p.adminMunicipal && !isAdminMunicipal) return false;
     if (!query) return true;
     const q = query.toLowerCase();
     return p.label.toLowerCase().includes(q) || p.keywords.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);

@@ -17,7 +17,7 @@ export default function SuperAdmin() {
 
   useEffect(() => {
     if (!isAuthenticated) { navigate('/login'); return; }
-    if (!user?.admin) { navigate('/mapa'); return; }
+    if (!['admin_municipal', 'super_admin'].includes(user?.papel)) { navigate('/mapa'); return; }
     Promise.all([
       api.adminListUsers(),
       api.listMunicipios(),

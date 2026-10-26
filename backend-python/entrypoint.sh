@@ -65,37 +65,14 @@ python manage.py migrate categorias --fake --noinput 2>&1
 python manage.py migrate defeitos --fake --noinput 2>&1
 
 echo "Ensuring super admin exists..."
-python - <<'PYEOF' 2>&1
-import os
-import django
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings.production')
-django.setup()
-
-from users.models import User
-
-email = os.environ.get('SUPER_ADMIN_EMAIL', '').strip().lower()
-if not email:
-    print('SUPER_ADMIN_EMAIL not set; skipping')
-    raise SystemExit(0)
-
-password = os.environ.get('SUPER_ADMIN_PASSWORD', '')
-if not password:
-    print('SUPER_ADMIN_PASSWORD not set; skipping super admin creation')
-    raise SystemExit(0)
-if not User.objects.filter(email__iexact=email).exists():
-    user = User(
-        email=email,
-        nome='Administrador',
-        admin=1,
-        email_verified=1,
-    )
-    user.set_password(password)
-    user.save()
-    print(f'Super admin criado: {email}')
-else:
-    print(f'Super admin já existe: {email}')
-PYEOF
+# Fonte única de criação/promoção: o comando seta papel='super_admin' (o
+# INSERT antigo esquecia o papel e o save() zerava admin=1 na primeira subida).
+if [ -n "$SUPER_ADMIN_EMAIL" ] && [ -n "$SUPER_ADMIN_PASSWORD" ]; then
+    python manage.py criar_super_admin "$SUPER_ADMIN_EMAIL" "$SUPER_ADMIN_PASSWORD" 2>&1 \
+        || echo "criar_super_admin falhou (código $?); segue o boot"
+else
+    echo "SUPER_ADMIN_EMAIL/SUPER_ADMIN_PASSWORD not set; skipping super admin creation"
+fi
 
 echo "Collecting static files..."
 python manage.py collectstatic --noinput --clear

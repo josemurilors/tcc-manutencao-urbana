@@ -1012,16 +1012,36 @@ class TestApoiados:
 
 
 class TestSlaVencido:
+    """SLA é da equipe (contrato v3): cidadão e anônimo nunca veem o selo."""
 
-    def test_sla_vencido(self, auth_client, client):
-        created = _create_defeito(auth_client)
+    @staticmethod
+    def _vencido(autor_client):
+        created = _create_defeito(autor_client)
         defeito = Defeito.objects.get(id=created['id'])
         defeito.criado_em = timezone.now() - timedelta(days=30)
         defeito.prazo_em = defeito.criado_em + timedelta(days=defeito.prazo_sla_dias)
         defeito.save()
-        resp = client.get(reverse('defeitos-detail', args=[created['id']]))
+        return created['id']
+
+    def test_sla_vencido_equipe_ve(self, auth_client, admin_client):
+        defeito_id = self._vencido(auth_client)
+        resp = admin_client.get(reverse('defeitos-detail', args=[defeito_id]))
         assert resp.status_code == 200
         assert resp.data['sla_vencido'] is True
+
+    def test_cidadao_autor_nao_ve_sla(self, client):
+        cidadao = _new_user_client(client)
+        defeito_id = self._vencido(cidadao)
+        resp = cidadao.get(reverse('defeitos-detail', args=[defeito_id]))
+        assert resp.status_code == 200
+        assert resp.data['sla_vencido'] is False
+        assert resp.data['sla_restante_horas'] is None
+
+    def test_anonimo_nao_ve_sla(self, auth_client, client):
+        defeito_id = self._vencido(auth_client)
+        resp = client.get(reverse('defeitos-detail', args=[defeito_id]))
+        assert resp.status_code == 200
+        assert resp.data['sla_vencido'] is False
 
     def test_sla_vencido_fresh(self, auth_client, client):
         created = _create_defeito(auth_client)

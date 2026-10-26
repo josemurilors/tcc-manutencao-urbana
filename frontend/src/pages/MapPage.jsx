@@ -937,7 +937,7 @@ export default function MapPage() {
           </button>
         </div>
       )}
-      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} isAdmin={user?.admin} />
+      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} isAdmin={user?.admin} isAdminMunicipal={['admin_municipal', 'super_admin'].includes(user?.papel)} />
     </div>
   );
 }

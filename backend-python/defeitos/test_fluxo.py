@@ -388,9 +388,9 @@ class TestPrivacidade:
         ids = {u['id'] for u in adm.get(reverse('auth-admin-users')).data}
         assert str(cidadao.id) in ids and str(op_de_fora.id) not in ids
 
-    def test_operador_nao_ve_bi_nem_gerencia_usuarios(self):
+    def test_operador_ve_metricas_mas_nao_gerencia_usuarios(self):
         op, _ = _usuario('operador', CIDADE)
-        assert op.get(reverse('auth-admin-estatisticas')).status_code == 403
+        assert op.get(reverse('auth-admin-estatisticas')).status_code == 200
         assert op.get(reverse('auth-admin-users')).status_code == 403
 
 
@@ -417,8 +417,9 @@ class TestSla:
         assert obj.prioridade == 'urgente'
         assert obj.categoria_id == sla.regra_para('Arvore Caida', None)['categoria_id']
         assert obj.prazo_em == obj.criado_em + timedelta(days=2)
+        # O autor é cidadão: prazo vira `sla_*` só para a equipe (contrato v3).
         assert d['sla_vencido'] is False
-        assert 47 <= d['sla_restante_horas'] <= 48
+        assert d['sla_restante_horas'] is None
 
     def test_regra_do_municipio_sobrepoe(self):
         from gestao.models import CategoriaMunicipio, Secretaria
