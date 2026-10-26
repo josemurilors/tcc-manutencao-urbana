@@ -90,6 +90,31 @@ export type BiProdutividadeLinha = {
 };
 
 /** GET bi/hotspots/ */
+/** GET /bi/sugestoes-ia/ — achados da IA leve sobre os chamados abertos recentes. */
+export type BiSugestoesIa = {
+  /** false: serviço de IA fora do ar (o painel fica só com as sugestões por regra). */
+  ia_disponivel: boolean;
+  analisados: number;
+  temas: {
+    total: number;
+    ruas: number;
+    bairros: string[];
+    categoria: string;
+    exemplo: string;
+    sugestao: string;
+    ids: string[];
+  }[];
+  riscos: {
+    id: string;
+    protocolo: string | null;
+    categoria: string;
+    rua: string;
+    bairro: string;
+    status: string;
+    termos: string[];
+  }[];
+};
+
 export type BiHotspots = {
   celulas: {
     lat: number;

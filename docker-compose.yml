@@ -166,8 +166,9 @@ services:
           memory: 256M
     restart: unless-stopped
 
+  # Sobe sempre em produção: duplicados, temas parecidos e risco citado
+  # (bi/sugestoes_ia.py). Sem ele o backend segue, só sem esses achados.
   ia:
-    profiles: ["ia"]
     build:
       context: ./ia
       dockerfile: Dockerfile
@@ -190,7 +191,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: 350M
+          memory: 512M  # medido: ~370 MB trabalhando (modelos de texto e imagem carregados)
     restart: unless-stopped
 
   backup:

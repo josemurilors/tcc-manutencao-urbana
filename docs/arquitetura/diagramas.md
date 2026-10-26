@@ -24,7 +24,7 @@ flowchart TB
         SCH["scheduler<br/>alertas_sla (hora em hora)<br/>resumo_semanal (seg 8h)"]
         PG[("PostgreSQL 16 + PostGIS<br/>imagem nativa: Dockerfile.postgres")]
         RD[("Redis 7<br/>cache/filas, máx. 64 MB")]
-        IA["FastAPI :8000 (profile ia)<br/>classificação ONNX + fallback HF"]
+        IA["FastAPI :8000 (IA leve)<br/>embeddings ONNX + urgência por termos"]
         BK["backup (profile backup)<br/>dump diário 03:00 + rotação 30d"]
     end
 

@@ -13,6 +13,7 @@ urlpatterns = [
     path('aging/', views.AgingView.as_view(), name='bi-aging'),
     path('produtividade/', views.ProdutividadeView.as_view(), name='bi-produtividade'),
     path('hotspots/', views.HotspotsView.as_view(), name='bi-hotspots'),
+    path('sugestoes-ia/', views.SugestoesIaView.as_view(), name='bi-sugestoes-ia'),
     path('satisfacao/', views.SatisfacaoView.as_view(), name='bi-satisfacao'),
     path('chamados/', views.ChamadosView.as_view(), name='bi-chamados'),
     path('exportar/', views.ExportarView.as_view(), name='bi-exportar'),

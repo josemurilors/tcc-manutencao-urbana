@@ -217,6 +217,27 @@ async def classify_priority(request: TextRequest):
     return PriorityResponse(priority=priority, confidence=confidence)
 
 
+class PriorityItem(BaseModel):
+    priority: str
+    confidence: float
+    terms: list[str]
+
+
+class BatchPriorityResponse(BaseModel):
+    items: list[PriorityItem]
+
+
+@app.post("/priority-batch", response_model=BatchPriorityResponse)
+async def priority_batch(request: BatchEmbeddingsRequest):
+    """Prioridade de vários relatos de uma vez, com os termos que a decidiram."""
+    from inference import extract_priority_terms
+    items = []
+    for text in request.texts:
+        priority, confidence, terms = extract_priority_terms(text)
+        items.append(PriorityItem(priority=priority, confidence=confidence, terms=terms))
+    return BatchPriorityResponse(items=items)
+
+
 @app.post("/text-similarity", response_model=SimilarityResponse)
 async def similarity(request: TextPairRequest):
     from inference import text_similarity

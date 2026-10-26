@@ -45,7 +45,11 @@ User input → Tokenize (BERT tokenizer) → paraphrase-multilingual-MiniLM-L12-
   carregar ou o container de IA cair; há também fallback opcional via API do
   Hugging Face (ver `docs/arquitetura/diagramas.md`).
 - **Endpoints:** `POST /classify`, `/classify-full`, `/classify-image`,
-  `/text-similarity`, `/summarize` e `GET /health`.
+  `/text-similarity`, `/embeddings-batch`, `/priority`, `/priority-batch`,
+  `/check-spam` e `GET /health`.
+- **Uso pelo backend:** `/embeddings-batch` na detecção de duplicados
+  (`defeitos/serializers.py`) e nos temas parecidos do painel; `/priority-batch`
+  no risco citado no relato (`bi/sugestoes_ia.py`, `GET /api/v1/bi/sugestoes-ia/`).
 - **Circuit breaker (no backend):** 3 falhas de IA → cooldown 60s, timeout 3s;
   nunca bloqueia a criação do defeito.
 

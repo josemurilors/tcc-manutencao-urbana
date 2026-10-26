@@ -39,6 +39,7 @@ import {
   granularidadePara,
 } from '@/components/bi/formato';
 import { ListaHotspots } from '@/components/bi/hotspots';
+import { ListaSugestoes, ListaSugestoesIa } from '@/components/bi/sugestoes';
 import {
   calcularDelta,
   fmtKpi,
@@ -61,6 +62,7 @@ import { AppText } from '@/components/ui/text';
 import { corDoTom, Layout, Radius, Spacing, type Tom } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
+import { api } from '@/services/api';
 import { apiBi } from '@/services/api-bi';
 import type { BiChaveKpi, BiFiltros, BiKpisResposta, DimensaoBi, RecorteLista } from '@/types/bi';
 
@@ -150,8 +152,12 @@ function PainelGestor() {
   const satisfacao = useSecao(f ? () => apiBi.satisfacao(f) : null, chave);
   const produtividade = useSecao(f ? () => apiBi.produtividade(f) : null, chave);
   const hotspots = useSecao(f ? () => apiBi.hotspots(f) : null, chave);
+  // Regras sobre o município inteiro: não dependem dos filtros, carregam uma vez.
+  const sugestoes = useSecao(f ? () => api.adminEstatisticas() : null, 'sugestoes');
+  // Achados da IA leve: abertos recentes do município, também fora dos filtros.
+  const sugestoesIa = useSecao(f ? () => apiBi.sugestoesIa(f) : null, 'sugestoes-ia');
 
-  const secoes = [kpis, series, ranking, aging, satisfacao, produtividade, hotspots];
+  const secoes = [kpis, series, ranking, aging, satisfacao, produtividade, hotspots, sugestoes, sugestoesIa];
   const secoesRef = useRef(secoes);
   const atualizadoRef = useRef(atualizadoEm);
   useEffect(() => {
@@ -514,6 +520,26 @@ function PainelGestor() {
                       )
                     }
                   />
+                </ChartCard>
+              )}
+            </SecaoGrafico>
+
+            <SecaoGrafico secao={sugestoes} titulo="Sugestões de ação">
+              {(dados) => (
+                <ChartCard
+                  title="Sugestões de ação"
+                  subtitle="Calculadas sobre o município inteiro, nos últimos meses — não seguem os filtros acima.">
+                  <ListaSugestoes dados={dados} />
+                </ChartCard>
+              )}
+            </SecaoGrafico>
+
+            <SecaoGrafico secao={sugestoesIa} titulo="Achados da IA">
+              {(dados) => (
+                <ChartCard
+                  title="Achados da IA"
+                  subtitle="A IA do sistema lê os relatos abertos: agrupa os que descrevem o mesmo problema e destaca os que citam risco.">
+                  <ListaSugestoesIa dados={dados} />
                 </ChartCard>
               )}
             </SecaoGrafico>

@@ -15,6 +15,7 @@ import type {
   BiDistribuicaoLinha,
   BiFiltros,
   BiHotspots,
+  BiSugestoesIa,
   BiKpisResposta,
   BiProdutividadeLinha,
   BiSatisfacao,
@@ -81,6 +82,8 @@ export const apiBi = {
     request<BiProdutividadeLinha[]>(`${BASE}/produtividade/?${queryDosFiltros(f)}`),
 
   hotspots: (f: BiFiltros) => request<BiHotspots>(`${BASE}/hotspots/?${queryDosFiltros(f)}`),
+  /** Temas parecidos e risco citado no texto (IA leve). Ignora o período: olha os abertos recentes. */
+  sugestoesIa: (f: BiFiltros) => request<BiSugestoesIa>(`${BASE}/sugestoes-ia/?${queryDosFiltros(f)}`),
 
   satisfacao: (f: BiFiltros) => request<BiSatisfacao>(`${BASE}/satisfacao/?${queryDosFiltros(f)}`),
 

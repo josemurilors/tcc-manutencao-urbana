@@ -109,6 +109,14 @@ async def get_embeddings_batch(texts: list[str], redis_client=None) -> list[list
     return None
 
 
+async def priority_batch(texts: list[str], redis_client=None) -> list[dict] | None:
+    """Prioridade por palavras-chave de vários textos: [{priority, confidence, terms}]."""
+    result = await _call_ia('/priority-batch', {'texts': texts}, redis_client)
+    if result and 'items' in result:
+        return result['items']
+    return None
+
+
 async def check_spam(text: str, redis_client=None) -> dict | None:
     return await _call_ia('/check-spam', {'text': text}, redis_client)
 

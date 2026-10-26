@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import unicodedata
 import numpy as np
 from pathlib import Path
 
@@ -32,11 +33,12 @@ CATEGORY_KEYWORDS = {
 }
 
 PRIORITY_KEYWORDS = {
+    # Com acento: é o que o painel mostra. A comparação ignora acentos dos dois lados.
     "urgente": [
-        "acidente", "atropelamento", "desabamento", "explosao", "incendio",
-        "vazamento de gas", "choque", "eletrocussao", "desabou", "crianca",
-        "hospital", "emergencia", "risco", "perigo", "iminente",
-        "queda de arvore", "arvore caiu", "fio partido", "fio eletrico",
+        "acidente", "atropelamento", "desabamento", "explosão", "incêndio",
+        "vazamento de gás", "choque", "eletrocussão", "desabou", "criança",
+        "hospital", "emergência", "risco", "perigo", "iminente",
+        "queda de árvore", "árvore caiu", "fio partido", "fio elétrico",
     ],
     "alta": [
         "buraco enorme", "buraqueira", "semafaro quebrado", "poste caido",
@@ -114,7 +116,9 @@ class TextClassifier:
         if tz_path.exists():
             from tokenizers import Tokenizer
             self.tokenizer = Tokenizer.from_file(str(tz_path))
-            self.tokenizer.enable_padding(max_length=128)
+            # Completa só até o maior texto do lote: o mean pooling ignora o
+            # preenchimento pela máscara, e fixar 128 deixava cada texto ~25x mais caro.
+            self.tokenizer.enable_padding()
             self.tokenizer.enable_truncation(max_length=128)
         else:
             alt_path = model_dir / "tokenizer_config.json"
@@ -167,13 +171,15 @@ class TextClassifier:
         if self.session is None or self.tokenizer is None:
             return None
         try:
+            # Uma passada do ONNX por lote, em vez de um texto por vez.
             embeddings = []
-            for text in texts:
-                emb = self._encode(text)
-                if emb is not None:
-                    embeddings.append(emb.tolist())
-                else:
-                    return None
+            for i in range(0, len(texts), 32):
+                encodings = self.tokenizer.encode_batch([t[:500] for t in texts[i:i + 32]])
+                input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+                attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+                outputs = self.session.run(None, {"input_ids": input_ids, "attention_mask": attention_mask})
+                pooled = _normalize(_mean_pooling(outputs[0], attention_mask))
+                embeddings.extend(v.tolist() for v in pooled)
             return embeddings
         except Exception as e:
             print(f"Erro no encode_batch: {e}")
@@ -237,19 +243,32 @@ class ImageClassifier:
             return "Outro", 0.0
 
 
-def extract_priority(text: str) -> tuple[str, float]:
-    text_lower = text.lower()[:500]
+def _sem_acento(texto: str) -> str:
+    # As palavras-chave estão sem acento: "criança" precisa casar com "crianca".
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+
+
+def extract_priority_terms(text: str) -> tuple[str, float, list[str]]:
+    """Prioridade por palavras-chave, com os termos que a decidiram."""
+    text_lower = _sem_acento(text.lower()[:500])
     scores = {}
+    termos = {}
     for priority, keywords in PRIORITY_KEYWORDS.items():
-        score = sum(2 if len(kw.split()) > 1 else 1 for kw in keywords if kw.lower() in text_lower)
-        if score > 0:
-            scores[priority] = score
+        achados = [kw for kw in keywords if _sem_acento(kw.lower()) in text_lower]
+        if achados:
+            scores[priority] = sum(2 if len(kw.split()) > 1 else 1 for kw in achados)
+            termos[priority] = achados
     if not scores:
-        return "baixa", 0.3
+        return "baixa", 0.3, []
     best = max(scores, key=scores.get)
     total = sum(scores.values())
     confidence = min(scores[best] / total, 0.95)
-    return best, confidence
+    return best, confidence, termos[best]
+
+
+def extract_priority(text: str) -> tuple[str, float]:
+    priority, confidence, _ = extract_priority_terms(text)
+    return priority, confidence
 
 
 def _jaccard_similarity(text1: str, text2: str) -> float:

@@ -112,6 +112,15 @@ class BiView(APIView):
     permission_classes = [EhGestor]
 
 
+class SugestoesIaView(BiView):
+    """Temas parecidos e risco citado no texto, pela IA leve (ver `sugestoes_ia`)."""
+
+    def get(self, request):
+        from .sugestoes_ia import sugestoes_ia
+
+        return Response(sugestoes_ia(municipio_do_pedido(request)))
+
+
 class KpisView(BiView):
     def get(self, request):
         escopo = escopo_do_pedido(request)
