@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/STATUS-EM%20PRODU%C3%87%C3%83O-green" alt="Status: em produção">
-  <img src="https://img.shields.io/badge/CONTEXTO-TCC-blue" alt="Contexto: TCC">
+  <img src="https://img.shields.io/badge/TCC-UNIVESP-blue" alt="TCC — UNIVESP">
   <img src="https://img.shields.io/badge/STACK-Expo%20%7C%20Django%20%7C%20PostGIS%20%7C%20ONNX-blueviolet" alt="Stack: Expo, Django, PostGIS, ONNX">
   <img src="https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey" alt="Licença MIT">
 </p>
@@ -21,7 +21,7 @@
 | --- | --- |
 | **Versão** | 1.1.0 (plataforma v3) |
 | **Estado** | Em produção em [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br), com entregas incrementais |
-| **Contexto** | Trabalho de Conclusão de Curso <!-- TODO: instituição, curso e orientador(a) --> |
+| **Contexto** | Trabalho de Conclusão de Curso — Engenharia da Computação, Universidade Virtual do Estado de São Paulo (UNIVESP) · Orientador: Marcos Norio Watanabe |
 | **Alvo** | Prefeituras (B2G) e cidadãos — Android, iOS e navegador |
 
 > **Limite principal:** a IA do sistema é leve e local. Ela detecta duplicados,
@@ -258,11 +258,23 @@ IA com relatos reais.
 
 ## 13. Autores e licença
 
-| Nome | Papel | GitHub |
-| --- | --- | --- |
-| José Murilo Rodrigues Sabalo | Autor — backend, infraestrutura, BI, IA | [@josemurilors](https://github.com/josemurilors) |
-| caiocinel | App (Expo), login com Google, sinalização e quarentena, operação, rotas | [@caiocinel](https://github.com/caiocinel) |
+TCC *Central de Inteligência Urbana: PWA para reporte, classificação automática
+e priorização de problemas de infraestrutura* — Engenharia da Computação,
+UNIVESP.
 
-<!-- TODO: demais membros do grupo do TCC e orientador(a) -->
+| Nome | RA | GitHub |
+| --- | --- | --- |
+| Caio Alencar Cinel | 2223869 | [@caiocinel](https://github.com/caiocinel) |
+| Gabriel Monteiro Alves | 2015614 | — |
+| Gabriel Venancio da Silva | 2231736 | — |
+| Ivaildes Bertoldo | 2013692 | — |
+| José Murilo Rodrigues Sabalo | 2232083 | [@josemurilors](https://github.com/josemurilors) |
+| Joseph Jucelio de Oliveira Santos | 2224541 | — |
+| Tiago José Schiabelli | 2226164 | — |
+
+Código: José Murilo (backend, infraestrutura, BI, IA) e Caio (app Expo, login
+com Google, sinalização e quarentena, operação, rotas).
+
+Orientador: Marcos Norio Watanabe.
 
 Licença MIT — texto em [`LICENSE`](LICENSE).
