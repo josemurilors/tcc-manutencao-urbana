@@ -8,7 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 COPY requirements-build.txt ./
-RUN pip install --no-cache-dir -r requirements-build.txt
+# PyTorch só exporta o modelo para ONNX, em CPU. Sem o índice CPU o pip traz a
+# variante CUDA (vários GB de bibliotecas NVIDIA) e lotou o disco da VPS.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements-build.txt
 
 COPY models/download_text_model.py models/download_image_model.py /build/
 COPY experimentos/dataset_sintetico.py /build/experimentos/
