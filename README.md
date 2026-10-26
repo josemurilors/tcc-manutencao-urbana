@@ -249,7 +249,7 @@ A interface entre app, backend e documentação vive em
 | `operacao/` `bi/` `gestao/` `notificacoes/` | fila de campo, BI, administração, avisos |
 | `transparencia/` `dados-abertos/` `open311/` | páginas públicas e dados abertos |
 | `municipios/` `categorias/` | lookups (IBGE, categorias com SLA) |
-| `health/` `csrf-token/` | status (db, ia, uptime) e token CSRF |
+| `health/` `csrf-token/` | verificação de saúde (200 se a API responde) e token CSRF |
 
 ## Segurança
 

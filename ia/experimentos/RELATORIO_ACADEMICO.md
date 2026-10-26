@@ -92,7 +92,7 @@
 ### Melhor Configuração
 
 - **Raio:** 50m
-- **Limiar de Similaridade:** 0.70
+- **Limiar de Similaridade:** 0.75 (empata com 0.70 em todas as métricas; o desempate fica com o limiar mais conservador, que é o usado em produção)
 - **Acurácia:** 56.25%
 - **Precisão:** 0.6667
 - **Recall:** 0.4444
@@ -119,9 +119,10 @@
 
 ### Classificador
 
-- ⚠️ **Acurácia abaixo do alvo (43.24% vs. alvo ≥70%)**: A expansão do dataset (100→525 relatos, 75 por categoria) não elevou a acurácia; o modelo ainda requer fine-tuning/retreinamento do centróide.
-- A categoria 'Outro' não possui centróide definido, resultando em 0% de acerto (75 relatos todos classificados como outras categorias). Esta categoria é um "catch-all" e o classificador atual não consegue representá-la.
-- **Próximos passos:** (1) adicionar mais templates por categoria para aumentar a variedade lexical; (2) tuning de temperatura do centróide/limiar de confiança; (3) re-treinar os centróides do modelo ONNX com o dataset expandido (75 exemplos por categoria, incluindo 'Outro'); (4) avaliar a separabilidade das categorias no espaço de embedding (muitas confusões Buraco↔Calcada Danificada↔Arvore Caida indicam baixa distância entre centróides).
+- ⚠️ **Acurácia de 68.57%, 1.43pp abaixo do alvo (≥70%)**: o retreino dos centróides com o dataset expandido (525 relatos, 75 por categoria, incluindo 'Outro') elevou a acurácia de 43.24% para 68.57%, e todas as categorias passaram a ter F1 > 0.4 ('Outro' saiu de F1=0 para 0.576).
+- 'Outro' segue como a categoria mais fraca (recall 0.48): por ser um "catch-all", seus relatos se espalham entre Entulho e Semáforo.
+- **Limitação:** o dataset é sintético (gerado por templates); a acurácia em relatos reais de cidadãos ainda precisa ser medida.
+- **Próximos passos:** (1) avaliar com relatos reais rotulados; (2) avaliar a separabilidade das categorias no espaço de embedding (confusões Buraco↔Árvore Caída e Iluminação↔Semáforo indicam centróides próximos); (3) fine-tuning do modelo, já que expandir o dataset para 100/cat e reforçar o centróide 'Outro' não melhoraram (64.57% e 67.05%).
 
 ### Performance
 
@@ -131,7 +132,7 @@
 
 ### Detecção de Duplicados
 
-- ✅ **Melhor configuração validada**: raio=50m, limiar=0.70
+- ✅ **Melhor configuração validada**: raio=50m, limiar=0.75 (empatado com 0.70; é o padrão de `DUPLICATE_SIMILARITY_THRESHOLD`)
 - ⚠️ **F1 moderado (0.5333)**: Sugere necessidade de ajuste fino nos limiares
 - Recomenda-se expandir o dataset de teste para 50+ pares
 

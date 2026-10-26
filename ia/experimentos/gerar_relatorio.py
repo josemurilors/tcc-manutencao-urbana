@@ -111,12 +111,11 @@ def generate_report(results):
     report.append("")
     report.append("### Classificador")
     acc = results["classificador"]["acuracia_global"]
-    if acc < 0.6:
-        report.append(f"- ⚠️ **Acurácia baixa ({acc:.2%})**: O modelo requer fine-tuning com mais exemplos por categoria")
-        report.append("- A categoria 'Outro' não possui centróide definido, resultando em 0% de acerto")
-        report.append("- Recomenda-se aumentar o dataset de treinamento para 50+ exemplos por categoria")
+    if acc < 0.7:
+        report.append(f"- ⚠️ **Acurácia de {acc:.2%}, abaixo do alvo (≥70%)**")
     else:
-        report.append(f"- ✅ **Acurácia aceitável ({acc:.2%})**")
+        report.append(f"- ✅ **Acurácia de {acc:.2%}, dentro do alvo (≥70%)**")
+    report.append("- **Limitação:** dataset sintético; a acurácia em relatos reais ainda precisa ser medida")
     report.append("")
 
     report.append("### Performance")

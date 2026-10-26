@@ -233,7 +233,7 @@ source of routes, schemas and vocabulary. Prefixes under `/api/v1/`:
 | `operacao/` `bi/` `gestao/` `notificacoes/` | field queue, BI, administration, notices |
 | `transparencia/` `dados-abertos/` `open311/` | public pages and open data |
 | `municipios/` `categorias/` | lookups (IBGE, categories with SLA) |
-| `health/` `csrf-token/` | status (db, ia, uptime) and CSRF token |
+| `health/` `csrf-token/` | health check (200 when the API is up) and CSRF token |
 
 ## Security
 

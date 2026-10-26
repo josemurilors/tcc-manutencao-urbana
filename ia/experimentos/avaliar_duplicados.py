@@ -140,7 +140,8 @@ def run_duplicate_evaluation():
             all_results.append(result)
             print(f"{radius:>10} {threshold:>10.2f} {result['accuracy']:>10.4f} {result['precision']:>10.4f} {result['recall']:>10.4f} {result['f1']:>10.4f}")
 
-    best_result = max(all_results, key=lambda x: x["f1"])
+    # Empate no F1 fica com o limiar mais alto (mais conservador, menos falso positivo)
+    best_result = max(all_results, key=lambda x: (x["f1"], x["threshold"]))
     print(f"\nMelhor combinação (por F1):")
     print(f"  Raio: {best_result['radius_m']}m")
     print(f"  Limiar: {best_result['threshold']}")
