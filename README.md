@@ -1,298 +1,268 @@
-<p align="center">
-  <img src="icone-projeto.svg" alt="Central de Inteligência Urbana" width="200">
-</p>
+<div align="center">
 
-<h1 align="center">Central de Inteligência Urbana — Urban Intelligence Center</h1>
+<img src="icone-projeto.svg" width="150" alt="Ícone da Central de Inteligência Urbana: satélite dourado">
 
-<p align="center">
-  <img src="https://img.shields.io/badge/STATUS-EM%20PRODU%C3%87%C3%83O-green?style=for-the-badge" alt="Status">
-  <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License: MIT">
-  <img src="https://img.shields.io/badge/stack-React%2019%20%7C%20Django%205%20%7C%20PostGIS-blueviolet?style=for-the-badge" alt="Stack">
-  <img src="https://img.shields.io/badge/deploy-Hetzner%20VPS%20%2B%20Cloudflare-important?style=for-the-badge" alt="Deploy: Hetzner VPS + Cloudflare">
-  <img src="https://img.shields.io/badge/python-3.13-3776AB?style=for-the-badge" alt="Python 3.13">
-</p>
+# Central de Inteligência Urbana
+
+*Zeladoria urbana para prefeituras: o cidadão reporta, a equipe executa, a gestão acompanha e a cidade publica os números.*
+
+</div>
 
 <p align="center">
-  <a href="#português">🇧🇷 Português</a> · <a href="docs/README.en.md">🇺🇸 English</a>
+  <img src="https://img.shields.io/badge/STATUS-EM%20PRODU%C3%87%C3%83O-green" alt="Status: em produção">
+  <img src="https://img.shields.io/badge/CONTEXTO-TCC-blue" alt="Contexto: TCC">
+  <img src="https://img.shields.io/badge/STACK-Expo%20%7C%20Django%20%7C%20PostGIS%20%7C%20ONNX-blueviolet" alt="Stack: Expo, Django, PostGIS, ONNX">
+  <img src="https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey" alt="Licença MIT">
 </p>
 
----
+<p align="center"><a href="docs/README.en.md">🇺🇸 English version</a></p>
 
-<a id="português"></a>
+| | |
+| --- | --- |
+| **Versão** | 1.1.0 (plataforma v3) |
+| **Estado** | Em produção em [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br), com entregas incrementais |
+| **Contexto** | Trabalho de Conclusão de Curso <!-- TODO: instituição, curso e orientador(a) --> |
+| **Alvo** | Prefeituras (B2G) e cidadãos — Android, iOS e navegador |
 
-## Descrição do Projeto
+> **Limite principal:** a IA do sistema é leve e local. Ela detecta duplicados,
+> agrupa relatos parecidos e destaca risco citado no texto; **não** classifica
+> a categoria do chamado (quem escolhe é o cidadão) e foi medida só com dados
+> sintéticos.
 
-Central de Inteligência Urbana é uma plataforma para reportar e gerenciar
-problemas de infraestrutura urbana (buracos, iluminação quebrada, calçadas
-danificadas, árvores caídas etc.). O cidadão envia relato com foto + GPS, a IA
-classifica e prioriza, a prefeitura executa e a gestão acompanha prazos e
-resultados.
+## Sumário
 
-**Deploy:** [tcc.josemurilors.com.br](https://tcc.josemurilors.com.br) —
-Hetzner (Nuremberg) ARM64, atrás de Cloudflare Tunnel.
+[Início rápido](#início-rápido) · [1. Objetivo e telas](#1-objetivo-e-telas) ·
+[2. Arquitetura](#2-arquitetura) · [3. Estrutura](#3-estrutura-do-repositório) ·
+[4. Domínio e papéis](#4-domínio-e-papéis) · [5. API](#5-api) ·
+[6. IA e geoespacial](#6-ia-e-geoespacial) · [7. Segurança](#7-segurança-e-privacidade) ·
+[8. Execução local](#8-desenvolvimento-e-execução-local) ·
+[9. Critérios de aceite](#9-critérios-de-aceite) · [10. Escopo](#10-limites-de-escopo-e-evolução) ·
+[11. Contribuição](#11-contribuição) · [12. Documentação](#12-documentação-complementar) ·
+[13. Autores e licença](#13-autores-e-licença)
 
-**Stack:** Expo/React Native (Android, iOS e web) · Django 5.2/DRF ·
-PostgreSQL 16/PostGIS 3.4 · ONNX Runtime (FastAPI) · Redis
+## Início rápido
 
-> **Requisitos:** Node.js ≥ 22 (Expo SDK 57) · Python 3.12–3.14 (a imagem usa
-> `python:3.13-slim`) · Docker + Compose v2 · GDAL no host (`libgdal-dev`) só
-> para rodar o Django fora do Docker · `uv` opcional para recriar o `.venv`.
+```bash
+cp .env.example backend-python/.env
+docker compose -f docker-compose.dev.yml up -d backend redis
+docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
+cd mobile && npm install && npm run web
+```
 
-## Status do Projeto
+Abra `http://localhost:8081` — o mesmo app roda no navegador, no Android e no iOS.
 
-🚧 Em produção, em uso contínuo. O backend Django é o backend oficial; o app
-em [`mobile/`](mobile/) é o único cliente: o mesmo código vira o app Android/iOS
-e o site (build web do Expo servido pelo nginx), com a mesma interface no
-computador e no celular. Novas entregas seguem de forma incremental.
+## 1. Objetivo e telas
 
-## Funcionalidades
+O cidadão marca no mapa um problema de infraestrutura (buraco, poste apagado,
+entulho, calçada, árvore caída, semáforo), anexa foto e GPS e recebe um
+**protocolo**. A prefeitura atende numa fila priorizada, a gestão acompanha
+prazos (SLA) e resultados, e qualquer pessoa vê os números da cidade. O sistema
+**não** despacha equipes nem integra com sistemas legados da prefeitura.
 
-- **Relato cidadão:** foto + GPS + categoria, com classificação por IA
-  (7 categorias), detecção de spam e dedup (raio 50 m + cosseno ≥ 0,75)
-- **Roteamento e prioridade:** categoria → secretaria responsável;
-  prioridade por palavras-chave; alerta de cluster (5+ do mesmo tipo em 7 dias)
-- **Fluxo de atendimento v3:** protocolo, linha do tempo, SLA, reabertura,
-  avaliação, evidências antes/depois (detalhe em
-  [`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md))
-- **Mapas:** mapa de calor, clusters com ações em lote, perímetro municipal
-  validado com PostGIS (`ST_Within` + tolerância de ~1 km na borda)
-- **Painéis:** BI completo por público na aba **Painel** (KPIs, séries,
-  hotspots e export CSV)
-- **Apoio e sinalização cidadã:** upvotes, "já foi resolvido"/"não existe",
-  gamificação (nível, EXP e ranking por cidade)
-- **Moderação:** quarentena anti-spam por strikes, recusa de reports
-  implausíveis, ofuscação Gaussiana das fotos enviadas (privacidade)
-- **Contas:** entrada por e-mail (código de verificação), login com Google,
-  2FA TOTP opcional, verificação de e-mail, gestão de usuários por hierarquia
-- **Notificações:** Expo Push no app instalado e central in-app em todas
-  as plataformas (no site ainda não há push do navegador)
-- **Plataforma:** um app para Android, iOS e web (instalável como PWA),
-  tema claro/escuro, contraste WCAG AA verificado por script e layout que se
-  adapta do celular ao computador
+**Uma interface só:** o app em [`mobile/`](mobile/) (Expo) é o único cliente. O
+build web dele é o site, então quem usa no computador ou no navegador do
+celular vê a mesma tela de quem instalou o app.
 
-### Demonstração
+| Página de início (web) | Mapa | Chamado |
+| --- | --- | --- |
+| <img src="docs/imagens/inicio.jpg" width="420" alt="Página de início com o mapa de São Paulo, 38 chamados abertos e a consulta de protocolo"> | <img src="docs/imagens/mapa.jpg" width="200" alt="Mapa com chamados agrupados e legenda de status"> | <img src="docs/imagens/chamado.png" width="200" alt="Ficha do chamado com protocolo, prazo, secretaria e histórico"> |
 
-**[tcc.josemurilors.com.br](https://tcc.josemurilors.com.br)**
+| Operação (fila e ficha de atendimento) | Painel da gestão |
+| --- | --- |
+| <img src="docs/imagens/operacao.png" width="420" alt="Fila de operação com resumo, filtros e a ficha do chamado ao lado"> | <img src="docs/imagens/painel.png" width="420" alt="Painel com manchete, KPIs comparados e gráficos de entradas e fila"> |
 
-## Plataforma v3
+| Sugestões de ação | Achados da IA | Transparência (público) |
+| --- | --- | --- |
+| <img src="docs/imagens/sugestoes.png" width="200" alt="Sugestões por regra com selos de impacto e bairros com alta fora do normal"> | <img src="docs/imagens/achados-ia.png" width="200" alt="Achados da IA: relatos que citam risco, com atender em até 24 horas"> | <img src="docs/imagens/transparencia.png" width="200" alt="Portal de transparência de São Paulo com indicadores dos últimos 90 dias"> |
 
-A v3 transforma a Central num produto de zeladoria urbana para prefeituras
-(B2G): o cidadão reporta, a equipe de campo executa, a gestão acompanha prazos
-e resultados, e a cidade publica os números. O cliente da v3 é o app em
-[`mobile/`](mobile/) (iOS, Android e web); o vocabulário, o esquema e a API
-compartilhados estão em
-[`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md).
+*Telas do município de demonstração (`seed_demo`, dados fictícios).*
 
-### O que o produto faz, por público
+### Entregas da versão
 
-- `Cidadão`: abre chamado com foto e GPS e recebe um **protocolo**
-  (`AAAA-NNNNNN`); acompanha a linha do tempo (Recebido → Em análise →
-  Programado → Em execução → Resolvido / Não procede) pelo protocolo, sem
-  login; apoia, sinaliza, avalia (1–5), reabre em até 30 dias e exporta os
-  próprios dados (LGPD).
-- `Operação`: fila priorizada por prazo e apoios, assumir chamado, mudar
-  status, nota interna, resposta pública, foto de evidência e checklist.
-  Funciona sem rede: as ações ficam numa fila e são reenviadas com
-  `Idempotency-Key`.
-- `Gestão`: BI do município (SLA, lead time P50/P90, CSAT, aging, hotspots,
-  produtividade) com drill-down e exportação; administra secretarias, equipes,
-  categorias, SLA, moderação e auditoria.
+- **Cidadão:** reporte com foto e GPS, protocolo `AAAA-NNNNNN`, linha do tempo
+  (Recebido → Em análise → Programado → Em execução → Resolvido / Não procede),
+  consulta pelo protocolo sem login, apoio, sinalização ("já foi resolvido",
+  "não existe"), avaliação (1–5), reabertura em até 30 dias, exportação dos
+  próprios dados (LGPD), nível e ranking por cidade.
+- **Operação:** fila priorizada por prazo, prioridade e apoios; assumir,
+  programar, executar, concluir com foto, resposta pública, nota interna,
+  ações em lote, ordem de serviço em PDF; funciona sem rede (fila offline com
+  `Idempotency-Key`).
+- **Gestão:** BI do município (SLA, lead time P50/P90, CSAT, aging, hotspots,
+  produtividade) com drill-down e exportação; sugestões de ação por regra e
+  achados da IA; secretarias, equipes, categorias, SLA, moderação e auditoria.
+- **Público:** portal de transparência, dados abertos (CSV/GeoJSON) e Open311.
+- **Plataforma:** Android, iOS e web (instalável como PWA), tema claro/escuro,
+  contraste WCAG AA verificado por script, layout do celular ao computador.
 
-### Papéis
+## 2. Arquitetura
 
-Cada servidor atua em **um** município (`users.municipio_id`). Regras em
+```mermaid
+flowchart LR
+    A["App Android/iOS"] --> CF["Cloudflare<br/>(WAF + Tunnel)"]
+    W["Navegador<br/>(build web do app)"] --> CF
+    CF --> N["nginx<br/>site + /api"]
+    N --> B["Django + DRF<br/>(Gunicorn)"]
+    B --> P[("PostgreSQL 16<br/>+ PostGIS")]
+    B --> R[("Redis")]
+    B --> IA["IA leve<br/>FastAPI + ONNX"]
+    S["Agendador<br/>(alertas de SLA)"] --> P
+```
+
+**Escrita:** o app envia o chamado → o backend resolve o município pelo ponto
+(PostGIS), aplica regras de duplicado, roteia para a secretaria e calcula o
+prazo. **Leitura:** fila, painel e transparência consultam o PostgreSQL; as
+sugestões da IA ficam 6 h em cache no Redis.
+
+| Área | Escolha | Papel |
+| --- | --- | --- |
+| App e site | Expo SDK 57, React Native 0.86, Expo Router, Leaflet (web) | Interface única |
+| Backend | Django 5.2, DRF, Gunicorn, simplejwt | API, regras, permissões |
+| Dados | PostgreSQL 16 + PostGIS 3.4, Redis | Chamados, geometria, cache |
+| IA | FastAPI + ONNX Runtime, MiniLM-L12-v2 multilíngue | Embeddings e termos de risco |
+| Borda | Cloudflare (WAF/TLS) + Tunnel → nginx | Entrada única, cabeçalhos de segurança |
+| CI/CD | GitHub Actions + VPS ARM64 (Hetzner) | Testes e deploy a cada push |
+
+## 3. Estrutura do repositório
+
+```text
+tcc-manutencao-urbana/
+├── mobile/            # app Expo (Android, iOS e web) — único cliente
+├── backend-python/    # API Django + DRF
+├── ia/                # serviço de IA leve (FastAPI + ONNX) e experimentos
+├── docs/              # contrato da API, diagramas, produção, Play Store, imagens
+├── scripts/           # testes do backend, seed demo, backup
+├── nginx.Dockerfile   # build web do app + nginx
+├── nginx.prod.conf
+├── docker-compose.yml       # produção
+└── docker-compose.dev.yml   # desenvolvimento
+```
+
+Cada subprojeto tem README próprio: [app](mobile/README.md),
+[backend](backend-python/README.md), [IA](ia/README.md).
+
+## 4. Domínio e papéis
+
+Cada servidor atua em **um** município (`users.municipio_id`); regras em
 `backend-python/core/permissoes.py`.
 
-| Papel             | Pode                                                                     |
-| ----------------- | ------------------------------------------------------------------------ |
-| `cidadao`         | Reportar, apoiar, sinalizar, avaliar, reabrir o próprio chamado (30 dias) |
-| `operador`        | Fila, assumir, mudar status, notas, resposta pública, evidências          |
-| `gestor`          | + rejeitar, duplicado, reabrir, atribuir, SLA, BI, exportações, moderação |
-| `admin_municipal` | + equipe e papéis, secretarias, categorias, configuração, auditoria       |
-| `super_admin`     | Gere qualquer município (`?municipio=`); opera só no seu                  |
+| Papel | Pode |
+| --- | --- |
+| `cidadao` | Reportar, apoiar, sinalizar, avaliar, reabrir o próprio chamado (30 dias) |
+| `operador` | Fila, assumir, mudar status, notas, resposta pública, evidências |
+| `gestor` | + rejeitar, duplicado, reabrir, atribuir, SLA, BI, exportações, moderação |
+| `admin_municipal` | + equipe e papéis, secretarias, categorias, configuração, auditoria |
+| `super_admin` | Gere qualquer município (`?municipio=`); opera só no seu |
 
-### Transparência e dados abertos
+Regras de negócio principais: status só muda por `defeitos/fluxo.py`
+(transições, histórico e aviso ao cidadão); duplicado = mesma categoria aberta
+a poucos metros; quarentena anti-spam por strikes (sinalizações "não existe"
+confirmadas). Vocabulário completo:
+[`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md).
 
-Sem login e sem dados pessoais:
+## 5. API
 
-- `GET /api/v1/transparencia/<codigo_ibge>/` — indicadores dos últimos 90 dias
-- `GET /api/v1/dados-abertos/<codigo_ibge>/chamados.csv` e `.geojson`
-- Open311 GeoReport v2 (leitura): `/api/v1/open311/v2/services.json` e `requests.json`
-
-### Notificações e agendador
-
-Todo evento relevante vira aviso in-app e push (Expo Push; variáveis
-`EXPO_PUSH_ENABLED` / `EXPO_ACCESS_TOKEN`). O serviço `scheduler` dos composes
-roda `entrypoint.sh agendador` no fuso `America/Sao_Paulo`: `alertas_sla` de
-hora em hora e `resumo_semanal` às segundas, a partir das 8h. Nenhum comando
-repete aviso, então reiniciar ou rodar à mão é seguro.
-
-```bash
-docker compose up -d scheduler                 # produção (sobe junto no up -d)
-docker compose exec backend python manage.py alertas_sla --dry-run
-```
-
-### Município de demonstração (`seed_demo`)
-
-Gera um município realista para vendas e para o BI: cidadãos fictícios,
-equipes e chamados que passam pelo ciclo de vida real, com datas retroativas
-coerentes. Tudo que é demo usa e-mail `@demo.ciu`. Rodar de novo substitui a
-demo anterior; `--limpar-demo` apaga só a demo.
-
-```bash
-scripts/seed-demo.sh                                  # DEV: São Paulo, 600 chamados, 180 dias
-scripts/seed-demo.sh --municipio 3509502 --chamados 300 --dias 90
-docker compose exec backend python manage.py seed_demo --municipio 3550308
-```
-
-### Testes do backend
-
-`scripts/test-backend.sh` roda o pytest num container efêmero com banco de
-teste próprio (`test_<sufixo>`), então execuções em paralelo não se atrapalham.
-Requer a stack dev no ar.
-
-```bash
-scripts/test-backend.sh                                   # suíte inteira
-scripts/test-backend.sh -k transicao                      # por nome
-```
-
-## Acesso ao Projeto
-
-### Quick Start (Desenvolvimento)
-
-```bash
-git clone git@github.com:josemurilors/tcc-manutencao-urbana.git
-cd tcc-manutencao-urbana
-
-cp .env.example backend-python/.env
-# Edite backend-python/.env: ENCRYPTION_KEY, DB_PASSWORD, etc.
-
-docker compose -f docker-compose.dev.yml up -d backend redis   # puxa o postgres (PostGIS) junto
-docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
-docker compose -f docker-compose.dev.yml --profile ia up -d ia # (opcional) serviço de IA
-
-cd mobile && npm install && npm run web   # site e app em http://localhost:8081
-```
-
-### Quick Start (Produção)
-
-```bash
-git clone git@github.com:josemurilors/tcc-manutencao-urbana.git
-cd tcc-manutencao-urbana
-
-cp .env.example .env
-# Edite .env com os segredos de produção (o compose lê as variáveis da raiz)
-
-docker compose up -d --build
-
-# PostGIS (extensão + geometrias), primeira vez:
-docker compose exec -T postgres psql -U urbana -d manutencao_urbana \
-  -c "CREATE EXTENSION IF NOT EXISTS postgis;"
-docker compose exec -T postgres psql -U urbana -d manutencao_urbana -c "
-  ALTER TABLE municipios ADD COLUMN IF NOT EXISTS polygon_geom geometry(MultiPolygon, 4326);
-  CREATE INDEX IF NOT EXISTS idx_municipios_polygon_geom ON municipios USING GIST (polygon_geom);
-  ALTER TABLE defeitos ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326)
-    GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED;
-  CREATE INDEX IF NOT EXISTS idx_defeitos_geom ON defeitos USING GIST (geom);"
-```
-
-O tráfego entra exclusivamente via **Cloudflare Tunnel** (`cloudflared`,
-`tcc_tunnel`); as portas 80/443 da VPS ficam fechadas no firewall da nuvem. O
-nginx usa o origin certificate em `./cloudflare/` (`cert.pem` + `key.pem`).
-
-```bash
-curl https://tcc.josemurilors.com.br/api/v1/health/
-```
-
-### App Mobile (Expo)
-
-O app iOS/Android/web vive em [`mobile/`](mobile/) e consome a mesma API.
-
-```bash
-cd mobile && npm install && npm start   # QR code com o Expo Go
-```
-
-Detalhes de configuração e limitações: [`mobile/README.md`](mobile/README.md).
-
-## Arquitetura
-
-Diagramas da stack, do pipeline de deploy e da sequência de atendimento:
-[`docs/arquitetura/diagramas.md`](docs/arquitetura/diagramas.md).
-
-| Camada | Stack |
-|---|---|
-| App e site | Expo SDK 57 + React Native 0.86 + Expo Router + react-native-maps (Leaflet no web) |
-| Backend | Django 5.2 + DRF (Gunicorn) + Redis |
-| Database | PostgreSQL 16 + PostGIS 3.4 |
-| IA | FastAPI + ONNX Runtime — paraphrase-multilingual-MiniLM-L12-v2 |
-| Auth | simplejwt + BCrypt + login Google |
-| Borda | Cloudflare (WAF/TLS) + Tunnel → nginx → backend |
-
-O nginx serve o build web do app e faz reverse-proxy de `/api/*` e `/uploads` para
-o Django; o serviço de IA roda ao lado (profile `ia`), consumido pelo backend;
-scheduler e backup (profiles próprios) usam a mesma imagem do backend. CI/CD:
-GitHub Actions (`.github/workflows/deploy.yml`) — gitleaks, build, testes,
-deploy via SSH e verificação de saúde. Backup: dump diário do Postgres com
-retenção de 30 dias e upload opcional via rclone (`scripts/backup-postgres.sh`).
-
-## API
-
-A interface entre app, backend e documentação vive em
-[`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md) — fonte
-única das rotas, esquemas e vocabulário. Prefixos em `/api/v1/`:
+Prefixo `/api/v1/`; fonte única de rotas e esquemas no contrato v3.
 
 | Prefixo | Conteúdo |
-|---|---|
-| `auth/` | entrada por e-mail, Google, perfil, push (VAPID) |
-| `defeitos/` | chamados: criar, listar, apoiar, sinalizar, protocolo, operação |
-| `operacao/` `bi/` `gestao/` `notificacoes/` | fila de campo, BI, administração, avisos |
-| `transparencia/` `dados-abertos/` `open311/` | páginas públicas e dados abertos |
-| `municipios/` `categorias/` | lookups (IBGE, categorias com SLA) |
-| `health/` `csrf-token/` | verificação de saúde (200 se a API responde) e token CSRF |
+| --- | --- |
+| `auth/` | Entrada por código de e-mail, Google, perfil |
+| `defeitos/` | Chamados: criar, listar, apoiar, sinalizar, protocolo |
+| `operacao/` `gestao/` `notificacoes/` | Fila de campo, administração, avisos |
+| `bi/` | Painel, exportação, `sugestoes-ia/` (achados da IA leve) |
+| `transparencia/` `dados-abertos/` `open311/` | Público, sem login e sem dados pessoais |
+| `municipios/` `categorias/` `health/` | Lookups e verificação de saúde |
 
-## Segurança
+## 6. IA e geoespacial
 
-- Senhas com bcrypt; JWT (simplejwt) com rotação de refresh; 2FA TOTP opcional
-- CPF criptografado em repouso (AES-256-GCM) + HMAC para lookup único
-- DRF `IsAuthenticated` por padrão; públicos com `AllowAny` explícito; CSRF
-  `SameSite=Strict`; rate limiting com Redis
-- Uploads: whitelist JPEG/PNG/WebP/AVIF, máx. 5 MB, compressão WebP ≤ 1200 px,
-  blur de privacidade Gaussiano
-- Contêiner Django sem root (uid 1001); HSTS e `SECURE_SSL_REDIRECT` em produção
-- Segredos só por variáveis de ambiente (`ENCRYPTION_KEY`, `RESEND_API_KEY`,
-  `GOOGLE_CLIENT_ID_*`, VAPID), nunca em código
+- **IA leve** ([`ia/`](ia/README.md)): MiniLM multilíngue em ONNX, local, sem
+  enviar dados para fora. Usada em três pontos: **duplicados** pelo texto
+  (cosseno ≥ 0,75 num raio maior), **temas** (relatos abertos parecidos, até
+  1,5 km, em 2+ ruas) e **risco citado** ("fio partido", "criança"…) no Painel.
+  Sem o serviço, o backend segue (disjuntor: 3 falhas → pausa de 60 s).
+- **Medido** (dados sintéticos): categoria pelo texto 68,6% de acerto — por
+  isso não é usada para classificar sozinha; duplicados F1 0,46–0,53 em 16
+  pares. Relatório: [`ia/experimentos/RELATORIO_ACADEMICO.md`](ia/experimentos/RELATORIO_ACADEMICO.md).
+- **Sugestões por regra:** recapeamento (3+ no mesmo ponto), sazonalidade
+  (+30% na categoria), bairro crítico (< 50% resolvidos) e anomalia por z-score.
+- **PostGIS:** 5.570 municípios (IBGE); município do chamado por `ST_Within`
+  com tolerância na borda.
 
-## IA & Geoespacial
+## 7. Segurança e privacidade
 
-- **Classificação:** embeddings ONNX multilíngues (MiniLM-L12-v2, 384-dim) →
-  7 centróides → softmax; fallback por palavras-chave se o serviço cair.
-  Spam, duplicados, prioridade e roteamento no backend. Detalhe do pipeline:
-  [`ia/README.md`](ia/README.md); métricas dos experimentos:
-  [`ia/experimentos/RELATORIO_ACADEMICO.md`](ia/experimentos/RELATORIO_ACADEMICO.md)
-- **Circuit breaker:** 3 falhas de IA → cooldown 60s; nunca bloqueia o relato
-- **PostGIS:** `municipios.polygon_geom` (MultiPolygon IBGE, 5570 municípios) e
-  `defeitos.geom` gerado por migração Django; validação de perímetro com
-  `ST_Within` + buffer de tolerância
+- Entrada por código de e-mail ou Google; JWT com rotação; senhas com bcrypt.
+- CPF cifrado em repouso (AES-256-GCM) + HMAC para busca; segredos só em
+  variáveis de ambiente.
+- Fotos: JPEG/PNG/WebP/AVIF até 5 MB, convertidas para WebP ≤ 1200 px, com
+  blur gaussiano de privacidade.
+- nginx: HSTS, `nosniff`, `X-Frame-Options`, `Permissions-Policy` (GPS e câmera
+  só no próprio domínio); rate limiting no Redis; contêiner Django sem root.
 
-## Pessoas Contribuidoras
+Os testes cobrem regras e permissões; não há teste de carga nem auditoria
+externa de segurança.
 
-| Usuário | Contribuições |
-|---|---|
-| [caiocinel](https://github.com/caiocinel) | App mobile (Expo), login com Google e fluxo único por e-mail, sinalização cidadã e quarentena, criação de chamado por long-press/clique direito, app de operação, rotas inteligentes |
+## 8. Desenvolvimento e execução local
 
-## Autores
+**Pré-requisitos:** Docker + Compose v2, Node.js ≥ 22. Python 3.12–3.14 e GDAL
+(`libgdal-dev`) só para rodar o Django fora do Docker.
 
-| Foto do Autor | Nome | Link |
-|---|---|---|
-| <img src="https://github.com/josemurilors.png" width=115 alt="José Murilo Rodrigues Sabalo"> | José Murilo Rodrigues Sabalo | [Perfil no GitHub](https://github.com/josemurilors) |
-| <img src="https://github.com/caiocinel.png" width=115 alt="caiocinel"> | caiocinel | [Perfil no GitHub](https://github.com/caiocinel) |
+1. `cp .env.example backend-python/.env` e preencha `ENCRYPTION_KEY`, `DB_PASSWORD`…
+2. `docker compose -f docker-compose.dev.yml up -d backend redis` (API em `localhost:8000`)
+3. `docker compose -f docker-compose.dev.yml exec backend python manage.py migrate`
+4. Opcional — IA: `docker compose -f docker-compose.dev.yml --profile ia up -d ia`
+5. Opcional — dados demo: `scripts/seed-demo.sh` (São Paulo, 600 chamados, e-mails `@demo.ciu`)
+6. `cd mobile && npm install && npm run web` (ou `npm start` para o Expo Go)
 
-Demais membros do grupo do TCC serão adicionados aqui posteriormente.
+### Testes
 
-## Licença
+```bash
+scripts/test-backend.sh                              # pytest do backend, banco próprio
+cd mobile && npm run lint && npm run typecheck && npm run check:contrast
+```
 
-MIT — texto completo em [`LICENSE`](LICENSE).
+Produção (deploy, túnel, agendador, backup): [`docs/producao.md`](docs/producao.md).
 
----
+## 9. Critérios de aceite
 
-**English version:** [docs/README.en.md](docs/README.en.md)
+- [x] Cidadão abre chamado com foto e GPS e recebe protocolo
+- [x] Acompanhamento pelo protocolo sem login
+- [x] Fila de operação priorizada, com ações em lote e modo offline
+- [x] Painel de BI com SLA, lead time, CSAT, hotspots e exportação
+- [x] Transparência, dados abertos e Open311 sem dados pessoais
+- [x] Mesma interface no Android, iOS e navegador
+- [x] IA leve em produção: duplicados, temas parecidos e risco citado
+- [ ] Classificação automática da categoria — modelo existe, mas 68,6% em dados sintéticos não basta
+- [ ] Acurácia da IA medida em relatos reais — só há dataset sintético
+- [ ] Push no navegador — o site tem apenas a central de avisos in-app
+
+## 10. Limites de escopo e evolução
+
+**Dentro:** relato, atendimento, gestão e transparência de um município por
+equipe. **Fora:** integração com sistemas legados da prefeitura (ERP, central
+156). **Evoluções possíveis:** plano de ação gerado
+por modelo de linguagem a partir das sugestões, push no navegador, avaliação da
+IA com relatos reais.
+
+## 11. Contribuição
+
+- Branches a partir da `master`; PR com revisão de outra pessoa do grupo.
+- Commits em Conventional Commits (`feat:`, `fix:`, `docs:`), validados por
+  commitlint/husky.
+- Antes do PR: `scripts/test-backend.sh`, lint e typecheck do app.
+
+## 12. Documentação complementar
+
+- [Contrato v3](docs/arquitetura/contrato-v3.md) · [Diagramas](docs/arquitetura/diagramas.md) · [Produção](docs/producao.md)
+- [App](mobile/README.md) · [Backend](backend-python/README.md) · [IA](ia/README.md) · [Relatório da IA](ia/experimentos/RELATORIO_ACADEMICO.md)
+- [Play Store](docs/play-store/ficha.md) · [Deep links](docs/deep-links/README.md)
+
+## 13. Autores e licença
+
+| Nome | Papel | GitHub |
+| --- | --- | --- |
+| José Murilo Rodrigues Sabalo | Autor — backend, infraestrutura, BI, IA | [@josemurilors](https://github.com/josemurilors) |
+| caiocinel | App (Expo), login com Google, sinalização e quarentena, operação, rotas | [@caiocinel](https://github.com/caiocinel) |
+
+<!-- TODO: demais membros do grupo do TCC e orientador(a) -->
+
+Licença MIT — texto em [`LICENSE`](LICENSE).
