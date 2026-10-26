@@ -6,13 +6,10 @@ import { motion } from 'framer-motion';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
-import { STATUS_CONFIG } from '../constants';
+import { getStatusColor, getStatusLabel } from '../components/ui/status-utils';
 import { KpiCard } from '../components/ui/kpi-card';
 import { StatusBadge } from '../components/ui/status-badge';
 const GOLD = '#D4AF37', GOLD_DARK = '#AA7C11', SUCCESS = '#4CAF7D', ERROR = '#CF4444';
-
-const statusCores = {};
-for (const [k, v] of Object.entries(STATUS_CONFIG)) statusCores[k] = v.color;
 
 const impactoLabel = { alta: 'Alto', media: 'Médio', baixa: 'Baixo' };
 
@@ -46,7 +43,7 @@ export default function AdminDashboardMetrics() {
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Carregando...</div></div>;
   if (!stats) return null;
 
-  const statusData = (stats.por_status || []).map(s => ({ name: s.status, value: s.total, color: statusCores[s.status] || '#6B5B3E' }));
+  const statusData = (stats.por_status || []).map(s => ({ name: getStatusLabel(s.status), value: s.total, color: getStatusColor(s.status) }));
   const catData = (stats.por_categoria || []).slice(0, 10);
   const tendenciaData = (stats.tendencia_mensal || []);
   const slaCatData = (stats.sla_por_categoria || []);

@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { api } from '../services/api';
 import { StatusBadge } from '../components/ui/status-badge';
-import { getStatusColor, STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
+import { STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import UserDropdown from '../components/ui/user-dropdown';
 import { CommandMenu } from '../components/ui/command-menu';
 import { useTheme } from '../context/ThemeContext';
@@ -145,7 +145,7 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
       style={{ left, top, width: QUICK_POPOVER_W, background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-          <MapPin size={15} weight="fill" style={{ color: 'var(--color-gold-500)' }} /> Novo chamado aqui
+          <MapPin size={15} weight="fill" style={{ color: 'var(--color-gold-text)' }} /> Novo chamado aqui
         </div>
         <button onClick={onClose} aria-label="Fechar" className="w-6 h-6 rounded-full flex items-center justify-center"
           style={{ color: 'var(--color-text-secondary)' }}>
@@ -207,7 +207,7 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
             style={{ color: 'var(--color-text-muted)' }}>Mais campos</button>
           <button onClick={onSubmit} disabled={submitting || !valido}
             className="h-9 px-5 rounded-md text-sm font-semibold transition-all disabled:opacity-50"
-            style={{ background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)' }}>
+            style={{ background: 'var(--color-gold-500)', color: 'var(--color-on-primary)' }}>
             {submitting ? 'Enviando...' : 'Enviar'}
           </button>
         </div>
@@ -725,7 +725,7 @@ export default function MapPage() {
             title="Novo chamado — ou segure o dedo / clique com o botão direito no mapa"
             aria-label="Novo chamado"
             className="fixed bottom-6 right-5 z-[1500] w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
-            style={{ background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)' }}>
+            style={{ background: 'var(--color-gold-500)', color: 'var(--color-on-primary)' }}>
             <Plus size={22} weight="bold" />
           </button>
         )}
@@ -740,7 +740,7 @@ export default function MapPage() {
             </button>
             <button onClick={abrirFormularioDoPonto} disabled={!coords}
               className="h-12 px-5 rounded-full flex items-center justify-center gap-2 shadow-lg flex-1 sm:flex-none transition-opacity disabled:opacity-40"
-              style={{ background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)' }}>
+              style={{ background: 'var(--color-gold-500)', color: 'var(--color-on-primary)' }}>
               <Plus size={16} weight="bold" />
               <span className="text-xs font-bold uppercase tracking-[0.1em] whitespace-nowrap">Adicionar chamado</span>
             </button>
@@ -834,7 +834,7 @@ export default function MapPage() {
                   style={{ background: 'transparent', color: 'var(--color-text-secondary)' }}>Cancelar</button>
                 <button onClick={handleSubmit} disabled={submitting || formData.descricao.length < 20}
                   className="h-10 px-6 rounded-md text-sm font-semibold transition-all disabled:opacity-50"
-                  style={{ background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)' }}>
+                  style={{ background: 'var(--color-gold-500)', color: 'var(--color-on-primary)' }}>
                   {submitting ? 'Enviando...' : 'Enviar'}
                 </button>
               </div>
@@ -852,7 +852,6 @@ export default function MapPage() {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0 pr-2">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: getStatusColor(selected.status, selected.atendido_em || selected.atualizado_em) }} />
                     <h3 className="text-sm font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>{selected.titulo}</h3>
                   </div>
                   <div className="flex items-center gap-2">
@@ -909,7 +908,7 @@ export default function MapPage() {
                   className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{
                     background: apoiei.has(selected.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
-                    color: 'var(--color-gold-500)',
+                    color: 'var(--color-gold-text)',
                     border: apoiei.has(selected.id) ? '1px solid var(--color-gold-500)' : 'none',
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,160,23,0.2)'; }}

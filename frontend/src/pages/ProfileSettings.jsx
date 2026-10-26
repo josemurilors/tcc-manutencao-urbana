@@ -100,7 +100,7 @@ export default function ProfileSettings() {
               <button key={item.id} onClick={() => setActiveSection(item.id)}
                 className="flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors"
                 style={activeSection === item.id
-                  ? { background: 'var(--color-gold-muted)', color: 'var(--color-gold-500)' }
+                  ? { background: 'var(--color-gold-muted)', color: 'var(--color-gold-text)' }
                   : { color: 'var(--color-text-secondary)' }}
                 onMouseEnter={e => { if (activeSection !== item.id) { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
                 onMouseLeave={e => { if (activeSection !== item.id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}>
@@ -157,7 +157,7 @@ export default function ProfileSettings() {
                     <CheckCircle size={14} /> Verificado
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-gold-500)' }}>
+                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-gold-text)' }}>
                     <WarningCircle size={14} /> Não verificado
                   </span>
                 )}
@@ -179,7 +179,7 @@ export default function ProfileSettings() {
 
             {!user?.email_verificado && (
               <div className="rounded-lg border p-4" style={{ borderColor: 'var(--color-gold-500)', background: 'rgba(212,160,23,0.06)' }}>
-                <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-gold-500)' }}>Verificação de Email</h4>
+                <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-gold-text)' }}>Verificação de Email</h4>
                 <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>Digite o código enviado para seu email.</p>
                 <div className="flex gap-2">
                   <input type="text" placeholder="000000" maxLength={6} value={codigoVerificacao}
@@ -191,7 +191,7 @@ export default function ProfileSettings() {
                   </Button>
                 </div>
                 <button onClick={handleReenviarCodigo} className="text-xs mt-2 hover:underline"
-                  style={{ color: 'var(--color-gold-500)' }}>Reenviar código</button>
+                  style={{ color: 'var(--color-gold-text)' }}>Reenviar código</button>
               </div>
             )}
           </div>

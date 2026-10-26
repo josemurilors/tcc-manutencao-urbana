@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { StatusBadge } from '../components/ui/status-badge';
-import { getStatusColor, STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
+import { STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import { Timeline } from '../components/ui/timeline';
 import { Button } from '../components/ui/button';
 import { getTimelineItems } from '../utils/timeline';
@@ -251,7 +251,7 @@ export default function DefectList() {
           (isAuthenticated || k !== 'meus') && (isAdmin || k !== 'vinculados') ? (
             <button key={k} onClick={() => setFiltro(k)}
               className="px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap"
-              style={filtro === k ? { background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)', border: '1px solid var(--color-gold-500)' }
+              style={filtro === k ? { background: 'var(--color-gold-500)', color: 'var(--color-on-primary)', border: '1px solid var(--color-gold-500)' }
                 : { border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)', background: 'transparent' }}>
               {l}
             </button>
@@ -317,7 +317,6 @@ export default function DefectList() {
                   )}
                   <td className="px-3 py-3 whitespace-nowrap">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: getStatusColor(d.status, d.atendido_em || d.atualizado_em) }} />
                       <StatusBadge status={d.status} concluido_em={d.atendido_em || d.atualizado_em} />
                       {d.sla_vencido && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold"
@@ -401,7 +400,7 @@ export default function DefectList() {
       {isAdmin && selectedIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[1500] flex items-center gap-3 px-4 py-2.5 rounded-lg border"
           style={{ background: 'rgba(10,10,10,0.95)', borderColor: 'rgba(180,140,50,0.4)', boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
-          <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-gold-500)' }}>
+          <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-gold-text)' }}>
             {selectedIds.size} selecionado{selectedIds.size === 1 ? '' : 's'}
           </span>
           <span className="w-px h-5" style={{ background: 'var(--color-border-default)' }} />
@@ -410,7 +409,7 @@ export default function DefectList() {
               <button key={valor} onClick={() => setBatchStatusPending(valor)} disabled={enviandoBatch}
                 className="px-2.5 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
                 style={batchStatusPending === valor
-                  ? { background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)', border: '1px solid var(--color-gold-500)' }
+                  ? { background: 'var(--color-gold-500)', color: 'var(--color-on-primary)', border: '1px solid var(--color-gold-500)' }
                   : { border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)', background: 'transparent' }}>
                 {rotulo}
               </button>
@@ -519,7 +518,7 @@ export default function DefectList() {
                   className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{
                     background: apoiei.has(selectedDefect.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
-                    color: 'var(--color-gold-500)',
+                    color: 'var(--color-gold-text)',
                     border: apoiei.has(selectedDefect.id) ? '1px solid var(--color-gold-500)' : 'none',
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,160,23,0.2)'; }}

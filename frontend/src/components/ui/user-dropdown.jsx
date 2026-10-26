@@ -57,7 +57,7 @@ export default function UserDropdown() {
                 {user?.email || ''}
               </p>
               {user?.municipio?.nome && (
-                <p className="text-xs truncate mt-0.5" style={{ color: 'var(--color-gold-500)' }}>
+                <p className="text-xs truncate mt-0.5" style={{ color: 'var(--color-gold-text)' }}>
                   {user.municipio.nome} - {user.municipio.uf_sigla}
                 </p>
               )}

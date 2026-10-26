@@ -116,7 +116,7 @@ export default function SearchableSelect({ options = [], value, onChange, placeh
                       onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
                       <span className="flex-1">{item.label}</span>
-                      {item.value === value && <Check size={14} weight="bold" style={{ color: 'var(--color-gold-500)' }} />}
+                      {item.value === value && <Check size={14} weight="bold" style={{ color: 'var(--color-gold-text)' }} />}
                     </button>
                   );
                 })}

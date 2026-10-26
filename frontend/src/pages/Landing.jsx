@@ -6,7 +6,7 @@ import { MagnifyingGlass } from '@phosphor-icons/react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { STATUS_CONFIG } from '../constants';
+import { getStatusColor, getStatusLabel, statusVars } from '../components/ui/status-utils';
 
 // Mesmo centro padrão do MapPage quando não há município do usuário.
 const CENTRO = [-28.67, -49.38];
@@ -52,7 +52,7 @@ function ConsultaProtocolo() {
     }
   }
 
-  const status = chamado && STATUS_CONFIG[chamado.status];
+  const status = chamado && { color: statusVars(chamado.status).fg, label: getStatusLabel(chamado.status) };
 
   return (
     <div>
@@ -138,7 +138,7 @@ export default function Landing() {
           </div>
           <button
             onClick={() => navigate(isAuthenticated ? '/mapa' : '/login')}
-            className="text-xs font-medium h-8 px-4 bg-[var(--color-gold-500)] hover:bg-[var(--color-gold-400)] text-[var(--color-text-inverse)] outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-gold-500)]"
+            className="text-xs font-medium h-8 px-4 bg-[var(--color-gold-500)] hover:bg-[var(--color-gold-400)] text-[var(--color-on-primary)] outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-gold-500)]"
           >
             {isAuthenticated ? 'Abrir o mapa' : 'Entrar'}
           </button>
@@ -169,7 +169,7 @@ export default function Landing() {
                     center={[d.latitude, d.longitude]}
                     radius={5}
                     interactive={false}
-                    pathOptions={{ color: STATUS_CONFIG[d.status]?.color || '#D4AF37', weight: 1, fillOpacity: 0.75 }}
+                    pathOptions={{ color: getStatusColor(d.status), weight: 1, fillOpacity: 0.75 }}
                   />
                 ))}
               </MapContainer>
@@ -198,13 +198,13 @@ export default function Landing() {
                 <div className="flex flex-col sm:flex-row gap-3 mb-7">
                   <button
                     onClick={() => navigate(isAuthenticated ? '/mapa' : '/login')}
-                    className="h-12 px-6 text-sm font-semibold bg-[var(--color-gold-500)] hover:bg-[var(--color-gold-400)] text-[var(--color-text-inverse)] outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-gold-500)]"
+                    className="h-12 px-6 text-sm font-semibold bg-[var(--color-gold-500)] hover:bg-[var(--color-gold-400)] text-[var(--color-on-primary)] outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-gold-500)]"
                   >
                     Reportar um problema
                   </button>
                   <button
                     onClick={() => navigate('/mapa')}
-                    className="h-12 px-6 text-sm font-semibold text-[var(--color-gold-500)] hover:bg-[var(--color-gold-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-gold-500)]"
+                    className="h-12 px-6 text-sm font-semibold text-[var(--color-gold-text)] hover:bg-[var(--color-gold-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-gold-500)]"
                     style={{ border: '1px solid var(--color-gold-500)' }}
                   >
                     Ver o mapa
@@ -222,7 +222,7 @@ export default function Landing() {
               <div className="flex flex-col md:flex-row md:items-baseline gap-x-10 gap-y-3" style={{ maxWidth: 1180, margin: '0 auto' }}>
                 {resumo.total_abertos > 0 ? (
                   <p className="text-lg">
-                    <span className="text-3xl font-semibold tabular-nums" style={{ color: 'var(--color-gold-500)' }}>{resumo.total_abertos}</span>
+                    <span className="text-3xl font-semibold tabular-nums" style={{ color: 'var(--color-gold-text)' }}>{resumo.total_abertos}</span>
                     {' '}{resumo.total_abertos === 1 ? 'chamado aberto' : 'chamados abertos'} em {resumo.municipio?.nome} agora
                   </p>
                 ) : (
@@ -242,7 +242,7 @@ export default function Landing() {
             <ol className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {passos.map((p, i) => (
                 <li key={p.titulo} className="flex gap-4">
-                  <span className="text-3xl font-semibold tabular-nums" style={{ color: 'var(--color-gold-500)', lineHeight: 1 }} aria-hidden="true">{i + 1}</span>
+                  <span className="text-3xl font-semibold tabular-nums" style={{ color: 'var(--color-gold-text)', lineHeight: 1 }} aria-hidden="true">{i + 1}</span>
                   <div>
                     <h3 className="text-base font-medium mb-1">{p.titulo}</h3>
                     <p className="text-sm" style={{ color: 'var(--color-text-secondary)', lineHeight: 1.55, maxWidth: '32ch' }}>{p.desc}</p>

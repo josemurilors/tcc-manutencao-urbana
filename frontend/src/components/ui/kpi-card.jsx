@@ -46,12 +46,12 @@ export function KpiCard({ title, value, icon: Icon, variation, format, className
         <span className="text-xs font-medium text-[var(--color-text-secondary)]">{title}</span>
         {Icon && (
           <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-[rgba(212,160,23,0.1)]">
-            <Icon size={18} weight="bold" style={{ color: 'var(--color-gold-500)' }} />
+            <Icon size={18} weight="bold" style={{ color: 'var(--color-gold-text)' }} />
           </div>
         )}
       </div>
       <div className="flex items-baseline gap-2">
-        <span className="text-3xl font-bold tracking-tight text-[var(--color-gold-500)] leading-tight">
+        <span className="text-3xl font-bold tracking-tight text-[var(--color-gold-text)] leading-tight">
           {format === 'percent' ? <AnimatedCount value={value} /> : format === 'time' ? value : <AnimatedCount value={value} />}
           {format === 'percent' && <span className="text-lg ml-0.5">%</span>}
         </span>

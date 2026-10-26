@@ -56,7 +56,7 @@ export default function EscolherNome() {
           {error && <p className="text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>}
           <button type="submit" disabled={loading}
             className="w-full h-12 font-semibold text-sm transition-all disabled:opacity-50"
-            style={{ background: 'var(--color-gold-500)', color: 'var(--color-text-inverse)' }}>
+            style={{ background: 'var(--color-gold-500)', color: 'var(--color-on-primary)' }}>
             {loading ? 'Salvando...' : 'Continuar'}
           </button>
         </form>
