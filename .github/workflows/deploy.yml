@@ -39,7 +39,7 @@ jobs:
           done
 
       - name: Django imports check
-        run: docker compose -f docker-compose.yml run --rm backend python -c "import django, rest_framework, corsheaders, django_filters, django_ratelimit, rest_framework_gis; print('django imports OK')"
+        run: docker compose -f docker-compose.yml run --rm backend python -c "import django, rest_framework, corsheaders, django_filters, rest_framework_gis; print('django imports OK')"
 
       - name: Run backend tests (pytest)
         run: docker compose -f docker-compose.yml run --rm -e DJANGO_SETTINGS_MODULE=core.settings.local backend python -m pytest
@@ -71,13 +71,5 @@ jobs:
             export GIT_SHA=$(git rev-parse --short HEAD)
             export BUILD_DATE=$(git log -1 --format=%cd --date='format:%d/%m/%Y %H:%M UTC')
             docker compose build
-            docker compose up -d postgres
-            docker compose exec -T postgres psql -U urbana -d manutencao_urbana -c "
-              ALTER TABLE municipios ADD COLUMN IF NOT EXISTS polygon_geom geometry(MultiPolygon, 4326);
-              UPDATE municipios SET polygon_geom = ST_SetSRID(ST_GeomFromGeoJSON(poligono_json), 4326) WHERE poligono_json IS NOT NULL AND poligono_json != '';
-              ALTER TABLE defeitos ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED;
-              CREATE INDEX IF NOT EXISTS idx_municipios_polygon_geom ON municipios USING GIST (polygon_geom);
-              CREATE INDEX IF NOT EXISTS idx_defeitos_geom ON defeitos USING GIST (geom);
-            " || true
             docker compose up -d --build
             docker image prune -f

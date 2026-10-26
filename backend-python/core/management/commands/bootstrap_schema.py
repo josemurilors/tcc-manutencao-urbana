@@ -207,6 +207,20 @@ SCHEMA_V3 = [
         atualizado_em TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # Tentativas erradas do código de 6 dígitos (e-mail/senha): na 5ª o código morre.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_tentativas INTEGER NOT NULL DEFAULT 0",
+    # --- Geometria (antes era SQL solto no workflow de deploy) -----------------
+    "ALTER TABLE municipios ADD COLUMN IF NOT EXISTS polygon_geom geometry(MultiPolygon, 4326)",
+    """
+    UPDATE municipios SET polygon_geom = ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(poligono_json::text), 4326))
+    WHERE polygon_geom IS NULL AND poligono_json IS NOT NULL AND poligono_json::text NOT IN ('', 'null')
+    """,
+    """
+    ALTER TABLE defeitos ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326)
+        GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_municipios_polygon_geom ON municipios USING GIST (polygon_geom)",
+    "CREATE INDEX IF NOT EXISTS idx_defeitos_geom ON defeitos USING GIST (geom)",
     # --- Chamados: colunas novas -------------------------------------------
     "CREATE SEQUENCE IF NOT EXISTS defeitos_protocolo_seq",
     "ALTER TABLE defeitos ADD COLUMN IF NOT EXISTS protocolo TEXT UNIQUE",

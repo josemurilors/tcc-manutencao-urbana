@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 from pathlib import Path
 from datetime import timedelta
 
@@ -7,10 +8,11 @@ from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# SECURITY: Separate Django SECRET_KEY from JWT_SECRET
+# SECURITY: a SECRET_KEY do Django nunca é igual à JWT_SECRET. Sem
+# DJANGO_SECRET_KEY, deriva-se uma chave própria da JWT_SECRET.
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
-if not SECRET_KEY:
-    SECRET_KEY = os.environ.get('JWT_SECRET')
+if not SECRET_KEY and os.environ.get('JWT_SECRET'):
+    SECRET_KEY = hashlib.sha256(b'django-secret-key:' + os.environ['JWT_SECRET'].encode()).hexdigest()
 if not SECRET_KEY:
     raise ValueError('DJANGO_SECRET_KEY or JWT_SECRET must be set')
 
@@ -86,7 +88,7 @@ AUTH_USER_MODEL = 'users.User'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'users.tokens.Autenticacao',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',

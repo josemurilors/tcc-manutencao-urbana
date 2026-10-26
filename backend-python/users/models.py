@@ -35,6 +35,7 @@ class User(AbstractBaseUser):
     email_verified = models.SmallIntegerField(default=0, db_column='email_verificado')
     codigo_2fa = models.CharField(max_length=10, blank=True, null=True, db_column='codigo_2fa')
     codigo_2fa_expira = models.CharField(max_length=50, blank=True, null=True, db_column='codigo_2fa_expira')
+    codigo_tentativas = models.IntegerField(default=0, db_column='codigo_tentativas')
     requestsResetAt = models.CharField(max_length=50, blank=True, null=True, db_column='requestsresetat')
     requestsCount = models.IntegerField(default=0, db_column='requestscount')
     criado_em = models.DateTimeField(auto_now_add=True, db_column='criado_em')

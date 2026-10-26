@@ -115,10 +115,17 @@ class _VisaoMixin:
     def get_sinalizacoes(self, obj):
         return _sinalizacoes(obj)
 
+    # SLA é métrica interna da equipe (contrato v3): cidadão e anônimo não
+    # enxergam atraso, nem mesmo o autor do chamado. `prazo_em` continua
+    # público — é a previsão mostrada ao reportar ("até 15/11").
     def get_sla_vencido(self, obj):
+        if not self._eh_equipe_do_chamado(obj):
+            return False
         return sla.sla_vencido(obj)
 
     def get_sla_restante_horas(self, obj):
+        if not self._eh_equipe_do_chamado(obj):
+            return None
         return sla.sla_restante_horas(obj)
 
 
@@ -367,13 +374,7 @@ class DefeitoCreateSerializer(serializers.ModelSerializer):
 
                 textos = [descricao] + [c['descricao'] for c in candidatos]
 
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                embeddings = loop.run_until_complete(get_embeddings_batch(textos))
+                embeddings = asyncio.run(get_embeddings_batch(textos))
 
                 if embeddings and len(embeddings) == len(textos):
                     emb_novo = embeddings[0]

@@ -51,14 +51,29 @@ circuit_breaker = CircuitBreaker()
 
 
 async def _call_ia(endpoint: str, payload: dict, redis_client=None) -> dict | None:
-    ia_url = settings.IA_URL
+    # Sem cliente informado, abre um do REDIS_URL: o disjuntor só funciona com
+    # estado compartilhado entre processos. Redis fora do ar = disjuntor desligado.
+    proprio = redis_client is None
+    if proprio:
+        redis_client = redis.from_url(settings.REDIS_URL)
+    try:
+        return await _chamar(endpoint, payload, redis_client)
+    except redis.RedisError:
+        logger.warning('Redis indisponível; chamando a IA sem disjuntor', exc_info=True)
+        return await _chamar(endpoint, payload, None)
+    finally:
+        if proprio:
+            await redis_client.aclose()
+
+
+async def _chamar(endpoint: str, payload: dict, redis_client) -> dict | None:
     if await circuit_breaker.is_open(redis_client):
         logger.warning(f'Circuit breaker open for {endpoint}')
         return None
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f'{ia_url}{endpoint}',
+                f'{settings.IA_URL}{endpoint}',
                 json=payload,
                 timeout=TIMEOUT,
             )

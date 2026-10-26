@@ -181,8 +181,13 @@ export const api = {
   updateProfile: (data) =>
     request('/api/v1/auth/profile/', { method: 'PATCH', body: data }),
 
-  updatePassword: (senhaAtual, novaSenha) =>
-    request('/api/v1/auth/senha/', { method: 'PATCH', body: { senha_atual: senhaAtual, nova_senha: novaSenha } }),
+  updatePassword: async (senhaAtual, novaSenha) => {
+    const res = await request('/api/v1/auth/senha/', { method: 'PATCH', body: { senha_atual: senhaAtual, nova_senha: novaSenha } });
+    // Trocar a senha derruba os tokens antigos: guarda os novos desta sessão.
+    if (res?.access) localStorage.setItem('token', res.access);
+    if (res?.refresh) localStorage.setItem('refresh', res.refresh);
+    return res;
+  },
 
   updateMunicipio: (municipioId) =>
     request('/api/v1/auth/municipio/', { method: 'PATCH', body: { municipio_id: municipioId } }),

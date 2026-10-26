@@ -14,7 +14,6 @@ services:
       - ./cloudflare:/etc/cloudflare:ro
       - certbot-data:/etc/letsencrypt
       - certbot-www:/var/www/certbot
-      - uploads:/app/uploads:ro
     depends_on:
       - backend
     networks:
@@ -124,8 +123,6 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,backend}
       - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT:-false}
-    volumes:
-      - uploads:/app/uploads
     networks:
       - app-network
     healthcheck:
@@ -231,7 +228,6 @@ services:
 
 volumes:
   postgres-data:
-  uploads:
   backend-logs:
   certbot-data:
   certbot-www:

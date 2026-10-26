@@ -393,11 +393,16 @@ export const api = {
   /** Apaga a própria conta. Chamados ficam no mapa, mas sem vínculo com a pessoa. */
   deleteAccount: () => request('/api/v1/auth/profile/', { method: 'DELETE' }),
 
-  updatePassword: (senhaAtual: string, novaSenha: string) =>
-    request('/api/v1/auth/senha/', {
+  updatePassword: async (senhaAtual: string, novaSenha: string) => {
+    const res = await request<{ access?: string; refresh?: string }>('/api/v1/auth/senha/', {
       method: 'PATCH',
       body: { senha_atual: senhaAtual, nova_senha: novaSenha },
-    }),
+    });
+    // Trocar a senha derruba os tokens antigos: guarda os novos desta sessão.
+    if (res?.access) await setToken(res.access);
+    if (res?.refresh) await setRefresh(res.refresh);
+    return res;
+  },
 
   updateMunicipio: (municipioId: string) =>
     request<{ municipio: Municipio }>('/api/v1/auth/municipio/', {

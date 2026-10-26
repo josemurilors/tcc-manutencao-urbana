@@ -8,18 +8,23 @@ from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .serializers import RegisterSerializer, UserSerializer
 from .models import User, PushSubscription
 from core import auditoria, permissoes
 from services.email_service import send_password_reset_code, send_verification_code
-from . import throttles
+from . import throttles, tokens
 
 logger = logging.getLogger(__name__)
 
 # Código de 6 dígitos (verificação de e-mail e recuperação de senha): mesmas
 # colunas `codigo_2fa`/`codigo_2fa_expira`, mesma validade.
 CODIGO_VALIDADE_MIN = 10
+# Tentativas erradas por código (contadas no banco, valem mesmo sem Redis); na
+# última o código é apagado e é preciso pedir outro.
+CODIGO_MAX_TENTATIVAS = 5
 # Recuperação de senha: no máximo N e-mails por conta por janela, contados em
 # `requestsCount`/`requestsResetAt` (vale mesmo se o cache do throttle cair).
 ESQUECI_MAX_ENVIOS = 5
@@ -32,13 +37,26 @@ def _gerar_codigo(user):
     code = f'{secrets.randbelow(900000) + 100000}'
     user.codigo_2fa = code
     user.codigo_2fa_expira = (timezone.now() + timedelta(minutes=CODIGO_VALIDADE_MIN)).isoformat()
-    user.save(update_fields=['codigo_2fa', 'codigo_2fa_expira'])
+    user.codigo_tentativas = 0
+    user.save(update_fields=['codigo_2fa', 'codigo_2fa_expira', 'codigo_tentativas'])
     return code
+
+
+def _codigo_confere(user, codigo):
+    """Compara o código em tempo constante; erro conta tentativa e a última apaga o código."""
+    if secrets.compare_digest(user.codigo_2fa or '', codigo):
+        return True
+    user.codigo_tentativas = (user.codigo_tentativas or 0) + 1
+    if user.codigo_tentativas >= CODIGO_MAX_TENTATIVAS:
+        user.codigo_2fa = None
+        user.codigo_2fa_expira = None
+    user.save(update_fields=['codigo_2fa', 'codigo_2fa_expira', 'codigo_tentativas'])
+    return False
 
 
 def _codigo_expirado(user):
     if not user.codigo_2fa_expira:
-        return False
+        return True  # sem data não há como provar que ainda vale
     try:
         expira = datetime.fromisoformat(user.codigo_2fa_expira.replace('Z', '+00:00'))
     except (ValueError, AttributeError):
@@ -118,8 +136,7 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         _enviar(send_verification_code, user.email, _gerar_codigo(user))
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(user)
+        refresh = tokens.emitir(user)
         user_serializer = UserSerializer(user)
         return Response({
             'user': user_serializer.data,
@@ -175,8 +192,7 @@ class GoogleLoginView(APIView):
             user.save(update_fields=['email_verified', 'codigo_2fa', 'codigo_2fa_expira'])
         _aplicar_convite(user)
 
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(user)
+        refresh = tokens.emitir(user)
         return Response({
             'user': UserSerializer(user).data,
             'access': str(refresh.access_token),
@@ -186,6 +202,7 @@ class GoogleLoginView(APIView):
 
 
 class LoginView(TokenObtainPairView):
+    serializer_class = tokens.LoginSerializer
     permission_classes = (permissions.AllowAny,)
     # Força bruta: limite por IP e por conta (trocar de IP não ajuda).
     throttle_classes = (throttles.LoginIp, throttles.LoginEmail)
@@ -217,15 +234,15 @@ class RefreshView(TokenRefreshView):
         # O simplejwt renova pelo assinado do token sem olhar o banco; se a
         # conta sumiu (apagada, ou token de um banco antigo) o cliente ficaria
         # num loop de 401 com refresh "válido". Aqui a renovação exige o usuário.
-        from rest_framework_simplejwt.exceptions import TokenError
-        from rest_framework_simplejwt.tokens import RefreshToken
-
+        refresh = request.data.get('refresh', '')
         try:
-            user_id = RefreshToken(request.data.get('refresh', ''))[settings.SIMPLE_JWT.get('USER_ID_CLAIM', 'user_id')]
+            user = User.objects.filter(pk=RefreshToken(refresh)[settings.SIMPLE_JWT.get('USER_ID_CLAIM', 'user_id')]).first()
         except (TokenError, KeyError):
             return Response({'detail': 'Sessão expirada'}, status=status.HTTP_401_UNAUTHORIZED)
-        if not User.objects.filter(pk=user_id).exists():
+        if user is None:
             return Response({'detail': 'Usuário não encontrado'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not tokens.refresh_valido(refresh, user):
+            return Response({'detail': 'Sessão expirada'}, status=status.HTTP_401_UNAUTHORIZED)
         return super().post(request, *args, **kwargs)
 
 
@@ -329,7 +346,13 @@ class ChangePasswordView(APIView):
             )
         user.set_password(nova_senha)
         user.save(update_fields=['password'])
-        return Response({'message': 'Senha alterada com sucesso'})
+        # Trocar a senha encerra as outras sessões (tokens.py); esta recebe tokens novos.
+        refresh = tokens.emitir(user)
+        return Response({
+            'message': 'Senha alterada com sucesso',
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        })
 
 
 class UpdateMunicipioView(APIView):
@@ -398,7 +421,7 @@ class VerifyEmailView(APIView):
                 {'error': 'Código expirado'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if user.codigo_2fa != codigo:
+        if not _codigo_confere(user, str(codigo)):
             return Response(
                 {'error': 'Código inválido'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -489,8 +512,8 @@ class RedefinirSenhaView(APIView):
         user = User.objects.filter(email__iexact=email).first()
         if (
             user is None or not user.codigo_2fa
-            or not secrets.compare_digest(user.codigo_2fa, codigo)
             or _codigo_expirado(user)
+            or not _codigo_confere(user, codigo)
         ):
             return Response(
                 {'error': 'Código inválido ou expirado. Peça um novo código.'},
@@ -823,12 +846,12 @@ class AdminEstatisticasView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
-        # BI é de gestor+ (contrato, seção 3), sempre da cidade dele, pelo
+        # Métricas são da equipe (operador+), sempre da cidade dele, pelo
         # município em que o chamado caiu (d.municipio_id), não pelo do autor.
         # Só o super admin sem vínculo vê o agregado geral — antes bastava
         # desvincular um operador para ele enxergar todas as prefeituras.
         user = request.user
-        if not permissoes.pode_gerir(user, user.municipio_id) or (
+        if not permissoes.eh_equipe(user) or (
             not user.municipio_id and permissoes.papel(user) != 'super_admin'
         ):
             return Response(
