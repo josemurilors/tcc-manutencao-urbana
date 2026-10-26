@@ -260,11 +260,11 @@ export default function DefectList() {
       </div>
 
       {loading ? (
-        <div className="h-40 rounded-xl border animate-pulse" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }} />
+        <div className="h-40 rounded-md border animate-pulse" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }} />
       ) : sorted.length === 0 ? (
         <div className="text-center py-12 text-sm" style={{ color: 'var(--color-text-muted)' }}>Nenhum chamado encontrado.</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--color-border-default)' }}>
+        <div className="overflow-x-auto rounded-md border" style={{ borderColor: 'var(--color-border-default)' }}>
           <table className="w-full text-sm" style={{ color: 'var(--color-text-primary)' }}>
             <thead>
               <tr style={{ background: 'var(--color-bg-elevated)' }}>
@@ -444,7 +444,7 @@ export default function DefectList() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={() => setSelectedDefect(null)}>
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg rounded-xl border p-6 max-h-[85vh] overflow-y-auto" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(180,140,50,0.3)' }}
+              className="w-full max-w-lg rounded-lg border p-6 max-h-[85vh] overflow-y-auto" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(180,140,50,0.3)' }}
               onClick={e => e.stopPropagation()}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1 min-w-0 pr-3">
@@ -476,13 +476,13 @@ export default function DefectList() {
                 {selectedDefect.total_apoios > 0 && <span className="flex items-center gap-1"><ThumbsUp size={12} /> {selectedDefect.total_apoios} apoios</span>}
               </div>
               {selectedDefect.imagem_thumbnail && (
-                <img src={selectedDefect.imagem_thumbnail} alt="" className="w-full h-40 object-cover rounded-lg mb-4 cursor-pointer"
+                <img src={selectedDefect.imagem_thumbnail} alt="" className="w-full h-40 object-cover rounded-md mb-4 cursor-pointer"
                   onClick={() => setSelectedImage(selectedDefect.imagem_thumbnail)} />
               )}
               {selectedDefect.imagens_extra && (() => {
                 try { return JSON.parse(selectedDefect.imagens_extra); } catch { return []; }
               })().map((url, i) => (
-                <img key={i} src={url} alt="" className="w-full h-40 object-cover rounded-lg mb-3 cursor-pointer"
+                <img key={i} src={url} alt="" className="w-full h-40 object-cover rounded-md mb-3 cursor-pointer"
                   onClick={() => setSelectedImage(url)} />
               ))}
               <div className="mb-4">
@@ -515,7 +515,7 @@ export default function DefectList() {
                   </Button>
                 )}
                 <button onClick={() => handleApoiar(selectedDefect.id)} disabled={apoiando === selectedDefect.id}
-                  className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{
                     background: apoiei.has(selectedDefect.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
                     color: 'var(--color-gold-text)',
@@ -527,7 +527,7 @@ export default function DefectList() {
                   {apoiando === selectedDefect.id ? '...' : apoiei.has(selectedDefect.id) ? 'Apoiado' : 'Apoiar'}
                 </button>
                 <button onClick={() => handleAnexarClick(selectedDefect.id)} disabled={anexando === selectedDefect.id}
-                  className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{ background: 'transparent', border: '1px solid var(--color-border-default)', color: 'var(--color-text-secondary)' }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-gold-500)'; e.currentTarget.style.color = 'var(--color-gold-500)'; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-default)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
@@ -557,7 +557,7 @@ export default function DefectList() {
       {selectedImage && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 cursor-pointer"
           onClick={() => setSelectedImage(null)}>
-          <img src={selectedImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+          <img src={selectedImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
             onClick={e => e.stopPropagation()} />
           <button onClick={() => setSelectedImage(null)}
             className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition-colors text-xl">

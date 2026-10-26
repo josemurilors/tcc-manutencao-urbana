@@ -14,7 +14,7 @@ export function Timeline({ items = [], className }) {
           )} style={{ background: item.active ? 'var(--color-gold-500)' : 'var(--color-bg-primary)' }}>
             {item.active && <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="w-2 h-2 rounded-full bg-white" />}
           </div>
-          <div className="rounded-xl border p-4 transition-colors" style={{
+          <div className="rounded-md border p-4 transition-colors" style={{
             background: item.active ? 'var(--color-bg-surface)' : 'var(--color-bg-primary)',
             borderColor: item.active ? 'var(--color-border-default)' : 'var(--color-border-subtle)',
             opacity: item.active ? 1 : 0.6,

@@ -50,7 +50,7 @@ export function CommandMenu({ open, onClose, isAdmin, isAdminMunicipal }) {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[5000] bg-black/70 backdrop-blur-sm" onClick={onClose} />
           <motion.div initial={{ opacity: 0, scale: 0.96, y: -20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: -20 }}
             transition={{ duration: 0.2, ease: [0.16,1,0.3,1] }} className="fixed top-[15%] left-1/2 -translate-x-1/2 z-[5001] w-full max-w-lg">
-            <div className="rounded-2xl border overflow-hidden shadow-2xl" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <div className="rounded-lg border overflow-hidden shadow-2xl" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
               <div className="flex items-center gap-3 px-4 h-12 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
                 <MagnifyingGlass size={18} style={{ color: 'var(--color-text-muted)' }} />
                 <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar páginas..."
@@ -62,7 +62,7 @@ export function CommandMenu({ open, onClose, isAdmin, isAdminMunicipal }) {
                 {filtered.length === 0 && <p className="py-6 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>Nenhum resultado para "{query}"</p>}
                 {filtered.map((item, i) => (
                   <button key={item.path} onClick={() => handleSelect(item)}
-                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition-colors"
+                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm transition-colors"
                     style={{ background: i === selectedIdx ? 'var(--color-bg-elevated)' : 'transparent', color: i === selectedIdx ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
                     <item.icon size={18} weight={i === selectedIdx ? 'bold' : 'regular'} style={{ color: i === selectedIdx ? 'var(--color-gold-500)' : 'var(--color-text-muted)' }} />
                     <span>{item.label}</span>

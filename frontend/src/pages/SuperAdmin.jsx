@@ -55,7 +55,7 @@ export default function SuperAdmin() {
         <h1 className="text-lg font-bold mb-1" style={{ color: 'var(--color-text-primary)' }}>Gerenciar Usuários</h1>
         <p className="text-sm mb-5" style={{ color: 'var(--color-text-muted)' }}>Administre usuários, vínculo municipal e permissões de admin</p>
 
-        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--color-border-default)' }}>
+        <div className="overflow-x-auto rounded-md border" style={{ borderColor: 'var(--color-border-default)' }}>
           <table className="w-full text-sm" style={{ color: 'var(--color-text-primary)' }}>
             <thead>
               <tr style={{ background: 'var(--color-bg-elevated)' }}>

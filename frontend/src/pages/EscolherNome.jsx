@@ -35,7 +35,7 @@ export default function EscolherNome() {
   return (
     <div className="min-h-dvh flex items-center justify-center bg-[var(--color-bg-primary)] p-4">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-        className="w-full max-w-md border p-8" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        className="w-full max-w-md rounded-md border p-8" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
         <h1 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>Como quer ser chamado?</h1>
         <p className="text-sm mt-2 mb-6" style={{ color: 'var(--color-text-muted)' }}>
           Esse nome aparece nos seus chamados. Você pode mudar depois em Conta.

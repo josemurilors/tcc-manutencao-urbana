@@ -35,7 +35,7 @@ export function KpiCard({ title, value, icon: Icon, variation, format, className
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16,1,0.3,1] }}
       className={cn(
-        'relative overflow-hidden rounded-xl border border-[var(--color-border-default)] p-5 flex flex-col gap-2',
+        'relative overflow-hidden rounded-md border border-[var(--color-border-default)] p-5 flex flex-col gap-2',
         'bg-gradient-to-br from-[var(--color-bg-surface)] to-[var(--color-bg-primary)]',
         'transition-all duration-200 hover:border-[var(--color-border-hover)] hover:-translate-y-0.5 hover:shadow-[var(--card-shadow-gold)]',
         'before:absolute before:top-0 before:left-0 before:right-0 before:h-[2px] before:bg-[var(--color-gold-500)]',
@@ -45,7 +45,7 @@ export function KpiCard({ title, value, icon: Icon, variation, format, className
       <div className="flex items-start justify-between">
         <span className="text-xs font-medium text-[var(--color-text-secondary)]">{title}</span>
         {Icon && (
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-[rgba(212,160,23,0.1)]">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md bg-[rgba(212,160,23,0.1)]">
             <Icon size={18} weight="bold" style={{ color: 'var(--color-gold-text)' }} />
           </div>
         )}

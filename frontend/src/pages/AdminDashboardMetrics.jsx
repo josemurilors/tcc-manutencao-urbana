@@ -74,7 +74,7 @@ export default function AdminDashboardMetrics() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Chamados por Status</h3>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
@@ -85,13 +85,13 @@ export default function AdminDashboardMetrics() {
             </PieChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Comparativo Mensal</h3>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={mesesComparativo}><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis /><Tooltip /><Bar dataKey="total" fill={GOLD} radius={[4,4,0,0]} /></BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Chamados por Categoria</h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={catData} margin={{ bottom: 60 }}>
@@ -100,11 +100,11 @@ export default function AdminDashboardMetrics() {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+        <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
           <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Variação por Categoria</h3>
           <div className="space-y-2">
             {catData.filter(c => c.variacao != null).slice(0, 8).map(c => (
-              <div key={c.categoria} className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--color-bg-primary)' }}>
+              <div key={c.categoria} className="flex items-center gap-2 p-2 rounded-md" style={{ background: 'var(--color-bg-primary)' }}>
                 <span className="text-xs flex-1">{c.categoria}</span>
                 <VariacaoBadge valor={c.variacao} />
                 <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{c.mes_atual} · {c.mes_anterior}</span>
@@ -121,7 +121,7 @@ export default function AdminDashboardMetrics() {
         <div className="mb-6">
           <h2 className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-primary)' }}><ChartLineUp size={18} /> Tendência Mensal (12 meses)</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>Volume de chamados por mês</p>
-          <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={tendenciaData}>
                 <XAxis dataKey="mes" tick={{ fontSize: 11 }} /><YAxis />
@@ -150,7 +150,7 @@ export default function AdminDashboardMetrics() {
           <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>Bairros com aumento anormal de chamados</p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {anomalias.map((a, i) => (
-              <div key={i} className="rounded-xl border p-4 border-l-4" style={{
+              <div key={i} className="rounded-md border p-4 border-l-4" style={{
                 background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)',
                 borderLeftColor: a.intensidade === 'alta' ? ERROR : GOLD,
               }}>
@@ -172,7 +172,7 @@ export default function AdminDashboardMetrics() {
       {slaCatData.length > 0 && (
         <div className="mb-6">
           <h2 className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-primary)' }}><Timer size={18} /> Tempo Médio por Categoria</h2>
-          <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <div className="rounded-md border p-5" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={slaCatData} layout="vertical" margin={{ left: 100 }}>
                 <XAxis type="number" /><YAxis type="category" dataKey="categoria" tick={{ fontSize: 11 }} width={90} />
@@ -194,7 +194,7 @@ export default function AdminDashboardMetrics() {
           </p>
           <div className="space-y-2">
             {stats.sla_vencidos.map(v => (
-              <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(107,18,26,0.5)', borderLeftColor: 'var(--color-error)' }}>
+              <div key={v.id} className="flex items-center gap-3 p-3 rounded-md border" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(107,18,26,0.5)', borderLeftColor: 'var(--color-error)' }}>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-semibold block truncate" style={{ color: 'var(--color-text-primary)' }}>{v.titulo}</span>
                   <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -213,7 +213,7 @@ export default function AdminDashboardMetrics() {
           <h2 className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-primary)' }}><Buildings size={18} /> Bairros com Mais Chamados</h2>
           <div className="space-y-2">
             {bairrosData.map((b, i) => (
-              <div key={i} className="flex items-center gap-3 p-3 rounded-xl border" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+              <div key={i} className="flex items-center gap-3 p-3 rounded-md border" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
                 <span className="text-xs font-bold min-w-[24px]" style={{ color: 'var(--color-text-muted)' }}>#{i+1}</span>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-semibold block">{b.bairro}</span>
@@ -233,7 +233,7 @@ export default function AdminDashboardMetrics() {
           <h2 className="text-sm font-bold mb-3" style={{ color: 'var(--color-text-primary)' }}>Recomendações Inteligentes</h2>
           <div className="space-y-3">
             {recomendacoes.map((r, i) => (
-              <div key={i} className="rounded-xl border p-4 border-l-4" style={{
+              <div key={i} className="rounded-md border p-4 border-l-4" style={{
                 background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)',
                 borderLeftColor: r.impacto === 'alta' ? ERROR : r.impacto === 'media' ? GOLD : SUCCESS,
               }}>

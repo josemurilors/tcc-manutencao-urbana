@@ -141,7 +141,7 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.12 }}
       onContextMenu={e => e.preventDefault()}
-      className="fixed z-[2000] rounded-xl border shadow-2xl p-4"
+      className="fixed z-[2000] rounded-lg border shadow-2xl p-4"
       style={{ left, top, width: QUICK_POPOVER_W, background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
@@ -155,14 +155,14 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
 
       <div className="space-y-2">
         <input autoFocus placeholder="Título" value={formData.titulo} onChange={e => setFormData(p => ({ ...p, titulo: e.target.value }))}
-          className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+          className="w-full h-9 px-3 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
           style={{ borderColor: 'var(--color-border-default)' }}
           onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
           onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
 
         <textarea placeholder="Descrição (mín. 20 caracteres)" rows={3} value={formData.descricao}
           onChange={e => setFormData(p => ({ ...p, descricao: e.target.value }))}
-          className="w-full px-3 py-2 rounded-lg border text-sm outline-none resize-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+          className="w-full px-3 py-2 rounded-md border text-sm outline-none resize-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
           style={{ borderColor: 'var(--color-border-default)' }}
           onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
           onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
@@ -182,7 +182,7 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
         </div>
 
         <select value={formData.categoria} onChange={e => setFormData(p => ({ ...p, categoria: e.target.value }))}
-          className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+          className="w-full h-9 px-3 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
           style={{ borderColor: 'var(--color-border-default)' }}>
           {categorias.map(c => (
             <option key={c.nome} value={c.nome}>{c.icone} {c.nome}</option>
@@ -191,7 +191,7 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
 
         <div className="flex items-center gap-2">
           <button onClick={() => fileRef.current?.click()}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-lg border text-xs transition-colors shrink-0"
+            className="flex items-center gap-1.5 h-9 px-3 rounded-md border text-xs transition-colors shrink-0"
             style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-muted)' }}>
             <Camera size={14} /> {file ? file.name.slice(0, 12) : 'Foto'}
           </button>
@@ -590,7 +590,7 @@ export default function MapPage() {
 
       <div className={`flex-1 relative${creating ? ' map-shell--creating' : ''}`} style={{ minHeight: 0 }}>
         {creating && (
-          <div className="hidden sm:flex items-center absolute top-4 left-1/2 -translate-x-1/2 z-[1600] h-9 pl-3 pr-3.5 text-xs border shadow-lg pointer-events-none"
+          <div className="hidden sm:flex items-center absolute top-4 left-1/2 -translate-x-1/2 z-[1600] h-9 pl-3 pr-3.5 rounded-md text-xs border shadow-lg pointer-events-none"
             style={{
               background: 'var(--color-bg-elevated)',
               borderColor: 'var(--color-border-default)',
@@ -601,7 +601,7 @@ export default function MapPage() {
           </div>
         )}
         {!isAuthenticated && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1500] px-4 py-2 rounded-lg text-xs border"
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1500] px-4 py-2 rounded-md text-xs border"
             style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-default)', color: 'var(--color-text-muted)' }}>
             Faça login para ver detalhes
           </div>
@@ -684,7 +684,7 @@ export default function MapPage() {
           <div className="fixed right-5 z-[1500] flex flex-col items-end gap-2" style={{ bottom: '8rem' }}>
             {pertoDeMim?.ativo ? (
               <>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl border shadow-lg"
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg"
                   style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-gold-500)' }}>
                   <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {filteredDefeitos.length} no raio de {pertoDeMim.raio}m
@@ -770,12 +770,12 @@ export default function MapPage() {
             <h3 className="text-base font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>Novo Chamado</h3>
             <div className="space-y-3">
               <input placeholder="Título" value={formData.titulo} onChange={e => setFormData(p => ({ ...p, titulo: e.target.value }))}
-                className="w-full h-11 px-4 rounded-lg border text-sm outline-none transition-colors bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+                className="w-full h-11 px-4 rounded-md border text-sm outline-none transition-colors bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
                 style={{ borderColor: 'var(--color-border-default)' }}
                 onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
                 onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
               <textarea placeholder="Descrição (mín. 20 caracteres)" value={formData.descricao} onChange={e => setFormData(p => ({ ...p, descricao: e.target.value }))} rows={3}
-                className="w-full px-4 py-3 rounded-lg border text-sm outline-none transition-colors resize-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+                className="w-full px-4 py-3 rounded-md border text-sm outline-none transition-colors resize-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
                 style={{ borderColor: 'var(--color-border-default)' }}
                 onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
                 onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
@@ -795,7 +795,7 @@ export default function MapPage() {
                 </span>
               </div>
               <select value={formData.categoria} onChange={e => setFormData(p => ({ ...p, categoria: e.target.value }))}
-                className="w-full h-11 px-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+                className="w-full h-11 px-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
                 style={{ borderColor: 'var(--color-border-default)' }}>
                 {categorias.map(c => (
                   <option key={c.nome} value={c.nome}>{c.icone} {c.nome}</option>
@@ -803,10 +803,10 @@ export default function MapPage() {
               </select>
               <div className="flex flex-col sm:flex-row gap-2 flex-1">
                 <input placeholder="Rua" value={formData.rua} onChange={e => setFormData(p => ({ ...p, rua: e.target.value }))}
-                  className="flex-1 h-11 px-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+                  className="flex-1 h-11 px-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
                   style={{ borderColor: 'var(--color-border-default)' }} />
                 <input placeholder="Bairro" value={formData.bairro} onChange={e => setFormData(p => ({ ...p, bairro: e.target.value }))}
-                  className="flex-1 h-11 px-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
+                  className="flex-1 h-11 px-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] text-[var(--color-text-primary)]"
                   style={{ borderColor: 'var(--color-border-default)' }} />
               </div>
               {geocoding && (
@@ -816,7 +816,7 @@ export default function MapPage() {
                 </div>
               )}
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-2 px-4 h-11 rounded-lg border text-sm cursor-pointer transition-colors"
+                <label className="flex items-center gap-2 px-4 h-11 rounded-md border text-sm cursor-pointer transition-colors"
                   style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-muted)' }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--color-gold-500)'}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--color-border-default)'}>
@@ -870,13 +870,13 @@ export default function MapPage() {
               </div>
               <p className="text-xs mb-3 line-clamp-2" style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>{selected.descricao}</p>
               {selected.imagem_thumbnail && (
-                <img src={selected.imagem_thumbnail} alt="" className="w-full h-32 object-cover rounded-lg mb-3 cursor-pointer"
+                <img src={selected.imagem_thumbnail} alt="" className="w-full h-32 object-cover rounded-md mb-3 cursor-pointer"
                   onClick={() => setSelectedImage(selected.imagem_thumbnail)} />
               )}
               {selected.imagens_extra && (() => {
                 try { return JSON.parse(selected.imagens_extra); } catch { return []; }
               })().map((url, i) => (
-                <img key={i} src={url} alt="" className="w-full h-32 object-cover rounded-lg mb-2 cursor-pointer"
+                <img key={i} src={url} alt="" className="w-full h-32 object-cover rounded-md mb-2 cursor-pointer"
                   onClick={() => setSelectedImage(url)} />
               ))}
               <div className="mb-4 mt-4">
@@ -890,7 +890,7 @@ export default function MapPage() {
               <div className="flex flex-col sm:flex-row gap-2">
                 {user?.admin && !selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
                   <button onClick={e => handleAtender(selected.id, e)} disabled={atendendo === selected.id}
-                    className="w-full sm:w-auto h-9 px-4 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                    className="w-full sm:w-auto h-9 px-4 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                     style={{ background: 'rgba(59,130,246,0.12)', color: '#3B82F6' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.2)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'rgba(59,130,246,0.12)'}>
@@ -899,13 +899,13 @@ export default function MapPage() {
                 )}
                 {user?.admin && selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
                   <button onClick={e => handleFinalizarMap(selected.id, e)} disabled={finalizando === selected.id}
-                    className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                    style={{ background: 'var(--color-error)', color: '#fff' }}>
+                    className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--color-error)', color: 'var(--color-on-danger)' }}>
                     {finalizando === selected.id ? '...' : 'Finalizar'}
                   </button>
                 )}
                 <button onClick={() => handleApoiar(selected.id)} disabled={apoiando === selected.id}
-                  className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{
                     background: apoiei.has(selected.id) ? 'rgba(212,160,23,0.2)' : 'rgba(212,160,23,0.12)',
                     color: 'var(--color-gold-text)',
@@ -917,7 +917,7 @@ export default function MapPage() {
                   {apoiando === selected.id ? '...' : apoiei.has(selected.id) ? 'Apoiado' : 'Apoiar'}
                 </button>
                 <button onClick={() => anexarRef.current?.click()} disabled={anexando === selected.id}
-                  className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="flex-1 h-9 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   style={{ background: 'transparent', border: '1px solid var(--color-border-default)', color: 'var(--color-text-secondary)' }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-gold-500)'; e.currentTarget.style.color = 'var(--color-gold-500)'; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-default)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
@@ -945,7 +945,7 @@ export default function MapPage() {
       {selectedImage && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 cursor-pointer"
           onClick={() => setSelectedImage(null)}>
-          <img src={selectedImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+          <img src={selectedImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
             onClick={e => e.stopPropagation()} />
           <button onClick={() => setSelectedImage(null)}
             className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition-colors text-xl">
@@ -996,10 +996,10 @@ function MapControlsDropdown({ filtro, setFiltro, heatmap, setHeatmap, direction
       {open && (
         <motion.div initial={{ opacity: 0, y: direction === 'up' ? 4 : -4, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: direction === 'up' ? 4 : -4, scale: 0.96 }} transition={{ duration: 0.15, ease: [0.16,1,0.3,1] }}
-          className={`${dropdownPos} min-w-[180px] rounded-xl border p-1.5 shadow-lg z-[3000]`}
+          className={`${dropdownPos} min-w-[180px] rounded-md border p-1.5 shadow-lg z-[3000]`}
           style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-default)' }}>
           <button onClick={() => { setHeatmap(h => !h); setOpen(false); }}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors"
+            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors"
             style={{ color: heatmap ? 'var(--color-gold-500)' : 'var(--color-text-secondary)' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = heatmap ? 'var(--color-gold-500)' : 'var(--color-text-secondary)'; }}>
@@ -1009,7 +1009,7 @@ function MapControlsDropdown({ filtro, setFiltro, heatmap, setHeatmap, direction
           <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Filtros</p>
           {['todos','abertos','encerrados', 'meus'].map(f => (
             <button key={f} onClick={() => { setFiltro(f); setOpen(false); }}
-              className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors"
+              className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-sm transition-colors"
               style={{ color: filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)' }}
               onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)'; }}>

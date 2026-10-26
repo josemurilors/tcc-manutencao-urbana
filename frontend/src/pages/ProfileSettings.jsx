@@ -113,7 +113,7 @@ export default function ProfileSettings() {
           {/* Content */}
           <div style={{ flex: 1, minWidth: '300px' }}>
           {activeSection === 'conta' && (
-          <div className="border p-6 space-y-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+          <div className="rounded-md border p-6 space-y-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
             <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Perfil</h2>
             <p className="text-xs -mt-4" style={{ color: 'var(--color-text-muted)' }}>Informações da sua conta</p>
             <div className="flex items-center gap-4">
@@ -137,7 +137,7 @@ export default function ProfileSettings() {
           <div className="space-y-4">
             <div className="relative">
               <input id="nome" type="text" value={nome} onChange={e => setNome(e.target.value)}
-                className="peer w-full h-12 px-4 pt-4 rounded-lg border text-sm outline-none transition-colors bg-[var(--color-bg-input)]"
+                className="peer w-full h-12 px-4 pt-4 rounded-md border text-sm outline-none transition-colors bg-[var(--color-bg-input)]"
                 style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }}
                 onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
                 onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} placeholder=" " />
@@ -147,7 +147,7 @@ export default function ProfileSettings() {
 
             <div className="relative">
               <input id="email" type="email" value={email} disabled
-                className="peer w-full h-12 px-4 pt-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] opacity-70 cursor-not-allowed"
+                className="peer w-full h-12 px-4 pt-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] opacity-70 cursor-not-allowed"
                 style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }} placeholder=" " />
               <label htmlFor="email" className="absolute left-4 top-0 text-xs"
                 style={{ color: 'var(--color-text-muted)' }}>E-mail</label>
@@ -167,7 +167,7 @@ export default function ProfileSettings() {
             {user?.cpf && (
               <div className="relative">
                 <input id="cpf" type="text" value={user.cpf.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')} disabled
-                  className="peer w-full h-12 px-4 pt-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)] opacity-70 cursor-not-allowed"
+                  className="peer w-full h-12 px-4 pt-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)] opacity-70 cursor-not-allowed"
                   style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }} placeholder=" " />
                 <label htmlFor="cpf" className="absolute left-4 top-0 text-xs"
                   style={{ color: 'var(--color-text-muted)' }}>CPF</label>
@@ -178,13 +178,13 @@ export default function ProfileSettings() {
               placeholder="Selecione um município" label="Município" />
 
             {!user?.email_verificado && (
-              <div className="rounded-lg border p-4" style={{ borderColor: 'var(--color-gold-500)', background: 'rgba(212,160,23,0.06)' }}>
+              <div className="rounded-md border p-4" style={{ borderColor: 'var(--color-gold-500)', background: 'rgba(212,160,23,0.06)' }}>
                 <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-gold-text)' }}>Verificação de Email</h4>
                 <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>Digite o código enviado para seu email.</p>
                 <div className="flex gap-2">
                   <input type="text" placeholder="000000" maxLength={6} value={codigoVerificacao}
                     onChange={e => setCodigoVerificacao(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="flex-1 h-10 px-3 rounded-lg border text-sm outline-none text-center tracking-widest font-mono bg-[var(--color-bg-input)]"
+                    className="flex-1 h-10 px-3 rounded-md border text-sm outline-none text-center tracking-widest font-mono bg-[var(--color-bg-input)]"
                     style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }} />
                   <Button variant="primary" size="sm" onClick={handleVerificarEmail} disabled={verificando || codigoVerificacao.length < 6}>
                     {verificando ? '...' : 'Verificar'}
@@ -200,12 +200,12 @@ export default function ProfileSettings() {
             <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>Alterar Senha</h3>
             <div className="space-y-3">
               <input type="password" placeholder="Senha atual" value={senhaAtual} onChange={e => setSenhaAtual(e.target.value)}
-                className="w-full h-11 px-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)]"
+                className="w-full h-11 px-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)]"
                 style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }}
                 onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
                 onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
               <input type="password" placeholder="Nova senha" value={novaSenha} onChange={e => setNovaSenha(e.target.value)}
-                className="w-full h-11 px-4 rounded-lg border text-sm outline-none bg-[var(--color-bg-input)]"
+                className="w-full h-11 px-4 rounded-md border text-sm outline-none bg-[var(--color-bg-input)]"
                 style={{ borderColor: 'var(--color-border-default)', color: 'var(--color-text-primary)' }}
                 onFocus={e => e.target.style.borderColor = 'var(--color-gold-500)'}
                 onBlur={e => e.target.style.borderColor = 'var(--color-border-default)'} />
@@ -220,7 +220,7 @@ export default function ProfileSettings() {
           )}
 
           {activeSection === 'seguranca' && (
-            <div className="border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Segurança</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Gerencie sua senha e autenticação</p>
               <div className="flex flex-col">
@@ -243,7 +243,7 @@ export default function ProfileSettings() {
           )}
 
           {activeSection === 'notificacoes' && (
-            <div className="border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Notificações</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Controle como você recebe alertas</p>
               <div className="flex flex-col">
@@ -266,7 +266,7 @@ export default function ProfileSettings() {
           )}
 
           {activeSection === 'preferencias' && (
-            <div className="border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
+            <div className="rounded-md border p-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-default)' }}>
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>Preferências</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Personalize sua experiência</p>
               <div className="flex flex-col">
@@ -282,7 +282,7 @@ export default function ProfileSettings() {
           )}
 
           {activeSection === 'conta' && (
-            <div className="border p-6 mt-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(207,68,68,0.3)' }}>
+            <div className="rounded-md border p-6 mt-6" style={{ background: 'var(--color-bg-surface)', borderColor: 'rgba(207,68,68,0.3)' }}>
               <h2 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-error)' }}>Zona de perigo</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>Ações irreversíveis</p>
               <div className="flex items-center justify-between">

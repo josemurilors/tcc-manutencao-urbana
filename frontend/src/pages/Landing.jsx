@@ -180,7 +180,7 @@ export default function Landing() {
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, ease: EASE }}
-                className="pointer-events-auto p-6 md:p-8"
+                className="pointer-events-auto rounded-lg p-6 md:p-8"
                 style={{
                   maxWidth: '30rem',
                   background: 'color-mix(in srgb, var(--color-bg-primary) 90%, transparent)',

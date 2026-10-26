@@ -10,11 +10,11 @@ const buttonVariants = cva(
         primary: "bg-[var(--color-gold-500)] text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-gold-400)] shadow-sm",
         secondary: "bg-transparent border border-[var(--color-gold-500)] text-[var(--color-gold-text)] hover:bg-[rgba(212,160,23,0.1)]",
         ghost: "bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-text-primary)]",
-        danger: "bg-[var(--color-error)] text-white hover:brightness-90",
+        danger: "bg-[var(--color-error)] text-[var(--color-on-danger)] hover:brightness-90",
       },
       size: {
         default: "h-9 gap-1.5 px-4 py-2",
-        xs: "h-6 gap-1 rounded-sm px-2 text-xs",
+        xs: "h-6 gap-1 px-2 text-xs",
         sm: "h-7 gap-1 px-2.5 text-xs",
         lg: "h-10 gap-1.5 px-6 text-base",
         icon: "size-9",

@@ -17,6 +17,7 @@
   /* Texto sobre o dourado e anel de foco (valores do app, AA nos dois temas) */
   --color-on-primary: #000000;
   --color-focus: #E6C762;
+  --color-on-danger: #000000;
   /* Dourado para TEXTO (o gold-500 é cor de preenchimento) */
   --color-gold-text: #E6C762;
 
@@ -80,13 +81,6 @@
   --space-12: 3rem;
   --space-16: 4rem;
 
-  /* Radius — Zero (estética industrial / BMW) */
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-full: 999px;
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
@@ -112,6 +106,7 @@
   --color-text-tertiary: #6B5F42;
   --color-on-primary: #1A1A14;
   --color-focus: #7A5800;
+  --color-on-danger: #FFFFFF;
   --color-gold-text: #7A5800;
   --color-border-default: #D8D0C0;
   --color-border-hover: #C8B890;

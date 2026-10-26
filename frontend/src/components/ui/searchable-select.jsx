@@ -69,7 +69,7 @@ export default function SearchableSelect({ options = [], value, onChange, placeh
   return (
     <div className="relative" ref={ref}>
       <button type="button" onClick={() => setOpen(o => !o)}
-        className={`flex items-center w-full h-12 px-4 ${label ? 'pt-4' : ''} rounded-lg border text-sm outline-none transition-colors bg-[var(--color-bg-input)] text-left`}
+        className={`flex items-center w-full h-12 px-4 ${label ? 'pt-4' : ''} rounded-md border text-sm outline-none transition-colors bg-[var(--color-bg-input)] text-left`}
         style={{ borderColor: open ? 'var(--color-gold-500)' : 'var(--color-border-default)', color: selected ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
         <span className="flex-1 truncate">{selected ? `${selected.label} - ${selected.group}` : placeholder}</span>
         <CaretUpDown size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
@@ -82,7 +82,7 @@ export default function SearchableSelect({ options = [], value, onChange, placeh
       )}
 
       {open && (
-        <div className="absolute z-50 left-0 right-0 top-full mt-1 rounded-xl border shadow-lg overflow-hidden"
+        <div className="absolute z-50 left-0 right-0 top-full mt-1 rounded-lg border shadow-lg overflow-hidden"
           style={{ background: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-default)' }}>
           <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
             <MagnifyingGlass size={14} style={{ color: 'var(--color-text-muted)' }} />

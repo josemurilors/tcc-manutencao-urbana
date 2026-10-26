@@ -18,6 +18,17 @@
   50% { box-shadow: 0 0 12px rgba(212,175,55,0.6); }
 }
 
+/* Raios iguais aos do app (mobile/src/constants/theme.ts): 8 para card, campo e
+   botão; 12 para painel e diálogo; full só para avatar, FAB e pílula. */
+@theme {
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 16px;
+}
+
 @theme inline {
   --font-sans: 'Geist Variable', 'Geist', sans-serif;
   --font-mono: 'Geist Mono', monospace;
@@ -39,17 +50,12 @@
   --color-border: var(--color-border-default);
   --color-input: var(--color-bg-input);
   --color-ring: var(--color-focus);
-  --radius: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-full: 999px;
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
+  /* Raio padrão de controle (8 px, como no app); classes rounded-* sobrepõem. */
+  button, select, textarea, input:not([type="checkbox"]):not([type="radio"]) { border-radius: var(--radius-md); }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-variation-settings: 'wght' 400;
@@ -63,7 +69,7 @@
 
 .leaflet-container { background: var(--color-bg-surface) !important; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--color-bg-surface) !important; color: var(--color-text-primary) !important; border: 1px solid var(--color-border-default) !important; }
-.leaflet-popup-content-wrapper { border-radius: var(--radius-xl) !important; padding: 2px !important; box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important; }
+.leaflet-popup-content-wrapper { border-radius: var(--radius-lg) !important; padding: 2px !important; box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important; }
 .leaflet-popup-content { margin: 14px 18px !important; font-size: 0.875rem !important; }
 .leaflet-popup-close-button { color: var(--color-text-tertiary) !important; top: 8px !important; right: 8px !important; }
 .leaflet-control-zoom a { background: var(--color-bg-surface) !important; color: var(--color-text-primary) !important; border-color: var(--color-border-default) !important; }

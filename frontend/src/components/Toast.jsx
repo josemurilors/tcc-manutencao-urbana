@@ -65,7 +65,7 @@ export function ToastProvider({ children }) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                className="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm font-medium shadow-lg max-w-sm"
+                className="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-lg border text-sm font-medium shadow-lg max-w-sm"
                 style={{
                   background: c.bg,
                   color: c.text,
