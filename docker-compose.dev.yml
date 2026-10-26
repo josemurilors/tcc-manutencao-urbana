@@ -77,7 +77,7 @@ services:
       - GOOGLE_CLIENT_ID_IOS=${GOOGLE_CLIENT_ID_IOS:-}
       - FROM_EMAIL=${FROM_EMAIL:-Central Urbana <onboarding@resend.dev>}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,backend}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT:-false}
     networks:
       - app-network
