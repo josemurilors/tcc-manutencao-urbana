@@ -223,6 +223,9 @@ export const api = {
   atenderDefeito: (id) =>
     request(`/api/v1/defeitos/${id}/atender/`, { method: 'PATCH' }),
 
+  responderDefeito: (id, texto) =>
+    request(`/api/v1/operacao/chamados/${id}/resposta/`, { method: 'POST', body: { texto } }),
+
   batchStatusDefeitos: (ids, status) =>
     request('/api/v1/defeitos/batch_status/', { method: 'PATCH', body: { ids, status } }),
 

@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { StatusBadge } from '../components/ui/status-badge';
-import { getStatusColor } from '../components/ui/status-utils';
+import { getStatusColor, STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import { Timeline } from '../components/ui/timeline';
 import { Button } from '../components/ui/button';
 import { getTimelineItems } from '../utils/timeline';
@@ -27,17 +27,20 @@ export default function DefectList() {
   const [ordemCol, setOrdemCol] = useState('criado_em');
   const [ordemDir, setOrdemDir] = useState('desc');
   const anexarRef = useRef(null);
+  const finalizarFotoRef = useRef(null);
+  const finalizarIdRef = useRef(null);
   const [anexando, setAnexando] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchStatusPending, setBatchStatusPending] = useState(null);
   const [enviandoBatch, setEnviandoBatch] = useState(false);
   const [gerandoOS, setGerandoOS] = useState(null);
 
+  // Rejeitar fica fora do lote: o backend exige motivo por chamado.
   const BATCH_STATUS_OPTIONS = [
-    ['pendente', 'Pendente'],
-    ['em_andamento', 'Em Andamento'],
-    ['vinculado_sem_resposta', 'Vinculado'],
-    ['rejeitado', 'Rejeitar'],
+    ['em_analise', 'Em triagem'],
+    ['agendado', 'Programado'],
+    ['em_andamento', 'Em execução'],
+    ['concluido', 'Concluir'],
   ];
 
   useEffect(() => {
@@ -68,33 +71,52 @@ export default function DefectList() {
     try {
       await api.atenderDefeito(id);
       addToast('Chamado vinculado com sucesso!');
-      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, status: 'vinculado_sem_resposta', atendente_id: user?.id } : d));
+      const atualizado = { status: 'em_andamento', atendente_id: user?.id };
+      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, ...atualizado } : d));
+      setSelectedDefect(prev => prev?.id === id ? { ...prev, ...atualizado } : prev);
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
     finally { setAtendendo(null); }
-  }, [addToast, user?.id]);
+  }, [addToast, user]);
 
+  // Resposta pública não muda status: vai pelo endpoint próprio da operação.
   const handleResponder = useCallback(async (id, e) => {
     e?.stopPropagation();
+    const texto = window.prompt('Resposta pública ao cidadão:')?.trim();
+    if (!texto) return;
     setRespondendo(id);
     try {
-      await api.updateDefeito(id, { status: 'vinculado_com_resposta' });
+      await api.responderDefeito(id, texto);
       addToast('Resposta registrada!');
-      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, status: 'vinculado_com_resposta' } : d));
-      setSelectedDefect(prev => prev?.id === id ? { ...prev, status: 'vinculado_com_resposta' } : prev);
+      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, resposta_publica: texto } : d));
+      setSelectedDefect(prev => prev?.id === id ? { ...prev, resposta_publica: texto } : prev);
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
     finally { setRespondendo(null); }
   }, [addToast]);
 
-  const handleFinalizar = useCallback(async (id, e) => {
+  // Finalizar pede a foto do serviço feito (o município pode exigir) e manda no /status/.
+  const handleFinalizar = useCallback((id, e) => {
     e?.stopPropagation();
+    finalizarIdRef.current = id;
+    finalizarFotoRef.current?.click();
+  }, []);
+
+  const handleFinalizarFoto = useCallback(async (e) => {
+    const foto = e.target.files?.[0];
+    const id = finalizarIdRef.current;
+    e.target.value = '';
+    if (!foto || !id) return;
+    const resposta = window.prompt('Resposta pública ao concluir (opcional):');
+    if (resposta === null) return;
     setFinalizando(id);
     try {
       const fd = new FormData();
-      fd.append('status', 'atendido');
-      await api.updateDefeitoComArquivo(id, fd);
-      addToast('Chamado finalizado!');
-      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, status: 'atendido' } : d));
-      setSelectedDefect(prev => prev?.id === id ? { ...prev, status: 'atendido' } : prev);
+      fd.append('status', 'concluido');
+      fd.append('foto_resolucao', foto);
+      if (resposta.trim()) fd.append('resposta_publica', resposta.trim());
+      const d = await api.updateDefeitoComArquivo(id, fd);
+      addToast('Chamado concluído!');
+      setDefeitos(prev => prev.map(x => x.id === id ? { ...x, ...d } : x));
+      setSelectedDefect(prev => prev?.id === id ? { ...prev, ...d } : prev);
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
     finally { setFinalizando(null); }
   }, [addToast]);
@@ -166,8 +188,10 @@ export default function DefectList() {
     setEnviandoBatch(true);
     try {
       const res = await api.batchStatusDefeitos([...selectedIds], batchStatusPending);
+      const falhas = Object.keys(res.erros || {});
       addToast(`Status atualizado em ${res.updated} chamado(s)!`);
-      setDefeitos(prev => prev.map(d => selectedIds.has(d.id) ? { ...d, status: batchStatusPending } : d));
+      if (falhas.length) addToast(`${falhas.length} não mudaram: ${Object.values(res.erros)[0]}`, 'error');
+      setDefeitos(prev => prev.map(d => selectedIds.has(d.id) && !falhas.includes(String(d.id)) ? { ...d, status: batchStatusPending } : d));
       setSelectedIds(new Set());
       setBatchStatusPending(null);
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
@@ -186,8 +210,8 @@ export default function DefectList() {
 
   const filtrados = defeitos.filter(d => {
     if (filtro === 'todos') return true;
-    if (filtro === 'pendentes') return ['pendente','em_andamento','vinculado_sem_resposta','vinculado_com_resposta'].includes(d.status);
-    if (filtro === 'atendidos') return ['atendido','encerrado','concluido'].includes(d.status);
+    if (filtro === 'abertos') return STATUS_ABERTOS.includes(d.status);
+    if (filtro === 'encerrados') return STATUS_FECHADOS.includes(d.status);
     if (filtro === 'vinculados') return d.atendente_id != null;
     if (filtro === 'meus') return meusDefeitos.some(m => m.id === d.id);
     return true;
@@ -223,7 +247,7 @@ export default function DefectList() {
       <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>Acompanhe todos os chamados de serviços públicos</p>
 
       <div className="flex items-center gap-1 mb-4 flex-wrap">
-        {[['todos','Todos'],['pendentes','Pendentes'],['atendidos','Atendidos'],['vinculados','Vinculados'],['meus','Meus Chamados']].map(([k,l]) => (
+        {[['todos','Todos'],['abertos','Abertos'],['encerrados','Encerrados'],['vinculados','Vinculados'],['meus','Meus Chamados']].map(([k,l]) => (
           (isAuthenticated || k !== 'meus') && (isAdmin || k !== 'vinculados') ? (
             <button key={k} onClick={() => setFiltro(k)}
               className="px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap"
@@ -330,17 +354,17 @@ export default function DefectList() {
                         title={apoiei.has(d.id) ? 'Remover apoio' : 'Apoiar'}>
                         <ThumbsUp size={13} weight={apoiei.has(d.id) ? 'fill' : 'regular'} />
                       </button>
-                      {isAdmin && !d.atendente_id && !['atendido','encerrado','concluido'].includes(d.status) && (
+                      {isAdmin && !d.atendente_id && STATUS_ABERTOS.includes(d.status) && (
                         <Button variant="secondary" size="xs" onClick={e => handleAtender(d.id, e)} disabled={atendendo === d.id}>
                           <Handshake size={11} /> {atendendo === d.id ? '...' : 'Atender'}
                         </Button>
                       )}
-                      {isAdmin && d.atendente_id && d.status === 'vinculado_sem_resposta' && (
+                      {isAdmin && d.atendente_id && STATUS_ABERTOS.includes(d.status) && (
                         <Button variant="secondary" size="xs" onClick={e => handleResponder(d.id, e)} disabled={respondendo === d.id}>
                           {respondendo === d.id ? '...' : 'Responder'}
                         </Button>
                       )}
-                      {isAdmin && d.atendente_id && ['vinculado_sem_resposta', 'vinculado_com_resposta'].includes(d.status) && (
+                      {isAdmin && d.atendente_id && STATUS_ABERTOS.includes(d.status) && (
                         <Button variant="danger" size="xs" onClick={e => handleFinalizar(d.id, e)} disabled={finalizando === d.id}>
                           {finalizando === d.id ? '...' : 'Finalizar'}
                         </Button>
@@ -467,19 +491,19 @@ export default function DefectList() {
                 <Timeline items={getTimelineItems(selectedDefect)} />
               </div>
               <div className="flex gap-2">
-                {user?.admin && !selectedDefect.atendente_id && !['atendido','encerrado','concluido'].includes(selectedDefect.status) && (
+                {user?.admin && !selectedDefect.atendente_id && STATUS_ABERTOS.includes(selectedDefect.status) && (
                   <Button variant="secondary" onClick={e => handleAtender(selectedDefect.id, e)} disabled={atendendo === selectedDefect.id}
                     className="flex items-center gap-1.5">
                     <Handshake size={14} /> {atendendo === selectedDefect.id ? '...' : 'Atender Chamado'}
                   </Button>
                 )}
-                {user?.admin && selectedDefect.atendente_id && selectedDefect.status === 'vinculado_sem_resposta' && (
+                {user?.admin && selectedDefect.atendente_id && STATUS_ABERTOS.includes(selectedDefect.status) && (
                   <Button variant="secondary" onClick={e => handleResponder(selectedDefect.id, e)} disabled={respondendo === selectedDefect.id}
                     className="flex items-center gap-1.5">
                     {respondendo === selectedDefect.id ? '...' : 'Responder'}
                   </Button>
                 )}
-                {user?.admin && selectedDefect.atendente_id && ['vinculado_sem_resposta', 'vinculado_com_resposta'].includes(selectedDefect.status) && (
+                {user?.admin && selectedDefect.atendente_id && STATUS_ABERTOS.includes(selectedDefect.status) && (
                   <Button variant="danger" onClick={e => handleFinalizar(selectedDefect.id, e)} disabled={finalizando === selectedDefect.id}
                     className="flex items-center gap-1.5">
                     {finalizando === selectedDefect.id ? '...' : 'Finalizar'}
@@ -529,6 +553,8 @@ export default function DefectList() {
           </motion.div>
         )}
       </AnimatePresence>
+      <input ref={finalizarFotoRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+        aria-label="Foto do serviço concluído" onChange={handleFinalizarFoto} />
       {selectedImage && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 cursor-pointer"
           onClick={() => setSelectedImage(null)}>

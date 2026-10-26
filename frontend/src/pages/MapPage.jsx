@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
 import { api } from '../services/api';
 import { StatusBadge } from '../components/ui/status-badge';
-import { getStatusColor } from '../components/ui/status-utils';
+import { getStatusColor, STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
 import UserDropdown from '../components/ui/user-dropdown';
 import { CommandMenu } from '../components/ui/command-menu';
 import { useTheme } from '../context/ThemeContext';
@@ -221,6 +221,8 @@ export default function MapPage() {
   const navigate = useNavigate();
   const addToast = useToast();
   const mapRef = useRef(null);
+  const finalizarFotoRef = useRef(null);
+  const finalizarIdRef = useRef(null);
   const [defeitos, setDefeitos] = useState([]);
   const [filtro, setFiltro] = useState('todos');
   const [heatmap, setHeatmap] = useState(true);
@@ -260,8 +262,8 @@ export default function MapPage() {
 
   const filteredDefeitos = useMemo(() => {
     let f = defeitos;
-    if (filtro === 'pendentes') f = f.filter(d => ['pendente','em_andamento','vinculado_sem_resposta','vinculado_com_resposta'].includes(d.status));
-    if (filtro === 'atendidos') f = f.filter(d => ['atendido','encerrado','concluido'].includes(d.status));
+    if (filtro === 'abertos') f = f.filter(d => STATUS_ABERTOS.includes(d.status));
+    if (filtro === 'encerrados') f = f.filter(d => STATUS_FECHADOS.includes(d.status));
     if (filtro === 'meus' && user) f = f.filter(d => d.usuario?.id === user.id);
     if (pertoDeMim?.ativo) f = filterByRadius(f, pertoDeMim.lat, pertoDeMim.lng, pertoDeMim.raio);
     return f;
@@ -420,11 +422,12 @@ export default function MapPage() {
     try {
       await api.atenderDefeito(id);
       addToast('Chamado vinculado com sucesso!');
-      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, status: 'vinculado_sem_resposta', atendente_id: user?.id } : d));
-      setSelected(prev => prev?.id === id ? { ...prev, status: 'vinculado_sem_resposta', atendente_id: user?.id } : prev);
+      const atualizado = { status: 'em_andamento', atendente_id: user?.id };
+      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, ...atualizado } : d));
+      setSelected(prev => prev?.id === id ? { ...prev, ...atualizado } : prev);
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
     finally { setAtendendo(null); }
-  }, [addToast, user?.id]);
+  }, [addToast, user]);
 
   const handleApoiar = useCallback(async (id) => {
     setApoiando(id);
@@ -448,16 +451,30 @@ export default function MapPage() {
     finally { setApoiando(null); }
   }, [addToast]);
 
-  const handleFinalizarMap = useCallback(async (id, e) => {
+  // Igual ao /lista: pede a foto do serviço feito e conclui pelo /status/.
+  const handleFinalizarMap = useCallback((id, e) => {
     e?.stopPropagation();
+    finalizarIdRef.current = id;
+    finalizarFotoRef.current?.click();
+  }, []);
+
+  const handleFinalizarFoto = useCallback(async (e) => {
+    const foto = e.target.files?.[0];
+    const id = finalizarIdRef.current;
+    e.target.value = '';
+    if (!foto || !id) return;
+    const resposta = window.prompt('Resposta pública ao concluir (opcional):');
+    if (resposta === null) return;
     setFinalizando(id);
     try {
       const fd = new FormData();
-      fd.append('status', 'atendido');
-      await api.updateDefeitoComArquivo(id, fd);
-      addToast('Chamado finalizado!');
-      setSelected(prev => prev?.id === id ? { ...prev, status: 'atendido' } : prev);
-      setDefeitos(prev => prev.map(d => d.id === id ? { ...d, status: 'atendido' } : d));
+      fd.append('status', 'concluido');
+      fd.append('foto_resolucao', foto);
+      if (resposta.trim()) fd.append('resposta_publica', resposta.trim());
+      const d = await api.updateDefeitoComArquivo(id, fd);
+      addToast('Chamado concluído!');
+      setSelected(prev => prev?.id === id ? { ...prev, ...d } : prev);
+      setDefeitos(prev => prev.map(x => x.id === id ? { ...x, ...d } : x));
     } catch (err) { addToast('Erro: ' + err.message, 'error'); }
     finally { setFinalizando(null); }
   }, [addToast]);
@@ -872,7 +889,7 @@ export default function MapPage() {
                 {selected.apoios_total > 0 && <span className="flex items-center gap-1"><ThumbsUp size={12} /> {selected.apoios_total}</span>}
               </div>
               <div className="flex flex-col sm:flex-row gap-2">
-                {user?.admin && !selected.atendente_id && !['atendido','encerrado','concluido'].includes(selected.status) && (
+                {user?.admin && !selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
                   <button onClick={e => handleAtender(selected.id, e)} disabled={atendendo === selected.id}
                     className="w-full sm:w-auto h-9 px-4 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                     style={{ background: 'rgba(59,130,246,0.12)', color: '#3B82F6' }}
@@ -881,7 +898,7 @@ export default function MapPage() {
                     <Handshake size={14} /> {atendendo === selected.id ? '...' : 'Atender Chamado'}
                   </button>
                 )}
-                {user?.admin && selected.atendente_id && ['vinculado_sem_resposta','vinculado_com_resposta'].includes(selected.status) && (
+                {user?.admin && selected.atendente_id && STATUS_ABERTOS.includes(selected.status) && (
                   <button onClick={e => handleFinalizarMap(selected.id, e)} disabled={finalizando === selected.id}
                     className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                     style={{ background: 'var(--color-error)', color: '#fff' }}>
@@ -937,6 +954,8 @@ export default function MapPage() {
           </button>
         </div>
       )}
+      <input ref={finalizarFotoRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+        aria-label="Foto do serviço concluído" onChange={handleFinalizarFoto} />
       <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} isAdmin={user?.admin} isAdminMunicipal={['admin_municipal', 'super_admin'].includes(user?.papel)} />
     </div>
   );
@@ -989,14 +1008,14 @@ function MapControlsDropdown({ filtro, setFiltro, heatmap, setHeatmap, direction
           </button>
           <div className="h-px mx-2 my-1" style={{ background: 'var(--color-border-default)' }} />
           <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Filtros</p>
-          {['todos','pendentes','atendidos', 'meus'].map(f => (
+          {['todos','abertos','encerrados', 'meus'].map(f => (
             <button key={f} onClick={() => { setFiltro(f); setOpen(false); }}
               className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors"
               style={{ color: filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)' }}
               onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = filtro === f ? 'var(--color-gold-500)' : 'var(--color-text-secondary)'; }}>
               {activeDot(filtro === f)}
-              {f === 'todos' ? 'Todos' : f === 'pendentes' ? 'Pendentes' : f === 'atendidos' ? 'Atendidos' : 'Meus Chamados'}
+              {f === 'todos' ? 'Todos' : f === 'abertos' ? 'Abertos' : f === 'encerrados' ? 'Encerrados' : 'Meus Chamados'}
             </button>
           ))}
         </motion.div>
