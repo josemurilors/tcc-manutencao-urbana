@@ -1,16 +1,15 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { IconContext, Sun, Moon, MagnifyingGlass } from '@phosphor-icons/react';
+import { IconContext } from '@phosphor-icons/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import { useToast } from './components/toast-context';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { useKeyboardNav } from './hooks/useKeyboardNav';
-import UserDropdown from './components/ui/user-dropdown';
 import { CommandMenu } from './components/ui/command-menu';
-import SyncIndicator from './components/ui/sync-indicator';
+import { AppHeader } from './components/app-header';
 import './styles/tokens.css';
 import './styles/globals.css';
 
@@ -57,52 +56,6 @@ function KeyboardNav() {
   const { toggle } = useTheme();
   useKeyboardNav({ addToast, toggleTheme: toggle });
   return null;
-}
-
-function AppHeader({ onToggleTheme, onOpenCmd, theme }) {
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
-
-  return (
-    <header style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      height: 56, padding: '0 20px', flexShrink: 0,
-      borderBottom: '1px solid var(--color-border-default)',
-      background: 'var(--color-bg-elevated)', zIndex: 1000,
-    }}>
-      <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/mapa')} role="button" aria-label="Ir para o mapa">
-        <div style={{ width: '1.75rem', height: '1.75rem', background: 'transparent', border: '1px solid var(--color-icon)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <img src="/icon.svg" alt="Central de Inteligência Urbana" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        </div>
-        <div className="max-sm:hidden">
-          <h1 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Central de Inteligência Urbana</h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Chamados para Serviços Públicos</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <SyncIndicator />
-        {isAuthenticated && (
-          <button onClick={onOpenCmd} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors bg-transparent hover:bg-[var(--color-bg-hover)]"
-            style={{ color: 'var(--color-text-secondary)' }}
-            aria-label="Buscar (Cmd+K)">
-            <MagnifyingGlass size={14} />
-            <span className="hidden sm:inline opacity-60">Cmd+K</span>
-          </button>
-        )}
-        <button onClick={onToggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-bg-hover)]"
-          style={{ color: 'var(--color-text-secondary)' }}
-          aria-label={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}>
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-        {isAuthenticated ? <UserDropdown /> : (
-          <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]">
-            Entrar
-          </button>
-        )}
-      </div>
-    </header>
-  );
 }
 
 function AppLayout() {
@@ -157,7 +110,7 @@ function AppLayout() {
         </Suspense>
       </main>
 
-      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} isAdmin={user?.admin} isAdminMunicipal={['admin_municipal', 'super_admin'].includes(user?.papel)} />
+      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} user={user} />
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { MapPin, Plus, X, Camera, ThumbsUp, Sun, Moon, MagnifyingGlass, Fire, Funnel, Handshake, Crosshair } from '@phosphor-icons/react';
+import { MapPin, Plus, X, Camera, ThumbsUp, Fire, Funnel, Handshake, Crosshair } from '@phosphor-icons/react';
 import { MapContainer, TileLayer, Marker, Polygon, Circle, useMapEvents, useMap } from 'react-leaflet';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/toast-context';
@@ -10,15 +9,14 @@ import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { StatusBadge } from '../components/ui/status-badge';
 import { STATUS_ABERTOS, STATUS_FECHADOS } from '../components/ui/status-utils';
-import UserDropdown from '../components/ui/user-dropdown';
 import { CommandMenu } from '../components/ui/command-menu';
+import { AppHeader } from '../components/app-header';
 import { useTheme } from '../context/ThemeContext';
 import { createPlacementPinIcon, createDefectIcon, createOpenCallIcon } from '../utils/map-markers';
 import { getTimelineItems } from '../utils/timeline';
 import { filterByRadius } from '../utils/map-heatmap';
 import { Timeline } from '../components/ui/timeline';
 import HeatmapLayer from '../components/HeatmapLayer';
-import SyncIndicator from '../components/ui/sync-indicator';
 
 // OSM não exige chave (Carto passou a exigir); tema escuro = filtro CSS `.tiles-escuro`.
 const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -220,7 +218,6 @@ function QuickAddPopover({ position, coords, formData, setFormData, categorias, 
 
 export default function MapPage() {
   const { isAuthenticated, user } = useAuth();
-  const navigate = useNavigate();
   const addToast = useToast();
   const mapRef = useRef(null);
   const finalizarFotoRef = useRef(null);
@@ -548,40 +545,7 @@ export default function MapPage() {
 
   return (
     <div className="flex flex-col" style={{ height: '100%', minHeight: 0, position: 'relative' }}>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56, padding: '0 16px', flexShrink: 0, borderBottom: '1px solid var(--color-border-default)', background: 'var(--color-bg-elevated)', zIndex: 1000 }}>
-        <div className="flex items-center gap-2">
-          <div style={{ width: '1.75rem', height: '1.75rem', background: 'transparent', border: '1px solid var(--color-icon)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <img src="/icon.svg" alt="Central de Inteligência Urbana" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </div>
-          <div className="max-sm:hidden">
-            <h1 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Central de Inteligência Urbana</h1>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Chamados para Serviços Públicos</p>
-          </div>
-        </div>
-        {(
-          <div className="flex items-center gap-2">
-            <SyncIndicator />
-            {isAuthenticated && (
-              <button onClick={() => setCmdOpen(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs transition-colors bg-transparent hover:bg-[var(--color-bg-hover)]"
-                style={{ color: 'var(--color-text-secondary)' }}
-                aria-label="Buscar (Cmd+K)">
-                <MagnifyingGlass size={14} />
-                <span className="hidden sm:inline opacity-60">Cmd+K</span>
-              </button>
-            )}
-            <button onClick={toggleTheme} className="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-bg-hover)]"
-              style={{ color: 'var(--color-text-secondary)' }}
-              aria-label={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}>
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
-            {isAuthenticated ? <UserDropdown /> : (
-              <button onClick={() => navigate('/login')} className="text-xs font-medium h-8 px-3 rounded-md transition-colors text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]">
-                Entrar
-              </button>
-            )}
-          </div>
-        )}
-      </header>
+      <AppHeader theme={theme} onToggleTheme={toggleTheme} onOpenCmd={() => setCmdOpen(true)} />
 
       <div className={`flex-1 relative${creating ? ' map-shell--creating' : ''}`} style={{ minHeight: 0 }}>
         {creating && (
@@ -929,7 +893,7 @@ export default function MapPage() {
       )}
       <input ref={finalizarFotoRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
         aria-label="Foto do serviço concluído" onChange={handleFinalizarFoto} />
-      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} isAdmin={user?.admin} isAdminMunicipal={['admin_municipal', 'super_admin'].includes(user?.papel)} />
+      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} user={user} />
     </div>
   );
 }
