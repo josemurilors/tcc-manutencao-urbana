@@ -47,7 +47,9 @@ jobs:
       # O site é o build web do app (mobile/); o nginx.Dockerfile já o gera no
       # "Build Docker images". Aqui só lint e tipos do app.
       - name: Lint e typecheck do app
-        run: docker run --rm -v ${{ github.workspace }}/mobile:/app -w /app node:22-alpine sh -c "npm ci --silent && npm run lint && npm run typecheck"
+        # expo-env.d.ts (tipos do Expo, inclusive imports de .css) é gerado pelo
+        # `expo start` e fica fora do git: no checkout limpo o CI o recria.
+        run: docker run --rm -v ${{ github.workspace }}/mobile:/app -w /app node:22-alpine sh -c "npm ci --silent && echo '/// <reference types=\"expo/types\" />' > expo-env.d.ts && npm run lint && npm run typecheck"
 
       - name: Stop services
         run: docker compose -f docker-compose.yml down
