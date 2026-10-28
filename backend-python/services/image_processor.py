@@ -1,5 +1,5 @@
 import io
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 from django.conf import settings
 
 # Teto de pixels conferido ANTES de decodificar, contra "bomba" de
@@ -22,7 +22,8 @@ def _abrir(input_bytes: bytes, lado: int) -> Image.Image:
     if img.format == 'JPEG':
         # Decodifica já em 1/2, 1/4 ou 1/8 quando dá: menos memória e CPU.
         img.draft('RGB', (lado, lado))
-    return img
+    # Celular grava a foto deitada e só marca o giro no EXIF; o WebP sai sem EXIF.
+    return ImageOps.exif_transpose(img)
 
 
 def process_image(input_bytes: bytes) -> dict:

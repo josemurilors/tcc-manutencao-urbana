@@ -425,6 +425,16 @@ class TestUploadImagem:
         saida = Image.open(io.BytesIO(process_image(buf.getvalue())['webp_bytes']))
         assert max(saida.size) == 1600
 
+    def test_aplica_rotacao_do_exif(self):
+        from PIL import Image
+        from services.image_processor import process_image
+        buf = io.BytesIO()
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Orientation: girar 90° (foto em pé tirada no celular)
+        Image.new('RGB', (400, 300), (10, 120, 40)).save(buf, 'JPEG', exif=exif)
+        saida = Image.open(io.BytesIO(process_image(buf.getvalue())['webp_bytes']))
+        assert saida.size == (300, 400)
+
     def test_recusa_nao_imagem(self):
         cli, _ = _usuario()
         pdf = _arquivo(b'%PDF-1.4 ...', 'doc.pdf', 'application/pdf')
