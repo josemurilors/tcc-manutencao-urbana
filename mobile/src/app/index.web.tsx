@@ -3,7 +3,7 @@
  * Porte da landing do antigo frontend: o mapa real da cidade com os chamados
  * abertos é o destaque, com os números ao vivo, a consulta por protocolo e o
  * "como funciona". Usa a cidade de quem está vendo quando a localização é
- * liberada; sem ela (ou fora de um município atendido), Criciúma.
+ * liberada; sem ela (ou fora de um município atendido), a região padrão do app.
  */
 
 import 'leaflet/dist/leaflet.css';
@@ -26,8 +26,9 @@ import { useTheme } from '@/context/theme-context';
 import { api } from '@/services/api';
 import { normalizarProtocolo } from '@/services/api-cidadao';
 import type { VisaoMunicipio } from '@/types';
+import { REGIAO_PADRAO } from '@/utils/geo';
 
-const CENTRO: [number, number] = [-28.67, -49.38];
+const CENTRO: [number, number] = [REGIAO_PADRAO.latitude, REGIAO_PADRAO.longitude];
 const TILES = process.env.EXPO_PUBLIC_TILES_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const ATRIBUICAO =
   process.env.EXPO_PUBLIC_TILES_ATTRIB ||
@@ -101,12 +102,15 @@ export default function Inicio() {
 
   useEffect(() => {
     let cancelado = false;
-    const carregar = (lat: number, lng: number) =>
-      api.visaoMunicipio(lat, lng).then((r) => { if (!cancelado) setResumo(r); }).catch(() => {});
-    carregar(...CENTRO);
+    let doGps = false;
+    // A resposta do centro padrão pode chegar depois da do GPS: não deixa sobrescrever.
+    api.visaoMunicipio(...CENTRO).then((r) => { if (!cancelado && !doGps) setResumo(r); }).catch(() => {});
     // Localização recusada ou fora de um município atendido (404) mantém o centro padrão.
     navigator.geolocation?.getCurrentPosition(
-      ({ coords }) => carregar(coords.latitude, coords.longitude),
+      ({ coords }) =>
+        api.visaoMunicipio(coords.latitude, coords.longitude)
+          .then((r) => { if (!cancelado) { doGps = true; setResumo(r); } })
+          .catch(() => {}),
       () => {},
       { timeout: 10000, maximumAge: 300000 },
     );
@@ -128,7 +132,8 @@ export default function Inicio() {
             {largo && <AppText variant="caption" tone="muted">Chamados para serviços públicos</AppText>}
           </View>
         </View>
-        <Button size="sm" onPress={entrar}>{isAuthenticated ? 'Abrir o mapa' : 'Entrar'}</Button>
+        {/* O Button se alinha ao início por padrão; na barra, centraliza com o resto. */}
+        <Button size="sm" onPress={entrar} style={{ alignSelf: 'center' }}>{isAuthenticated ? 'Abrir o mapa' : 'Entrar'}</Button>
       </View>
 
       {/* O mapa real da cidade é o destaque: mostra o produto em vez de descrevê-lo. */}
