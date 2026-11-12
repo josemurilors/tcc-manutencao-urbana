@@ -6,6 +6,10 @@ WORKDIR /build
 COPY mobile/package*.json ./
 RUN npm ci
 COPY mobile/ ./
+# Versão do rodapé: o deploy exporta COMMIT_SHA/COMMIT_DATE (o contexto não tem .git).
+ARG COMMIT_SHA
+ARG COMMIT_DATE
+ENV COMMIT_SHA=$COMMIT_SHA COMMIT_DATE=$COMMIT_DATE
 RUN npx expo export --platform web --output-dir dist
 
 FROM nginx:alpine-slim

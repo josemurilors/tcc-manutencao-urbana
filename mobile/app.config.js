@@ -19,6 +19,27 @@ const iosMapsKey = process.env.GOOGLE_MAPS_API_KEY_IOS;
  */
 const DOMINIO_LINKS = process.env.CIU_DOMINIO_LINKS || 'tcc.josemurilors.com.br';
 
+/**
+ * Versão exibida no rodapé do site: hash curto e data do commit. No build do
+ * Docker não há `.git` (o contexto o ignora), então o deploy passa `COMMIT_SHA`
+ * e `COMMIT_DATE`; em desenvolvimento local cai no `git log`. Sem nenhum dos
+ * dois, o rodapé simplesmente não mostra versão.
+ */
+function versaoDoCommit() {
+  let sha = process.env.COMMIT_SHA;
+  let data = process.env.COMMIT_DATE;
+  if (!sha) {
+    try {
+      [sha, data] = require('child_process')
+        .execSync('git log -1 --format=%h,%cI', { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim()
+        .split(',');
+    } catch {}
+  }
+  return sha ? { sha, data } : null;
+}
+
 const mapsPlugin =
   androidMapsKey || iosMapsKey
     ? [
@@ -127,6 +148,7 @@ module.exports = {
       reactCompiler: true,
     },
     extra: {
+      commit: versaoDoCommit(),
       eas: {
         projectId: 'c2a38d38-63b7-4e86-bb5f-5f771f7145dc',
       },

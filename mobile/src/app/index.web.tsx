@@ -11,6 +11,7 @@ import 'leaflet/dist/leaflet.css';
 import '@/components/map-surface.web.css';
 
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { Link, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet';
@@ -35,6 +36,22 @@ const ATRIBUICAO =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 const LARGURA_MAX = 1180;
 const LARGURA_CARTAO = 480;
+
+// Hash e data do commit do build (ver `versaoDoCommit` em app.config.js).
+const COMMIT = Constants.expoConfig?.extra?.commit as { sha: string; data?: string } | null | undefined;
+const VERSAO = COMMIT
+  ? [
+      COMMIT.sha,
+      COMMIT.data &&
+        new Date(COMMIT.data).toLocaleString('pt-BR', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+          timeZone: 'America/Sao_Paulo',
+        }),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  : '';
 
 const PASSOS = [
   { titulo: 'Marque e fotografe', desc: 'Toque no ponto do mapa onde está o problema e anexe uma foto.' },
@@ -219,7 +236,9 @@ export default function Inicio() {
       </View>
 
       <View style={[styles.rodape, bordas]}>
-        <AppText variant="caption" tone="muted">Central de Inteligência Urbana</AppText>
+        <AppText variant="caption" tone="muted">
+          Central de Inteligência Urbana{VERSAO ? ` · ${VERSAO}` : ''}
+        </AppText>
         <View style={styles.links}>
           <Link href="/privacidade"><AppText variant="caption" tone="muted">Privacidade</AppText></Link>
           <Link href="/termos"><AppText variant="caption" tone="muted">Termos de uso</AppText></Link>
@@ -256,6 +275,8 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing[5],
     paddingHorizontal: Spacing[5],
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
     justifyContent: 'space-between',
     borderTopWidth: 1,
   },

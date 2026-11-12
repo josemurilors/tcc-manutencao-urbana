@@ -72,11 +72,18 @@ function paraPosicao(obj: {
   };
 }
 
+const semGeolocalizacaoWeb = () =>
+  Platform.OS === 'web' && (typeof navigator === 'undefined' || !navigator.geolocation);
+
 export function useLocalizacao(ativo = true): EstadoLocalizacao {
   const [posicao, setPosicao] = useState<Posicao | null>(null);
   const [bussola, setBussola] = useState<number | null>(null);
-  const [permitido, setPermitido] = useState<boolean | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
+  // Navegador sem geolocalização já nasce negado: setState dentro do effect
+  // dispararia render em cascata (react-hooks/set-state-in-effect).
+  const [permitido, setPermitido] = useState<boolean | null>(() => (semGeolocalizacaoWeb() ? false : null));
+  const [erro, setErro] = useState<string | null>(() =>
+    semGeolocalizacaoWeb() ? 'Este navegador não oferece geolocalização.' : null,
+  );
   const [tentativa, setTentativa] = useState(0);
   const [simulado, setSimulado] = useState<EstadoSimulado>(gpsSimulado.get());
   const assinaturaRef = useRef<Location.LocationSubscription | null>(null);
@@ -93,11 +100,7 @@ export function useLocalizacao(ativo = true): EstadoLocalizacao {
     // webviews), trata erro de sinal como "permissão negada" e não repassa
     // erros nem `enableHighAccuracy` ao `watchPosition`.
     if (Platform.OS === 'web') {
-      if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        setPermitido(false);
-        setErro('Este navegador não oferece geolocalização.');
-        return;
-      }
+      if (semGeolocalizacaoWeb()) return;
       const id = navigator.geolocation.watchPosition(
         (p) => {
           if (cancelado) return;

@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: nginx.Dockerfile
+      args:
+        COMMIT_SHA: ${COMMIT_SHA:-}
+        COMMIT_DATE: ${COMMIT_DATE:-}
     ports:
       - "80:80"
       - "443:443"

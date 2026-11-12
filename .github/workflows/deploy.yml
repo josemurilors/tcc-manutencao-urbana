@@ -69,6 +69,7 @@ jobs:
             set -e
             cd /opt/tcc-manutencao-urbana
             git pull origin master
+            export COMMIT_SHA=$(git log -1 --format=%h) COMMIT_DATE=$(git log -1 --format=%cI)
             docker compose build
             docker compose up -d --build
             docker image prune -f
