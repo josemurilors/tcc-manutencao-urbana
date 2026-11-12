@@ -1,3 +1,6 @@
 # Shell scripts precisam de LF: o shebang com CRLF quebra o exec
 # (Docker exec /app/entrypoint.sh: no such file or directory).
 *.sh text eol=lf
+
+# Normaliza o final de linha: o disco chegou a ter CRLF em ~300 arquivos que o repositório guarda em LF.
+* text=auto eol=lf
