@@ -16,7 +16,7 @@ jobs:
       JWT_SECRET: ci-jwt-secret-for-build-only
       ENCRYPTION_KEY: 9f7a2d4b1e8c3f5a0d6b9e2c4f7a1d3b5e8c0f2a4d6b9e1c3f5a7d0b2e4c8f
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
