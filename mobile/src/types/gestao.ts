@@ -40,6 +40,26 @@ export type Membro = {
   criado_em?: string | null;
 };
 
+/** Conta de qualquer município (GET `usuarios/`, só super_admin). */
+export type UsuarioPlataforma = {
+  id: string;
+  nome: string;
+  email: string;
+  papel: Papel;
+  municipio_id?: string | null;
+  municipio_nome?: string | null;
+  uf_sigla?: string | null;
+  suspenso_ate?: string | null;
+  email_verificado: boolean;
+  criado_em?: string | null;
+};
+
+/** Corpo do PATCH `usuarios/<id>/` (só super_admin); `municipio_id: null` desvincula. */
+export type AlteracaoConta = {
+  papel?: Papel;
+  municipio_id?: string | null;
+};
+
 /** Resposta do DELETE `membros/<id>/`. */
 export type RevogacaoMembro = {
   id: string;

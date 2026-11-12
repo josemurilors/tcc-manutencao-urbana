@@ -18,7 +18,7 @@ import { escolherMunicipioGestao, useMunicipioGestao, type MunicipioEscolhido } 
 // A lista (~5.500 municípios) não muda durante o uso: busca uma vez por sessão.
 let cache: MunicipioEscolhido[] | null = null;
 
-function useMunicipios() {
+export function useMunicipios() {
   const [lista, setLista] = useState<MunicipioEscolhido[] | null>(cache);
   const [falhou, setFalhou] = useState(false);
   useEffect(() => {

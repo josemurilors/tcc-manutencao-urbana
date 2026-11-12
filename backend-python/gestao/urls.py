@@ -24,5 +24,7 @@ urlpatterns = [
          name='gestao-moderacao-suspender'),
     path('moderacao/usuarios/<uuid:pk>/reativar/', views.ReativarUsuarioView.as_view(),
          name='gestao-moderacao-reativar'),
+    path('usuarios/', views.UsuariosPlataformaView.as_view(), name='gestao-usuarios'),
+    path('usuarios/<uuid:pk>/', views.UsuarioPlataformaDetalheView.as_view(), name='gestao-usuario'),
     path('auditoria/', views.AuditoriaView.as_view(), name='gestao-auditoria'),
 ]

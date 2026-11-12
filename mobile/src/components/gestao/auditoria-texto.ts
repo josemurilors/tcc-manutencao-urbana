@@ -54,6 +54,7 @@ const ROTULO_ACAO: Record<string, string> = {
   'equipe.excluir': 'Equipe excluída',
   'membro.vincular': 'Pessoa adicionada à equipe',
   'membro.alterar': 'Papel ou lotação alterados',
+  'conta.alterar': 'Papel ou município da conta alterados',
   'membro.revogar': 'Acesso revogado',
   'convite.criar': 'Convite enviado',
   'convite.reenviar': 'Convite reenviado',
@@ -255,6 +256,7 @@ export function fraseDaAuditoria(r: RegistroAuditoria): string {
         : `${ator} adicionou ${alvo} à equipe`;
     }
     case 'membro.alterar':
+    case 'conta.alterar':
     case 'usuario.papel': {
       const alvo = nomeDoAlvo(r, d, 'uma pessoa');
       const de = texto(antes.papel);

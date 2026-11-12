@@ -95,6 +95,14 @@ const AREAS: Area[] = [
     rota: '/admin/auditoria',
     minimo: 'admin_municipal',
   },
+  {
+    chave: 'contas',
+    titulo: 'Contas da plataforma',
+    descricao: 'Todas as pessoas cadastradas, de qualquer município, com busca e filtros.',
+    icone: 'globe',
+    rota: '/admin/contas',
+    minimo: 'super_admin',
+  },
 ];
 
 function plural(n: number, um: string, varios: string) {
@@ -159,6 +167,10 @@ async function buscarContadores(nivel: number): Promise<Record<string, Contador>
     auditoria: async () => {
       const p = await apiGestao.auditoria({ page: 1 });
       return { valor: plural(p.count, 'registro', 'registros') };
+    },
+    contas: async () => {
+      const p = await apiGestao.usuariosPlataforma({ page: 1 });
+      return { valor: plural(p.count, 'conta', 'contas') };
     },
   };
 

@@ -582,6 +582,8 @@ dados abertos 10/min):
 | GET `moderacao/` | gestor+ | `{sinalizados, removidos, usuarios}` |
 | POST `moderacao/defeitos/<id>/remover/` `{motivo}`, `.../restaurar/` | gestor+ | |
 | POST `moderacao/usuarios/<id>/suspender/` `{dias, motivo}`, `.../reativar/` | gestor+ | |
+| GET `usuarios/?q=&papel=&municipio=&situacao=` | super_admin | todas as contas, de qualquer município; `situacao` = `ativo` \| `suspenso`; `municipio` aqui é filtro, não escopo |
+| PATCH `usuarios/<id>/` `{papel?, municipio_id?}` | super_admin | muda papel (inclui `cidadao` e `super_admin`) e/ou município de qualquer conta |
 | GET `auditoria/?acao=&usuario_id=` | admin_municipal | paginado; `?formato=csv` exporta |
 
 Todas as escritas chamam `core.auditoria.registrar`.
@@ -616,6 +618,15 @@ Detalhes da implementação (`gestao/views.py`, regras em `gestao/servicos.py`):
   acima do seu (403); rebaixar/revogar o último `admin_municipal` → 409. DELETE → 200
   `{id, papel: "cidadao", chamados_liberados}`: os chamados abertos dele perdem o atendente
   (evento interno `atribuido` com `dados.motivo = "membro_revogado"`).
+- `usuarios/` (só `super_admin`; outro papel → 403) é **paginado** (30 por página, `page_size` ≤ 100;
+  ordem: cadastro mais recente) com itens `{id, nome, email, papel, municipio_id, municipio_nome,
+  uf_sigla, suspenso_ate, email_verificado, criado_em}`; filtros `q` (nome/e-mail), `papel`, `municipio`,
+  `situacao`, `page` (valor inválido → 400). Não expõe CPF. PATCH devolve a conta no mesmo formato.
+  Regras: ninguém muda o próprio papel (400); `operador`/`gestor`/`admin_municipal` exigem
+  município existente (400); mudar o papel **ou** o município do único `admin_municipal` da prefeitura
+  → 409; mudar o município ou virar `cidadao` zera `secretaria_id`/`equipe_id` e, se era servidor,
+  tira o atendente dos chamados abertos (evento interno `atribuido`, `dados.motivo = "conta_alterada"`).
+  Audita `conta.alterar` `{nome, email, antes, depois, chamados_liberados}` no município de destino.
 - `convites/`: **lista** dos pendentes (não aceitos, inclusive vencidos) do município,
   `{id, email, papel, secretaria_id, secretaria_nome, equipe_id, equipe_nome,
   convidado_por_nome, criado_em, expira_em, expirado}` (o `token` não sai na API). Convidar

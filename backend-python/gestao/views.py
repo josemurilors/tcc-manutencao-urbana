@@ -34,7 +34,7 @@ from . import servicos
 from .models import AuditLog, CategoriaMunicipio, Equipe, MunicipioConfig, Secretaria
 from .serializers import (
     AuditLogSerializer, CategoriaRegraSerializer, EquipeSerializer, MembroAlterarSerializer,
-    MembroCriarSerializer, MunicipioConfigSerializer, RemoverSerializer, RestaurarSerializer,
+    ContaAlterarSerializer, MembroCriarSerializer, MunicipioConfigSerializer, RemoverSerializer, RestaurarSerializer,
     SecretariaSerializer, SuspenderSerializer, convite_dict, membro_dict,
 )
 
@@ -882,6 +882,124 @@ class ReativarUsuarioView(_ModeracaoUsuarioView):
             servicos.reativar(alvo)
             self.auditar('usuario.reativar', 'usuario', alvo.pk, {'nome': alvo.nome, 'suspenso_ate_anterior': antes})
         return Response(_resposta_usuario(alvo))
+
+
+# ------------------------------------------------- usuários da plataforma
+
+def _contas_dict(usuarios):
+    """Contas no formato de `usuarios/`, com o nome do município de cada uma."""
+    from municipios.models import Municipio
+
+    cidades = {
+        m['codigo']: m for m in Municipio.objects.filter(
+            codigo__in={u.municipio_id for u in usuarios if u.municipio_id},
+        ).values('codigo', 'nome', 'uf_sigla')
+    }
+    return [{
+        'id': str(u.id),
+        'nome': u.nome,
+        'email': u.email,
+        'papel': u.papel,
+        'municipio_id': u.municipio_id,
+        'municipio_nome': cidades.get(u.municipio_id, {}).get('nome'),
+        'uf_sigla': cidades.get(u.municipio_id, {}).get('uf_sigla'),
+        'suspenso_ate': u.suspenso_ate,
+        'email_verificado': bool(u.email_verified),
+        'criado_em': u.criado_em,
+    } for u in usuarios]
+
+
+class _PlataformaView(APIView):
+    """Contas de qualquer município: só o super admin. O `?municipio=` aqui é filtro, não escopo."""
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if permissoes.papel(request.user) != 'super_admin':
+            raise PermissionDenied('Disponível apenas para a plataforma.')
+
+
+class UsuariosPlataformaView(_PlataformaView):
+    """Lista todas as contas, com busca e filtros. Papel e município mudam no detalhe."""
+
+    def get(self, request):
+        from users.models import User
+
+        params = request.query_params
+        qs = User.objects.all()
+        termo = (params.get('q') or '').strip()
+        if termo:
+            qs = qs.filter(Q(nome__icontains=termo) | Q(email__icontains=termo))
+        papel_filtro = (params.get('papel') or '').strip()
+        if papel_filtro:
+            if papel_filtro not in NIVEIS:
+                raise ParseError('Papel inválido.')
+            qs = qs.filter(papel=papel_filtro)
+        municipio = (params.get('municipio') or '').strip()
+        if municipio:
+            qs = qs.filter(municipio_id=municipio)
+        situacao = (params.get('situacao') or '').strip()
+        if situacao == 'suspenso':
+            qs = qs.filter(suspenso_ate__gt=timezone.now())
+        elif situacao == 'ativo':
+            qs = qs.exclude(suspenso_ate__gt=timezone.now())
+        elif situacao:
+            raise ParseError('Situação inválida.')
+
+        paginador = MembrosPaginacao()
+        usuarios = paginador.paginate_queryset(qs.order_by('-criado_em', 'id'), request, view=self)
+        return paginador.get_paginated_response(_contas_dict(usuarios))
+
+
+class UsuarioPlataformaDetalheView(_PlataformaView):
+
+    def patch(self, request, pk):
+        """
+        Muda o papel e/ou o município de qualquer conta. Mesmas travas de
+        `membros/<id>/`: não mexe no próprio papel e não tira a única pessoa
+        administradora de uma prefeitura. Servidor que sai do cargo ou da
+        prefeitura perde a lotação e devolve os chamados abertos à fila.
+        """
+        from municipios.models import Municipio
+        from users.models import User
+
+        dados = _validar(ContaAlterarSerializer(data=request.data))
+        alvo = User.objects.filter(pk=pk).first()
+        if alvo is None:
+            raise NotFound('Usuário não encontrado.')
+        papel = dados.get('papel', alvo.papel)
+        municipio = (dados['municipio_id'] if 'municipio_id' in dados else alvo.municipio_id) or None
+
+        if papel != alvo.papel and alvo.pk == request.user.pk:
+            raise ParseError('Você não pode alterar o próprio papel.')
+        if municipio and not Municipio.objects.filter(codigo=municipio).exists():
+            raise ParseError('Município não encontrado.')
+        if papel in servicos.PAPEIS_VINCULAVEIS and papel != 'super_admin' and not municipio:
+            raise ParseError('Servidor da prefeitura precisa de um município.')
+        mudou_papel, mudou_cidade = papel != alvo.papel, municipio != alvo.municipio_id
+        if not (mudou_papel or mudou_cidade):
+            return Response(_contas_dict([alvo])[0])
+        if servicos.eh_ultimo_admin(alvo, alvo.municipio_id):
+            raise Conflito('Esta é a única pessoa administradora da prefeitura. '
+                           'Promova outra pessoa antes de mudar este papel ou município.')
+
+        antes = {'papel': alvo.papel, 'municipio_id': alvo.municipio_id,
+                 'secretaria_id': alvo.secretaria_id, 'equipe_id': alvo.equipe_id}
+        with transaction.atomic():
+            liberados = 0
+            if permissoes.eh_equipe(alvo) and (mudou_cidade or not permissoes.NIVEIS[papel]):
+                liberados = servicos.desatribuir_abertos(alvo, request.user, 'conta_alterada')
+            alvo.papel = papel
+            alvo.municipio_id = municipio
+            if mudou_cidade or papel == 'cidadao':
+                alvo.secretaria_id = None
+                alvo.equipe_id = None
+            alvo.save(update_fields=['papel', 'municipio_id', 'secretaria_id', 'equipe_id'])
+            auditoria.registrar(
+                request, 'conta.alterar', 'usuario', alvo.pk, municipio_id=municipio or antes['municipio_id'],
+                dados={'nome': alvo.nome, 'email': alvo.email, 'antes': antes,
+                       'depois': {'papel': papel, 'municipio_id': municipio}, 'chamados_liberados': liberados},
+            )
+        return Response(_contas_dict([alvo])[0])
 
 
 # --------------------------------------------------------------- auditoria

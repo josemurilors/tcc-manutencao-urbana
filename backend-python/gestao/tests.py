@@ -763,6 +763,84 @@ class TestSeed:
             call_command('seed_gestao_demo', '0000001', verbosity=0)
 
 
+class TestUsuariosPlataforma:
+
+    def test_so_super_admin_acessa(self):
+        for papel in ('cidadao', 'operador', 'gestor', 'admin_municipal'):
+            cli, _ = _usuario(papel)
+            assert cli.get(reverse('gestao-usuarios')).status_code == 403
+        assert APIClient().get(reverse('gestao-usuarios')).status_code == 401
+
+    def test_lista_todos_os_municipios_e_filtra(self):
+        cli, _ = _usuario('super_admin', municipio_id=None)
+        _, ana = _usuario('cidadao', CIDADE, nome='Ana Filtro')
+        _, bia = _usuario('gestor', OUTRA, nome='Bia Filtro')
+        _, suspensa = _usuario('cidadao', OUTRA, nome='Cris Filtro')
+        suspensa.suspenso_ate = timezone.now() + timedelta(days=3)
+        suspensa.save(update_fields=['suspenso_ate'])
+
+        def ids(**params):
+            resp = cli.get(reverse('gestao-usuarios'), {'q': 'Filtro', **params})
+            assert resp.status_code == 200
+            return {u['id'] for u in resp.data['results']}
+
+        assert ids() == {str(ana.id), str(bia.id), str(suspensa.id)}
+        assert ids(papel='gestor') == {str(bia.id)}
+        assert ids(municipio=CIDADE) == {str(ana.id)}
+        assert ids(situacao='suspenso') == {str(suspensa.id)}
+        assert ids(situacao='ativo') == {str(ana.id), str(bia.id)}
+        item = next(u for u in cli.get(reverse('gestao-usuarios'), {'q': 'Bia Filtro'}).data['results'])
+        assert item['municipio_nome'] == 'Outra Gestão' and item['uf_sigla'] == 'RS'
+
+    def test_altera_papel_e_municipio_e_audita(self):
+        cli, _ = _usuario('super_admin', municipio_id=None)
+        _, alvo = _usuario('cidadao', CIDADE)
+        url = reverse('gestao-usuario', args=[alvo.id])
+
+        # Servidor precisa de município; super_admin não.
+        assert cli.patch(url, {'papel': 'gestor', 'municipio_id': None}, format='json').status_code == 400
+        resp = cli.patch(url, {'papel': 'gestor', 'municipio_id': OUTRA}, format='json')
+        assert resp.status_code == 200 and resp.data['papel'] == 'gestor'
+        alvo.refresh_from_db()
+        assert (alvo.papel, alvo.municipio_id, alvo.admin) == ('gestor', OUTRA, 1)
+        log = AuditLog.objects.get(acao='conta.alterar', alvo_id=str(alvo.id))
+        assert log.municipio_id == OUTRA and log.dados['antes']['papel'] == 'cidadao'
+
+        assert cli.patch(url, {'municipio_id': '0000000'}, format='json').status_code == 400
+        assert cli.patch(url, {'papel': 'rei'}, format='json').status_code == 400
+        assert cli.patch(reverse('gestao-usuario', args=[uuid.uuid4()]), {'papel': 'gestor'}, format='json').status_code == 404
+        assert cli.patch(url, {'papel': 'super_admin', 'municipio_id': None}, format='json').status_code == 200
+
+    def test_nao_altera_proprio_papel(self):
+        cli, eu = _usuario('super_admin')
+        assert cli.patch(reverse('gestao-usuario', args=[eu.id]), {'papel': 'cidadao'}, format='json').status_code == 400
+
+    def test_so_super_admin_altera(self):
+        _, alvo = _usuario('cidadao')
+        for papel in ('operador', 'gestor', 'admin_municipal'):
+            cli, _ = _usuario(papel)
+            assert cli.patch(reverse('gestao-usuario', args=[alvo.id]), {'papel': 'gestor'}, format='json').status_code == 403
+
+    def test_protege_ultimo_admin_e_devolve_chamados_ao_sair(self):
+        cli, _ = _usuario('super_admin', municipio_id=None)
+        _, unico = _usuario('admin_municipal', CIDADE)
+        url = reverse('gestao-usuario', args=[unico.id])
+        assert cli.patch(url, {'papel': 'cidadao'}, format='json').status_code == 409
+        assert cli.patch(url, {'municipio_id': OUTRA}, format='json').status_code == 409
+
+        _, outro = _usuario('admin_municipal', CIDADE)
+        chamado = _chamado(status='em_andamento', atendente=unico)
+        resp = cli.patch(url, {'papel': 'cidadao'}, format='json')
+        assert resp.status_code == 200
+        chamado.refresh_from_db()
+        assert chamado.atendente_id is None
+
+    def test_filtros_invalidos_dao_400(self):
+        cli, _ = _usuario('super_admin', municipio_id=None)
+        assert cli.get(reverse('gestao-usuarios'), {'papel': 'rei'}).status_code == 400
+        assert cli.get(reverse('gestao-usuarios'), {'situacao': 'talvez'}).status_code == 400
+
+
 def test_ip_da_auditoria_ignora_xff_forjado():
     # O 1º item do X-Forwarded-For vem do cliente; o nginx grava o real em
     # X-Real-IP e no fim do XFF.

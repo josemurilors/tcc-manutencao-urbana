@@ -13,7 +13,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,6 +30,7 @@ import {
   usePapel,
 } from '@/components/gestao/papeis';
 import { useDados } from '@/components/gestao/use-dados';
+import { useDebounce } from '@/components/gestao/use-debounce';
 import { useListaPaginada } from '@/components/gestao/use-lista-paginada';
 import { Badge } from '@/components/ui/badge';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -76,15 +77,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+$/;
 
 /** Valor do Select para "nenhuma" (o Select trabalha com string). */
 const NENHUMA = '';
-
-function useDebounce<T>(valor: T, ms: number) {
-  const [atrasado, setAtrasado] = useState(valor);
-  useEffect(() => {
-    const t = setTimeout(() => setAtrasado(valor), ms);
-    return () => clearTimeout(t);
-  }, [valor, ms]);
-  return atrasado;
-}
 
 export default function EquipeScreen() {
   const insets = useSafeAreaInsets();

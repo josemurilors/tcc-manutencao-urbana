@@ -138,6 +138,12 @@ class MembroAlterarSerializer(serializers.Serializer):
     equipe_id = serializers.IntegerField(required=False, allow_null=True)
 
 
+class ContaAlterarSerializer(serializers.Serializer):
+    """Troca de papel/município de qualquer conta (só super admin; ver `UsuarioPlataformaDetalheView`)."""
+    papel = serializers.ChoiceField(choices=tuple(NIVEIS), required=False)
+    municipio_id = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
+
+
 def membro_dict(user, nomes_secretarias, nomes_equipes, abertos=0):
     return {
         'id': str(user.id),

@@ -14,6 +14,7 @@ import { Platform } from 'react-native';
 import { municipioGestao } from '@/components/gestao/municipio-gestao';
 import type { User } from '@/types';
 import type {
+  AlteracaoConta,
   AlteracaoMembro,
   CategoriaAlteracao,
   CategoriaGestao,
@@ -35,6 +36,7 @@ import type {
   Secretaria,
   SecretariaEntrada,
   UsuarioModerado,
+  UsuarioPlataforma,
 } from '@/types/gestao';
 
 import { API_URL, request } from './api';
@@ -62,8 +64,10 @@ function req<T>(endpoint: string, opcoes?: Opcoes) {
  * grandes, mas aceitar um array cru evita quebrar a tela se o backend optar
  * por devolver tudo de uma vez numa lista curta.
  */
-async function pagina<T>(endpoint: string): Promise<Pagina<T>> {
-  const data = await req<Pagina<T> | T[]>(endpoint);
+async function pagina<T>(endpoint: string, doMunicipioEscolhido = true): Promise<Pagina<T>> {
+  const data = doMunicipioEscolhido
+    ? await req<Pagina<T> | T[]>(endpoint)
+    : await request<Pagina<T> | T[]>(endpoint);
   if (Array.isArray(data)) return { count: data.length, next: null, results: data };
   return {
     count: data?.count ?? data?.results?.length ?? 0,
@@ -121,6 +125,13 @@ export const apiGestao = {
    */
   revogarMembro: (id: string) =>
     req<RevogacaoMembro>(`${BASE}/membros/${id}/`, { method: 'DELETE' }),
+
+  // --- Contas da plataforma (só super_admin; `municipio` aqui é filtro, não escopo) ---
+  usuariosPlataforma: (
+    filtros: { q?: string; papel?: string; municipio?: string; situacao?: string; page?: number } = {},
+  ) => pagina<UsuarioPlataforma>(`${BASE}/usuarios/${query(filtros)}`, false),
+  alterarConta: (id: string, dados: AlteracaoConta) =>
+    request<UsuarioPlataforma>(`${BASE}/usuarios/${id}/`, { method: 'PATCH', body: dados }),
 
   // --- Convites pendentes (e-mail ainda sem conta) ---
   convites: () => lista<Convite>(`${BASE}/convites/`),

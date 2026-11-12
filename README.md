@@ -152,13 +152,26 @@ Cada servidor atua em **um** município (`users.municipio_id`); regras em
 | `operador` | Fila, assumir, mudar status, notas, resposta pública, evidências |
 | `gestor` | + rejeitar, duplicado, reabrir, atribuir, SLA, BI, exportações, moderação |
 | `admin_municipal` | + equipe e papéis, secretarias, categorias, configuração, auditoria |
-| `super_admin` | Gere qualquer município (`?municipio=`); opera só no seu |
+| `super_admin` | Gere qualquer município (`?municipio=`); opera só no seu; vê todas as contas da plataforma e muda papel e município de qualquer uma |
 
 Regras de negócio principais: status só muda por `defeitos/fluxo.py`
 (transições, histórico e aviso ao cidadão); duplicado = mesma categoria aberta
 a poucos metros; quarentena anti-spam por strikes (sinalizações "não existe"
 confirmadas). Vocabulário completo:
 [`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md).
+
+**Contas da plataforma (só `super_admin`).** No app, *Administração → Contas da
+plataforma* (`/admin/contas`) lista todas as pessoas cadastradas, de qualquer
+município, com busca por nome/e-mail e filtros de papel, situação (ativa ou
+suspensa) e município. Tocar numa conta abre a troca de papel e município. As
+travas são as mesmas de Equipe: ninguém muda o próprio papel, a única pessoa
+administradora de uma prefeitura não é rebaixada nem movida (409), e quem sai
+do cargo ou da prefeitura perde a lotação e devolve os chamados abertos à fila.
+Servidor da prefeitura exige município. Toda alteração entra na auditoria
+(`conta.alterar`). Rotas: `GET gestao/usuarios/` e `PATCH gestao/usuarios/<id>/`
+([contrato 7.6](docs/arquitetura/contrato-v3.md)). Não há migration: usa as
+colunas que `users` já tem, então o deploy automático não altera o esquema do
+banco; só as alterações feitas pela tela gravam em `users` e `audit_log`.
 
 ## 5. API
 
