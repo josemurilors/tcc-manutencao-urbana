@@ -56,7 +56,10 @@ function diferencaAngular(a: number, b: number) {
   return ((a - b + 540) % 360) - 180;
 }
 
-function paraPosicao(obj: Location.LocationObject): Posicao {
+function paraPosicao(obj: {
+  coords: { latitude: number; longitude: number; accuracy: number | null; heading: number | null };
+  timestamp: number;
+}): Posicao {
   return {
     latitude: obj.coords.latitude,
     longitude: obj.coords.longitude,
@@ -84,6 +87,40 @@ export function useLocalizacao(ativo = true): EstadoLocalizacao {
   useEffect(() => {
     if (!ativo) return;
     let cancelado = false;
+
+    // No web usa a API do navegador direto: o expo-location exige
+    // `navigator.permissions.query` (ausente no Safari do iOS < 16 e em
+    // webviews), trata erro de sinal como "permissão negada" e não repassa
+    // erros nem `enableHighAccuracy` ao `watchPosition`.
+    if (Platform.OS === 'web') {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        setPermitido(false);
+        setErro('Este navegador não oferece geolocalização.');
+        return;
+      }
+      const id = navigator.geolocation.watchPosition(
+        (p) => {
+          if (cancelado) return;
+          setPermitido(true);
+          setErro(null);
+          setPosicao(paraPosicao(p));
+        },
+        (e) => {
+          if (cancelado) return;
+          if (e.code === e.PERMISSION_DENIED) {
+            setPermitido(false);
+            setErro('Permissão de localização negada.');
+          } else {
+            setErro('Não foi possível obter sua localização.');
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+      );
+      return () => {
+        cancelado = true;
+        navigator.geolocation.clearWatch(id);
+      };
+    }
 
     (async () => {
       const permissao = await Location.requestForegroundPermissionsAsync();

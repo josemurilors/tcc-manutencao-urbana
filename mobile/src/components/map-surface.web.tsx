@@ -272,6 +272,21 @@ function PrefixoAtribuicao() {
   return null;
 }
 
+/**
+ * O Leaflet só remede o contêiner no `resize` da janela. Ao empilhar outra
+ * tela (ex.: /novo) esta recebe `display: none`; um resize nesse intervalo
+ * (barra do Safari, teclado) zera o tamanho do mapa e ele volta quebrado.
+ */
+function AjustaTamanho() {
+  const mapa = useMap();
+  useEffect(() => {
+    const observador = new ResizeObserver(() => mapa.invalidateSize());
+    observador.observe(mapa.getContainer());
+    return () => observador.disconnect();
+  }, [mapa]);
+  return null;
+}
+
 function EventosDoMapa({
   onLongPress,
   onArrastar,
@@ -357,6 +372,7 @@ export const MapSurface = forwardRef<MapSurfaceHandle, MapSurfaceProps>(function
         noWrap
       />
       <PrefixoAtribuicao />
+      <AjustaTamanho />
       <EventosDoMapa
         onLongPress={onLongPressMapa}
         onArrastar={onArrastar}
