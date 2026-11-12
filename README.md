@@ -160,7 +160,7 @@ a poucos metros; quarentena anti-spam por strikes (sinalizações "não existe"
 confirmadas). Vocabulário completo:
 [`docs/arquitetura/contrato-v3.md`](docs/arquitetura/contrato-v3.md).
 
-**Contas da plataforma (só `super_admin`).** No app, *Administração → Contas da
+**Contas da plataforma (só `super_admin`).** No app, *Conta → Plataforma → Contas da
 plataforma* (`/admin/contas`) lista todas as pessoas cadastradas, de qualquer
 município, com busca por nome/e-mail e filtros de papel, situação (ativa ou
 suspensa) e município. Tocar numa conta abre a troca de papel e município. As

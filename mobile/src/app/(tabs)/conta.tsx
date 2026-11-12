@@ -187,6 +187,26 @@ export default function ContaScreen() {
         </View>
       ) : null}
 
+      {papel === 'super_admin' ? (
+        <View style={styles.secao}>
+          <TituloSecao>Plataforma</TituloSecao>
+          <Card>
+            <MenuRow
+              icon="globe"
+              label="Contas da plataforma"
+              detail="Todas as pessoas cadastradas: busque, filtre e altere papel e município"
+              onPress={() => router.push('/admin/contas' as Href)}
+            />
+            <MenuRow
+              icon="business"
+              label="Administrar qualquer município"
+              detail="Escolha a prefeitura e gerencie equipe, secretarias, categorias, moderação e auditoria"
+              onPress={() => router.push('/admin' as Href)}
+            />
+          </Card>
+        </View>
+      ) : null}
+
       <View style={styles.secao}>
         <TituloSecao>Conta e privacidade</TituloSecao>
         <Card>
