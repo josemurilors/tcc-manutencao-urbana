@@ -11,7 +11,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 
 import { AuthWelcome } from '@/components/auth-welcome';
 import { ROTULO_PAPEL, TOM_PAPEL, usePapel } from '@/components/gestao/papeis';
@@ -24,6 +24,9 @@ import { FontSize, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useColors } from '@/context/theme-context';
 import { useProgresso } from '@/services/progresso';
+
+// Pesquisa de avaliação do app (TCC). Sem a variável no build, a linha não aparece.
+const LINK_PESQUISA = process.env.EXPO_PUBLIC_LINK_PESQUISA;
 
 export default function ContaScreen() {
   const colors = useColors();
@@ -199,6 +202,14 @@ export default function ContaScreen() {
             detail="Tema e idioma"
             onPress={() => router.push('/ajustes/preferencias')}
           />
+          {LINK_PESQUISA ? (
+            <MenuRow
+              icon="clipboard"
+              label="Avaliar o app"
+              detail="Responda à pesquisa de avaliação"
+              onPress={() => void Linking.openURL(LINK_PESQUISA)}
+            />
+          ) : null}
           <MenuRow
             icon="document-text"
             label="Termos de Uso"
