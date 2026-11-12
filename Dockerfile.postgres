@@ -10,5 +10,7 @@ RUN set -eux; \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-16-postgis-3; \
+    # postgresql-16 junto: o postgis do PGDG é compilado contra o PG mais novo e
+    # falha com "undefined symbol" se a base postgres:16 em cache for mais velha.
+    apt-get install -y --no-install-recommends postgresql-16 postgresql-16-postgis-3; \
     rm -rf /var/lib/apt/lists/*

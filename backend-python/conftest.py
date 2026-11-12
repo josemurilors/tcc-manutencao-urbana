@@ -55,10 +55,12 @@ def _bootstrap_test_db():
     env = os.environ.copy()
     env['DJANGO_SETTINGS_MODULE'] = 'core.settings.local'
     env['DB_NAME'] = dbname
-    subprocess.run(
+    r = subprocess.run(
         [sys.executable, 'manage.py', 'bootstrap_schema'],
-        env=env, check=True, capture_output=True,
+        env=env, capture_output=True, text=True,
     )
+    if r.returncode:  # sem isso o INTERNALERROR esconde a causa real
+        raise RuntimeError(f'bootstrap_schema falhou:\n{r.stderr[-3000:]}')
 
 
 def pytest_sessionstart(session):
